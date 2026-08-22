@@ -19,6 +19,19 @@
 </div>
 <!-- glowup:hero end -->
 
+## Get Carnet
+
+| Channel | Price | Notes |
+|---------|-------|-------|
+| [GitHub Releases](https://github.com/Entrevoix/carnet/releases) | Free | APK attached to every `vX.Y.Z` tag |
+| [IzzyOnDroid](https://android.izzysoft.de/) | Free | F-Droid-compatible repo (listing pending review) |
+| Google Play | Paid | Same app, convenience pricing — auto-updates and supports development (listing in preparation) |
+
+All channels ship the identical app; nothing is feature-gated. The Play build
+is signed by Play App Signing, so a Play install and a GitHub/Izzy install
+can't upgrade each other — pick one channel per device. Privacy policy:
+[PRIVACY.md](PRIVACY.md).
+
 ## Architecture
 
 ```

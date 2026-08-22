@@ -31,11 +31,32 @@
 
 set -e
 
+# --aab: build an Android App Bundle (gradlew bundleRelease) instead of an
+# APK — for Google Play uploads only. The keystore below then acts as the
+# Play *upload* key; Play App Signing re-signs what users download, so a
+# Play install can never upgrade a GitHub/Izzy APK install (and vice versa).
+# AABs aren't adb-installable, so the install step is skipped in this mode.
+BUILD_AAB=0
+if [ "${1:-}" = "--aab" ]; then
+  BUILD_AAB=1
+  shift
+fi
+if [ "$#" -gt 0 ]; then
+  echo "Usage: $(basename "$0") [--aab]" >&2
+  exit 1
+fi
+
 # Resolve to apps/mobile regardless of where the script is invoked from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MOBILE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ANDROID_DIR="$MOBILE_DIR/android"
-OUTPUT_APK="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
+if [ "$BUILD_AAB" -eq 1 ]; then
+  GRADLE_TASK="bundleRelease"
+  OUTPUT_APK="$ANDROID_DIR/app/build/outputs/bundle/release/app-release.aab"
+else
+  GRADLE_TASK="assembleRelease"
+  OUTPUT_APK="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
+fi
 
 # ── locate Android SDK (gradle needs ANDROID_HOME or local.properties) ──
 # Without this, gradle's eval phase fails with "SDK location not found"
@@ -128,8 +149,12 @@ else
 fi
 
 # ── build ────────────────────────────────────────────────────────────
-echo "Building release APK… (this packages the JS bundle into the APK, no Metro needed)"
-( cd "$ANDROID_DIR" && ./gradlew assembleRelease "${SIGNING_ARGS[@]}" )
+if [ "$BUILD_AAB" -eq 1 ]; then
+  echo "Building release AAB for Play upload…"
+else
+  echo "Building release APK… (this packages the JS bundle into the APK, no Metro needed)"
+fi
+( cd "$ANDROID_DIR" && ./gradlew "$GRADLE_TASK" "${SIGNING_ARGS[@]}" )
 
 if [ ! -f "$OUTPUT_APK" ]; then
   echo "ERROR: build completed but $OUTPUT_APK is missing." >&2
@@ -144,6 +169,11 @@ SIZE_MB=$(( SIZE / 1024 / 1024 ))
 echo ""
 echo "✓ Built: $OUTPUT_APK  (${SIZE_MB} MB)"
 echo ""
+
+if [ "$BUILD_AAB" -eq 1 ]; then
+  echo "AABs can't be adb-installed — upload this file in the Play Console."
+  exit 0
+fi
 
 if [ -z "$ADB" ]; then
   echo "To install on a connected device:"
