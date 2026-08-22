@@ -117,11 +117,16 @@ describe("draft at-rest encryption", () => {
   it("stores ciphertext, with no plaintext in the raw dump", async () => {
     await saveDraft("idea", FIELDS);
     const dump = _store.get(IDEA_KEY)!;
+    // Every needle must be impossible-by-construction in the base64 payload,
+    // not just unlikely: short alphanumeric strings CAN appear in random
+    // ciphertext ("555" did, in CI — the base64 alphabet includes digits).
+    // Safe needles are either long enough to be astronomically improbable or
+    // contain characters outside base64 (space, @, .); "555" alone is neither,
+    // so assert on the full phone string, whose spaces and '+' can't collide.
     for (const needle of [
       "conference",
-      "Jane",
       "jane@example.com",
-      "555",
+      "+1 555 0100",
       "acquisition",
       "VP Eng",
     ]) {
