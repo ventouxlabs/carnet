@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Entrevoix, Inc.
+// Copyright (C) 2025 Ventoux Labs
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Per-bookmark record of which local attachments have already been uploaded +
