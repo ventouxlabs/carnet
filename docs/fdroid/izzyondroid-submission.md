@@ -14,16 +14,16 @@ appended after the divider. Copy-paste it verbatim:
 com.ventouxlabs.carnet
 
 ### Link to app in another app store:
-None — distributed via GitHub Releases only: https://github.com/Entrevoix/carnet/releases
+None — distributed via GitHub Releases only: https://github.com/ventouxlabs/carnet/releases
 
 ### Category and group:
 * Writing
 * Note taking
 
 ### Useful additional links:
-* Source code: https://github.com/Entrevoix/carnet
-* Releases (APK attached to each, tag pattern v*.*.*, asset name carnet-vX.Y.Z.apk): https://github.com/Entrevoix/carnet/releases
-* Fastlane metadata (descriptions, per-version changelogs, screenshots) maintained in-repo: https://github.com/Entrevoix/carnet/tree/main/fastlane/metadata/android/en-US
+* Source code: https://github.com/ventouxlabs/carnet
+* Releases (APK attached to each, tag pattern v*.*.*, asset name carnet-vX.Y.Z.apk): https://github.com/ventouxlabs/carnet/releases
+* Fastlane metadata (descriptions, per-version changelogs, screenshots) maintained in-repo: https://github.com/ventouxlabs/carnet/tree/main/fastlane/metadata/android/en-US
 
 ---
 

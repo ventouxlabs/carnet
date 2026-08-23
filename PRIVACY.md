@@ -61,5 +61,5 @@ folder you control. Uninstalling the app removes its private storage
 ## Changes and contact
 
 This policy changes only via a public commit to this file in the app's
-source repository: <https://github.com/Entrevoix/carnet>. Questions or
+source repository: <https://github.com/ventouxlabs/carnet>. Questions or
 concerns: open an issue there.

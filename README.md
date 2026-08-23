@@ -7,7 +7,7 @@
   </picture>
 </h1>
 
-[![Build](https://img.shields.io/github/actions/workflow/status/Entrevoix/carnet/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Entrevoix/carnet/actions/workflows/ci.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/ventouxlabs/carnet/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/ventouxlabs/carnet/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-7C5CE0?style=for-the-badge)](https://www.gnu.org/licenses/agpl-3.0)
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
@@ -23,7 +23,7 @@
 
 | Channel | Price | Notes |
 |---------|-------|-------|
-| [GitHub Releases](https://github.com/Entrevoix/carnet/releases) | Free | APK attached to every `vX.Y.Z` tag |
+| [GitHub Releases](https://github.com/ventouxlabs/carnet/releases) | Free | APK attached to every `vX.Y.Z` tag |
 | [IzzyOnDroid](https://android.izzysoft.de/) | Free | F-Droid-compatible repo (listing pending review) |
 | Google Play | Paid | Same app, convenience pricing — auto-updates and supports development (listing in preparation) |
 

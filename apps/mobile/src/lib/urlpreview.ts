@@ -36,7 +36,7 @@ const FETCH_TIMEOUT_MS = 8_000;
 const MAX_BODY_CHARS = 256 * 1024;
 const FIELD_CHAR_LIMIT = 500;
 const USER_AGENT =
-  "Mozilla/5.0 (compatible; carnet/0.2; +https://github.com/Entrevoix/carnet)";
+  "Mozilla/5.0 (compatible; carnet/0.2; +https://github.com/ventouxlabs/carnet)";
 
 export interface UrlPreview {
   /** Best of `<title>` and `og:title`. */
