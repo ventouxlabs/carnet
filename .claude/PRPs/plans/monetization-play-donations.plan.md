@@ -62,7 +62,8 @@ Nothing here gates features; the FOSS distribution channels are unaffected.
 ### Human actions (blocking)
 
 - [ ] Enroll in GitHub Sponsors (verified 2026-08-22: neither `bearyjd` nor
-      `Entrevoix` has a listing today) and/or create a Liberapay account.
+      the org — now `ventouxlabs` after the repo move — had a listing) and/or
+      create a Liberapay account.
       Requires identity + payout (Stripe) setup.
 
 ### Repo work (agent-executable, after handle exists)

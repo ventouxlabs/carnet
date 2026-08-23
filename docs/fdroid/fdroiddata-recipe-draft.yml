@@ -13,14 +13,14 @@
 Categories:
   - Writing
 License: AGPL-3.0-only
-SourceCode: https://github.com/Entrevoix/carnet
-IssueTracker: https://github.com/Entrevoix/carnet/issues
-Changelog: https://github.com/Entrevoix/carnet/releases
+SourceCode: https://github.com/ventouxlabs/carnet
+IssueTracker: https://github.com/ventouxlabs/carnet/issues
+Changelog: https://github.com/ventouxlabs/carnet/releases
 
 AutoName: Carnet
 
 RepoType: git
-Repo: https://github.com/Entrevoix/carnet.git
+Repo: https://github.com/ventouxlabs/carnet.git
 
 Builds:
   - versionName: 0.7.0
