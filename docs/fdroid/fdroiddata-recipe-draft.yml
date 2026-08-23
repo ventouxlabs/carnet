@@ -1,14 +1,22 @@
 # fdroiddata metadata for main F-Droid inclusion (Phase 2 of #182).
 # Destination: fdroiddata repo as metadata/com.ventouxlabs.carnet.yml
-# Status: LOCALLY VALIDATED 2026-08-19 — `fdroid lint` clean and `fdroid build
-# com.ventouxlabs.carnet:5` produced com.ventouxlabs.carnet_5.apk end-to-end on
-# fdroidserver 2.4.5 (12 iterations; see issue #182). Local shims that the real
+# Status: LOCALLY VALIDATED 2026-08-22 — `fdroid lint` clean and `fdroid build
+# com.ventouxlabs.carnet:7` produced an unsigned com.ventouxlabs.carnet_7.apk
+# (versionCode 7 / 0.9.0, apksigner confirms no signature) end-to-end on
+# fdroidserver 2.4.5. The :5 (0.7.0) block was validated the same way on
+# 2026-08-19 (12 iterations; see issue #182). Local shims that the real
 # buildserver provides natively: the gradlew-fdroid wrapper (missing from the
 # pip wheel) and the gradle 8.14.3 checksum (older bundled list). Key learnings
 # baked in below: prebuild lines are JOINED with ';' in ONE shell (cwd leaks —
 # hence the single chained line); the scanner DELETES gradle wrapper jar+script
-# (hence `gradle`, not `./gradlew`); scanignore for node_modules is required
-# (~102 benign RN artifacts); assembleRelease emits app-release.apk.
+# (hence `gradle`, not `./gradlew`); scanignore is REQUIRED and must list
+# exactly the node_modules dirs that exist (~100 benign RN artifacts) — npm
+# hoists everything to the root, so only the two paths below exist, and fdroid
+# hard-errors on an unmatched scanignore glob just like on an unignored binary.
+# Local-repro quirk (not needed on the buildserver / in fdroiddata CI): on a
+# FRESH workspace fdroidserver 2.4.5 crashes deriving SOURCE_DATE_EPOCH before
+# first clone (TypeError in set_FDroidPopen_env) — pre-clone the repo into
+# build/com.ventouxlabs.carnet once and it proceeds normally.
 
 Categories:
   - Writing
@@ -27,6 +35,9 @@ Builds:
     versionCode: 5
     commit: v0.7.0
     subdir: apps/mobile
+    scanignore:
+      - node_modules
+      - apps/mobile/node_modules
     sudo:
       # Node 20+ and npm are required for the workspace build (see
       # .github/actions/android-toolchain/action.yml for the CI equivalent).
@@ -47,17 +58,35 @@ Builds:
     # The tentap editor web bundle is pre-built and committed
     # (apps/mobile/editor-web/generated/), so no vite build is needed here.
 
+  - versionName: 0.9.0
+    versionCode: 7
+    commit: v0.9.0
+    subdir: apps/mobile
+    scanignore:
+      - node_modules
+      - apps/mobile/node_modules
+    sudo:
+      - apt-get update
+      - apt-get install -y npm nodejs
+    init:
+      - cd ../.. && npm ci
+    prebuild:
+      - cd ../.. && npm run build:shared && cd apps/mobile && npx expo prebuild --platform android --clean --no-install
+      - sed -i '/signingConfig signingConfigs.debug/d' android/app/build.gradle
+    build:
+      - cd android && gradle assembleRelease
+    output: android/app/build/outputs/apk/release/app-release-unsigned.apk
+
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.7.0
-CurrentVersionCode: 5
+CurrentVersion: 0.9.0
+CurrentVersionCode: 7
 
 # Open questions for the fdroiddata MR (tracked in issue #182):
 # 1. Signing: DECIDED (2026-08-22) — the prebuild sed strips the debug
 #    signingConfig from the release buildType, so the build emits a genuinely
-#    UNSIGNED app-release-unsigned.apk (verified: apksigner reports no
-#    signature). F-Droid signs with their own key. Locally re-validated
-#    end-to-end with `fdroid build` after the change.
+#    UNSIGNED app-release-unsigned.apk (verified for both :5 and :7 via
+#    apksigner). F-Droid signs with their own key.
 # 2. Hermes/gradle determinism has not been verified on the buildserver.
 # 3. The committed editor-web/generated bundle passed the scanner unflagged
 #    (source + build script live in-repo: apps/mobile/editor-web, npm script
