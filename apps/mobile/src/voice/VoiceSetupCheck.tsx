@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Ventoux Labs
+// Copyright (C) 2025 Ventoux Advisory, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Settings → Voice input → "Check voice setup". The manual, always-available

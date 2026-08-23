@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Ventoux Labs
+// Copyright (C) 2025 Ventoux Advisory, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // The proactive half of STT onboarding v2: a one-shot Home banner that offers

@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Ventoux Labs
+// Copyright (C) 2025 Ventoux Advisory, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Orchestrates pushing a note's local attachments to Karakeep as assets and
