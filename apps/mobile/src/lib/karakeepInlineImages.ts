@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Entrevoix, Inc.
+// Copyright (C) 2025 Ventoux Advisory, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Rewrite a note body's `![alt](../Photos/x.jpg)` image embeds to their Karakeep
