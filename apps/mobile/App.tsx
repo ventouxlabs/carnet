@@ -33,6 +33,7 @@ import AudioCaptureScreen from "./src/screens/AudioCaptureScreen";
 import RecentDetailScreen from "./src/screens/RecentDetailScreen";
 import TagBrowserScreen from "./src/screens/TagBrowserScreen";
 import SearchScreen from "./src/screens/SearchScreen";
+import TodosScreen from "./src/screens/TodosScreen";
 import type { CaptureEntry, CaptureMode } from "./src/lib/storage";
 import { carnetDark, carnetLight } from "./src/lib/theme";
 import {
@@ -65,6 +66,7 @@ export type RootStackParamList = {
   TagBrowser: { tag?: string } | undefined;
   /** `tag` pre-applies a tag filter — how "tap a tag anywhere" lands here. */
   Search: { tag?: string } | undefined;
+  Todos: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -317,6 +319,7 @@ export default function App() {
                   options={({ route }) => ({ title: route.params.entry.title })}
                 />
                 <Stack.Screen name="TagBrowser" component={TagBrowserScreen} options={{ title: "Tags" }} />
+                <Stack.Screen name="Todos" component={TodosScreen} options={{ title: "Todos" }} />
                 <Stack.Screen
                   name="Search"
                   component={SearchScreen}
