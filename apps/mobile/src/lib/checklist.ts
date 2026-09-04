@@ -1,4 +1,4 @@
-import { stripFrontmatter } from "./frontmatter";
+import { splitFrontmatter, stripFrontmatter } from "./frontmatter";
 
 /** Cap on stored/matched checklist-line text — mirrors EXCERPT_MAX's role
  * of bounding the shared AsyncStorage note-index blob (vault.ts). */
@@ -45,8 +45,9 @@ export function toggleChecklistLine(
   text: string,
   expectedChecked: boolean,
 ): ChecklistToggleResult {
+  const { header, body } = splitFrontmatter(markdown);
   const target = text.trim().slice(0, CHECKLIST_TEXT_MAX);
-  const lines = markdown.split("\n");
+  const lines = body.split("\n");
   const matchIndexes: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     const m = /^([ \t]*-[ \t]+\[)([ xX])(\][ \t]+)(.+)$/.exec(lines[i]);
@@ -63,5 +64,5 @@ export function toggleChecklistLine(
   const nextMark = expectedChecked ? " " : "x";
   const nextLines = [...lines];
   nextLines[i] = `${m[1]}${nextMark}${m[3]}${m[4]}`;
-  return { ok: true, markdown: nextLines.join("\n") };
+  return { ok: true, markdown: header + nextLines.join("\n") };
 }

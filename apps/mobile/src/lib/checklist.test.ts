@@ -310,4 +310,29 @@ describe("extractChecklistLines and toggleChecklistLine regex consistency", () =
       expect(result.markdown).toBe("- [ ] Capital task");
     }
   });
+
+  it("frontmatter containing checkbox-like text is never a toggle target", () => {
+    const markdown =
+      "---\ntitle: Test Note\ntags: [- [ ] fake]\n---\n- [ ] Real item\n- [x] Another";
+    const result = toggleChecklistLine(markdown, "Real item", false);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.markdown).toBe(
+        "---\ntitle: Test Note\ntags: [- [ ] fake]\n---\n- [x] Real item\n- [x] Another",
+      );
+      // Verify frontmatter is preserved byte-for-byte and unchanged
+      expect(result.markdown.split("\n").slice(0, 4).join("\n")).toBe(
+        "---\ntitle: Test Note\ntags: [- [ ] fake]\n---",
+      );
+    }
+  });
+
+  it("fake checkbox-like text in frontmatter cannot be toggled", () => {
+    const markdown = "---\ntags: [- [ ] not-a-real-item]\n---\n";
+    const result = toggleChecklistLine(markdown, "not-a-real-item", false);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("not_found");
+    }
+  });
 });
