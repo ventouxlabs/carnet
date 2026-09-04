@@ -168,6 +168,23 @@ describe("TodosScreen", () => {
     ).toBeTruthy();
   });
 
+  it("reverts the optimistic flip and shows an error Snackbar when updateChecklistItem throws", async () => {
+    updateChecklistItem.mockRejectedValueOnce(new Error("SAF permission revoked"));
+    renderScreen();
+    await screen.findByText("Buy milk");
+    const checkbox = screen.getByLabelText("Mark as done: Buy milk");
+    fireEvent.click(checkbox);
+
+    expect(
+      await screen.findByText("Couldn't update that item: SAF permission revoked"),
+    ).toBeTruthy();
+    // Reverted: back to unchecked, so the "mark as done" label is present again.
+    await waitFor(() =>
+      expect(screen.getByLabelText("Mark as done: Buy milk")).toBeTruthy(),
+    );
+    expect(upsertNoteInIndex).not.toHaveBeenCalled();
+  });
+
   it("the open/all filter changes what's rendered", async () => {
     renderScreen();
     await screen.findByText("Buy milk");

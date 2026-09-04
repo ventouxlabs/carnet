@@ -104,18 +104,30 @@ export default function TodosScreen({ navigation }: Props) {
   const onToggle = useCallback(async (todo: AggregatedTodo) => {
     // Optimistic: flip immediately, revert on failure.
     setIndex((prev) => prev && flipInIndex(prev, todo));
-    const result = await updateChecklistItem(todo.uri, todo.text, todo.checked);
-    if (!result.ok) {
+    try {
+      const result = await updateChecklistItem(todo.uri, todo.text, todo.checked);
+      if (!result.ok) {
+        setIndex((prev) => prev && flipInIndex(prev, todo)); // revert
+        setToggleError(
+          result.reason === "ambiguous"
+            ? "Can't tell which item — edit the text in the note to make it unique."
+            : "That item changed — pull to refresh and try again.",
+        );
+        return;
+      }
+    } catch (e: unknown) {
       setIndex((prev) => prev && flipInIndex(prev, todo)); // revert
       setToggleError(
-        result.reason === "ambiguous"
-          ? "Can't tell which item — edit the text in the note to make it unique."
-          : "That item changed — pull to refresh and try again.",
+        `Couldn't update that item: ${e instanceof Error ? e.message : String(e)}`,
       );
       return;
     }
-    // Keep the cache in sync without a full rescan.
-    await upsertNoteInIndex(todo.uri, await readNote(todo.uri));
+    // Cache sync only — the write already succeeded, so a failure here must NOT revert.
+    try {
+      await upsertNoteInIndex(todo.uri, await readNote(todo.uri));
+    } catch {
+      // Stale cache self-corrects on the next pull-to-refresh.
+    }
   }, []);
 
   const renderItem = useCallback(
