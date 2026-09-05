@@ -77,7 +77,8 @@ vi.mock("../lib/writer", () => ({
     updateChecklistItem(...args),
 }));
 
-import TodosScreen from "./TodosScreen";
+import TodosScreen, { flipInIndex } from "./TodosScreen";
+import type { AggregatedTodo } from "../lib/vault";
 
 type ScreenProps = Parameters<typeof TodosScreen>[0];
 
@@ -236,5 +237,87 @@ describe("TodosScreen", () => {
     fireEvent.click(screen.getByText("All"));
 
     expect(await screen.findByText("Call mom")).toBeTruthy();
+  });
+});
+
+describe("flipInIndex", () => {
+  const baseIndex: NoteIndex = {
+    builtAt: 1,
+    notes: [
+      {
+        uri: "file:///v/Ideas/a.md",
+        subdir: "Ideas",
+        title: "Note A",
+        createdOrDate: 100,
+        tags: [],
+        mode: "idea",
+        excerpt: "",
+        todos: [
+          { text: "First", checked: false },
+          { text: "Second", checked: true },
+        ],
+      },
+    ],
+  };
+
+  function todoAt(index: NoteIndex, ordinal: number): AggregatedTodo {
+    const line = index.notes[0].todos![ordinal];
+    return { ...line, uri: index.notes[0].uri, noteTitle: "Note A", subdir: "Ideas", mode: "idea", createdOrDate: 100, ordinal };
+  }
+
+  it("flips the checked state of exactly the note+ordinal targeted", () => {
+    const todo = todoAt(baseIndex, 0);
+    const result = flipInIndex(baseIndex, todo);
+    expect(result.notes[0].todos).toEqual([
+      { text: "First", checked: true },
+      { text: "Second", checked: true },
+    ]);
+    // Immutable: original index untouched.
+    expect(baseIndex.notes[0].todos![0].checked).toBe(false);
+  });
+
+  it("refuses to flip when the note's todo at that ordinal no longer matches (stale ordinal)", () => {
+    // Simulates a refresh landing between the apply and revert calls in
+    // onToggle: the closure's `todo` still says ordinal 0 is "First", but
+    // the index it's applied against now has different text there.
+    const reorderedIndex: NoteIndex = {
+      ...baseIndex,
+      notes: [
+        {
+          ...baseIndex.notes[0],
+          todos: [
+            { text: "Something else entirely", checked: false },
+            { text: "Second", checked: true },
+          ],
+        },
+      ],
+    };
+    const staleTodo = todoAt(baseIndex, 0); // text: "First", ordinal: 0
+    const result = flipInIndex(reorderedIndex, staleTodo);
+    // Untouched — not flipped, not corrupted.
+    expect(result.notes[0].todos).toEqual(reorderedIndex.notes[0].todos);
+  });
+
+  it("leaves other notes untouched", () => {
+    const twoNoteIndex: NoteIndex = {
+      builtAt: 1,
+      notes: [
+        baseIndex.notes[0],
+        {
+          uri: "file:///v/Ideas/b.md",
+          subdir: "Ideas",
+          title: "Note B",
+          createdOrDate: 50,
+          tags: [],
+          mode: "idea",
+          excerpt: "",
+          todos: [{ text: "First", checked: false }], // same text+ordinal, different note
+        },
+      ],
+    };
+    const todo = todoAt(twoNoteIndex, 0); // targets Note A
+    const result = flipInIndex(twoNoteIndex, todo);
+    expect(result.notes[0].todos![0].checked).toBe(true); // Note A flipped
+    expect(result.notes[1].todos![0].checked).toBe(false); // Note B untouched
   });
 });

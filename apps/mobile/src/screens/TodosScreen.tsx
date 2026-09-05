@@ -39,12 +39,26 @@ type TodoFilter = "open" | "all";
  * `text`) means two checklist lines with identical text in one note no
  * longer both flip when only one was tapped — `ordinal` is a UI-local
  * targeting detail of the cached index and is never sent to
- * `updateChecklistItem`, which stays text-anchored for the actual write. */
-function flipInIndex(index: NoteIndex, todo: AggregatedTodo): NoteIndex {
+ * `updateChecklistItem`, which stays text-anchored for the actual write.
+ *
+ * GUARD: before trusting `ordinal`, confirm the note's line AT that ordinal
+ * still has `todo.text` — a pull-to-refresh landing between the apply and
+ * revert calls (a real, if narrow, race: `onToggle` awaits the write, and a
+ * concurrent `onRefresh` can swap in a freshly-rebuilt `index` mid-flight)
+ * can re-extract the note with its checklist lines reordered, making the old
+ * ordinal point at a DIFFERENT line. If the text no longer matches, leave
+ * this note's todos untouched rather than flipping whatever is there now —
+ * same anchor-by-content, refuse-on-mismatch stance `toggleChecklistLine`
+ * takes for the actual disk write, just applied to the local cache. Nothing
+ * here ever reaches disk either way; `getAllTodos` will show the true state
+ * on the next index read. */
+export function flipInIndex(index: NoteIndex, todo: AggregatedTodo): NoteIndex {
   return {
     ...index,
     notes: index.notes.map((note) => {
       if (note.uri !== todo.uri || !note.todos) return note;
+      const target = note.todos[todo.ordinal];
+      if (!target || target.text !== todo.text) return note;
       return {
         ...note,
         todos: note.todos.map((line, ordinal) =>
@@ -130,8 +144,11 @@ export default function TodosScreen({ navigation }: Props) {
     // Cache sync only — the write already succeeded, so a failure here must NOT revert.
     try {
       await upsertNoteInIndex(todo.uri, await readNote(todo.uri));
-    } catch {
-      // Stale cache self-corrects on the next pull-to-refresh.
+    } catch (e: unknown) {
+      // Stale cache self-corrects on the next pull-to-refresh. Warn (don't
+      // revert, don't alert) — matches buildNoteIndex's own skip-and-warn
+      // precedent (vault.ts) for a benign, expected-to-sometimes-fail path.
+      console.warn("[TodosScreen] cache sync failed after a successful toggle:", e);
     }
   }, []);
 

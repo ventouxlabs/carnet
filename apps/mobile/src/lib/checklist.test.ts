@@ -335,4 +335,24 @@ describe("extractChecklistLines and toggleChecklistLine regex consistency", () =
       expect(result.reason).toBe("not_found");
     }
   });
+
+  it("leading whitespace before the frontmatter fence: both functions agree it's NOT frontmatter", () => {
+    // splitFrontmatter requires `---` at byte offset 0 — a leading newline
+    // means it never recognizes this as a frontmatter block, so the WHOLE
+    // string (including the line that looks like frontmatter content) is
+    // body to both extractChecklistLines and toggleChecklistLine. This pins
+    // the symmetric-but-strict behavior: neither function silently disagrees
+    // with the other about where the body starts, even on malformed input.
+    const markdown =
+      "\n---\n- [ ] looks like it's in frontmatter\n---\n\n- [ ] Real item";
+    const extracted = extractChecklistLines(markdown);
+    expect(extracted.map((l) => l.text)).toEqual([
+      "looks like it's in frontmatter",
+      "Real item",
+    ]);
+    for (const item of extracted) {
+      const result = toggleChecklistLine(markdown, item.text, item.checked);
+      expect(result.ok).toBe(true);
+    }
+  });
 });

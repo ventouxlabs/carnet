@@ -22,6 +22,16 @@ const CHECKLIST_LINE_MATCH_RE = /^([ \t]*-[ \t]+\[)([ xX])(\][ \t]+)(.+)$/;
 /** Extract every `- [ ]` / `- [x]` line from a note's body (frontmatter
  * split off first via splitFrontmatter — the same detector toggleChecklistLine
  * uses, so the two functions can never disagree about where the body starts).
+ * NOTE: splitFrontmatter requires the `---` fence at byte offset 0 — stricter
+ * than the trimStart()-tolerant stripFrontmatter this used to call. A note
+ * with leading whitespace before its frontmatter fence (nothing in this repo
+ * writes one — every writer emits `---` at offset 0) is now treated as
+ * having NO frontmatter by BOTH functions, rather than the two disagreeing
+ * about it as they used to. Symmetric-but-strict was chosen over the reverse
+ * (making toggleChecklistLine lenient) because toggleChecklistLine needs
+ * splitFrontmatter's `header` back to reconstruct the file byte-exact after a
+ * body-only edit — stripFrontmatter throws that header away, so there is
+ * nothing to round-trip through.
  * Nested/indented items are matched too (leading whitespace is tolerated) and
  * returned as independent flat rows — v1 does not model parent/child
  * structure. Text is trimmed and capped at CHECKLIST_TEXT_MAX so one
