@@ -1,4 +1,4 @@
-import { splitFrontmatter, stripFrontmatter } from "./frontmatter";
+import { splitFrontmatter } from "./frontmatter";
 
 /** Cap on stored/matched checklist-line text — mirrors EXCERPT_MAX's role
  * of bounding the shared AsyncStorage note-index blob (vault.ts). */
@@ -11,15 +11,23 @@ export interface ChecklistLine {
 
 const CHECKLIST_LINE_RE = /^[ \t]*-[ \t]+\[([ xX])\][ \t]+(.+)$/gm;
 
+/** Single-line variant of CHECKLIST_LINE_RE, capturing the mark's surrounding
+ * bracket/spacing as separate groups so toggleChecklistLine can splice a new
+ * mark in without re-deriving the line's shape. Both regexes describe the
+ * SAME syntax (`- [ ] `/`- [x] `, case-insensitive, leading-whitespace
+ * tolerant) — keep them in sync if either changes; checklist.test.ts pins
+ * both against shared fixtures precisely to catch drift here. */
+const CHECKLIST_LINE_MATCH_RE = /^([ \t]*-[ \t]+\[)([ xX])(\][ \t]+)(.+)$/;
+
 /** Extract every `- [ ]` / `- [x]` line from a note's body (frontmatter
- * stripped first — frontmatter is YAML, never checklist syntax, but this
- * keeps the regex from ever seeing it). Nested/indented items are matched
- * too (leading whitespace is tolerated) and returned as independent flat
- * rows — v1 does not model parent/child structure. Text is trimmed and
- * capped at CHECKLIST_TEXT_MAX so one unformatted line can't blow up the
- * shared note-index blob. */
+ * split off first via splitFrontmatter — the same detector toggleChecklistLine
+ * uses, so the two functions can never disagree about where the body starts).
+ * Nested/indented items are matched too (leading whitespace is tolerated) and
+ * returned as independent flat rows — v1 does not model parent/child
+ * structure. Text is trimmed and capped at CHECKLIST_TEXT_MAX so one
+ * unformatted line can't blow up the shared note-index blob. */
 export function extractChecklistLines(markdown: string): ChecklistLine[] {
-  const body = stripFrontmatter(markdown);
+  const { body } = splitFrontmatter(markdown);
   const out: ChecklistLine[] = [];
   for (const match of body.matchAll(CHECKLIST_LINE_RE)) {
     const checked = match[1].toLowerCase() === "x";
@@ -48,19 +56,18 @@ export function toggleChecklistLine(
   const { header, body } = splitFrontmatter(markdown);
   const target = text.trim().slice(0, CHECKLIST_TEXT_MAX);
   const lines = body.split("\n");
-  const matchIndexes: number[] = [];
+  const matches: Array<{ index: number; parts: RegExpExecArray }> = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = /^([ \t]*-[ \t]+\[)([ xX])(\][ \t]+)(.+)$/.exec(lines[i]);
+    const m = CHECKLIST_LINE_MATCH_RE.exec(lines[i]);
     if (!m) continue;
     const checked = m[2].toLowerCase() === "x";
     const lineText = m[4].trim().slice(0, CHECKLIST_TEXT_MAX);
-    if (lineText === target && checked === expectedChecked) matchIndexes.push(i);
+    if (lineText === target && checked === expectedChecked) matches.push({ index: i, parts: m });
   }
-  if (matchIndexes.length === 0) return { ok: false, reason: "not_found" };
-  if (matchIndexes.length > 1) return { ok: false, reason: "ambiguous" };
+  if (matches.length === 0) return { ok: false, reason: "not_found" };
+  if (matches.length > 1) return { ok: false, reason: "ambiguous" };
 
-  const i = matchIndexes[0];
-  const m = /^([ \t]*-[ \t]+\[)([ xX])(\][ \t]+)(.+)$/.exec(lines[i])!;
+  const { index: i, parts: m } = matches[0];
   const nextMark = expectedChecked ? " " : "x";
   const nextLines = [...lines];
   nextLines[i] = `${m[1]}${nextMark}${m[3]}${m[4]}`;

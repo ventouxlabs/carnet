@@ -28,13 +28,18 @@ type Props = NativeStackScreenProps<RootStackParamList, "Todos">;
 
 type TodoFilter = "open" | "all";
 
-/** Return a NEW NoteIndex with the note's todo matching `(uri, text)` flipped
- * to `!checked` (its OWN current checked, not `todo.checked`) — never mutates
- * `index` or its arrays. `onToggle` calls this twice with the same
- * pre-flip `todo` closure (apply, then revert on failure): matching against
- * the line's live checked state — rather than requiring it to still equal
+/** Return a NEW NoteIndex with the note's todo at `(uri, ordinal)` flipped to
+ * `!checked` (its OWN current checked, not `todo.checked`) — never mutates
+ * `index` or its arrays. `onToggle` calls this twice with the same pre-flip
+ * `todo` closure (apply, then revert on failure): matching against the
+ * line's live checked state — rather than requiring it to still equal
  * `todo.checked` — is what makes that second call actually undo the first,
- * instead of finding nothing to flip because the first call already changed it. */
+ * instead of finding nothing to flip because the first call already changed
+ * it. Matching by `ordinal` (this line's position within its OWN note, not by
+ * `text`) means two checklist lines with identical text in one note no
+ * longer both flip when only one was tapped — `ordinal` is a UI-local
+ * targeting detail of the cached index and is never sent to
+ * `updateChecklistItem`, which stays text-anchored for the actual write. */
 function flipInIndex(index: NoteIndex, todo: AggregatedTodo): NoteIndex {
   return {
     ...index,
@@ -42,8 +47,8 @@ function flipInIndex(index: NoteIndex, todo: AggregatedTodo): NoteIndex {
       if (note.uri !== todo.uri || !note.todos) return note;
       return {
         ...note,
-        todos: note.todos.map((line) =>
-          line.text === todo.text ? { ...line, checked: !line.checked } : line,
+        todos: note.todos.map((line, ordinal) =>
+          ordinal === todo.ordinal ? { ...line, checked: !line.checked } : line,
         ),
       };
     }),
@@ -131,11 +136,8 @@ export default function TodosScreen({ navigation }: Props) {
   }, []);
 
   const renderItem = useCallback(
-    ({ item, index: rowIndex }: { item: AggregatedTodo; index: number }) => (
-      <View
-        key={`${item.uri}#${rowIndex}`}
-        style={[styles.row, { gap: theme.carnet.spacing.sm }]}
-      >
+    ({ item }: { item: AggregatedTodo }) => (
+      <View style={[styles.row, { gap: theme.carnet.spacing.sm }]}>
         <Checkbox.Android
           status={item.checked ? "checked" : "unchecked"}
           onPress={() => void onToggle(item)}
@@ -192,7 +194,7 @@ export default function TodosScreen({ navigation }: Props) {
       ) : (
         <FlatList
           data={todos}
-          keyExtractor={(item, i) => `${item.uri}#${i}`}
+          keyExtractor={(item) => `${item.uri}#${item.ordinal}`}
           renderItem={renderItem}
           contentContainerStyle={[
             todos.length === 0 ? styles.center : null,

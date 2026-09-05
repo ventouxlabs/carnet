@@ -191,12 +191,21 @@ export async function buildNoteIndex(): Promise<NoteIndex> {
   };
 }
 
+// ── Todo aggregation (checklist lines across the note index) ─────────────────
+
 export interface AggregatedTodo extends ChecklistLine {
   uri: string;
   noteTitle: string;
   subdir: NoteSubdir;
   mode: CaptureMode;
   createdOrDate: number;
+  /** This line's position within its OWN note's `todos` array — stable
+   * across a rebuild as long as extraction order is (it is: extraction walks
+   * the body top-to-bottom). UI-local identity only — a target for matching
+   * a specific row in the CACHED index (e.g. TodosScreen's flipInIndex, so
+   * two notes-with-duplicate-text lines don't both flip when only one was
+   * tapped) — NEVER sent to updateChecklistItem, which stays text-anchored. */
+  ordinal: number;
 }
 
 /** Flatten every note's checklist lines into one list, newest-note-first
@@ -204,7 +213,7 @@ export interface AggregatedTodo extends ChecklistLine {
 export function getAllTodos(index: NoteIndex): AggregatedTodo[] {
   const out: AggregatedTodo[] = [];
   for (const note of index.notes) {
-    for (const line of note.todos ?? []) {
+    (note.todos ?? []).forEach((line, ordinal) => {
       out.push({
         ...line,
         uri: note.uri,
@@ -212,8 +221,9 @@ export function getAllTodos(index: NoteIndex): AggregatedTodo[] {
         subdir: note.subdir,
         mode: note.mode,
         createdOrDate: note.createdOrDate,
+        ordinal,
       });
-    }
+    });
   }
   return out.sort(
     (a, b) => b.createdOrDate - a.createdOrDate || a.noteTitle.localeCompare(b.noteTitle),

@@ -340,10 +340,9 @@ export async function updateNote(filepath: string, markdown: string): Promise<vo
   await writeByUri(filepath, markdown);
 }
 
-export interface ChecklistUpdateResult {
-  ok: boolean;
-  reason?: "not_found" | "ambiguous";
-}
+export type ChecklistUpdateResult =
+  | { ok: true }
+  | { ok: false; reason: "not_found" | "ambiguous" };
 
 /**
  * Toggle one checklist line in a note by TEXT, not by position. Always reads

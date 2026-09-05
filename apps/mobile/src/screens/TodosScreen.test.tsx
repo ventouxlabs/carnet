@@ -185,6 +185,49 @@ describe("TodosScreen", () => {
     expect(upsertNoteInIndex).not.toHaveBeenCalled();
   });
 
+  it("toggling one of two identical-text checklist items in the same note flips only the tapped one", async () => {
+    const dupIndex: NoteIndex = {
+      builtAt: 1,
+      notes: [
+        {
+          uri: "file:///v/Ideas/dup.md",
+          subdir: "Ideas",
+          title: "Dup Note",
+          createdOrDate: 300,
+          tags: [],
+          mode: "idea",
+          excerpt: "",
+          todos: [
+            { text: "Water plants", checked: false },
+            { text: "Water plants", checked: false },
+          ],
+        },
+      ],
+    };
+    getNoteIndex.mockResolvedValue(dupIndex);
+    // A real successful write for ONE specific line — this is the case the
+    // old text-only matching got wrong: it had no way to tell the two rows
+    // apart, so a successful write to one line flipped BOTH in the local
+    // cache until the next refocus.
+    updateChecklistItem.mockResolvedValueOnce({ ok: true });
+    renderScreen();
+
+    // "All" filter, not the default "open" — a successfully-checked row must
+    // stay visible after the toggle for this assertion to see both rows.
+    fireEvent.click(await screen.findByText("All"));
+
+    const before = await screen.findAllByLabelText("Mark as done: Water plants");
+    expect(before).toHaveLength(2);
+    fireEvent.click(before[0]);
+
+    await waitFor(() => expect(updateChecklistItem).toHaveBeenCalled());
+    // Exactly one row flipped: one "done" checkbox remains, one is now "not done".
+    await waitFor(() => {
+      expect(screen.getAllByLabelText("Mark as done: Water plants")).toHaveLength(1);
+      expect(screen.getAllByLabelText("Mark as not done: Water plants")).toHaveLength(1);
+    });
+  });
+
   it("the open/all filter changes what's rendered", async () => {
     renderScreen();
     await screen.findByText("Buy milk");

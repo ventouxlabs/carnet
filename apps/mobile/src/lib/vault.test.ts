@@ -471,11 +471,38 @@ describe("getAllTodos", () => {
     };
 
     expect(getAllTodos(index)).toEqual([
-      { text: "t3", checked: false, uri: "file:///v/Journal/c.md", noteTitle: "C Note", subdir: "Journal", mode: "journal", createdOrDate: 200 },
-      { text: "t4", checked: false, uri: "file:///v/Journal/c.md", noteTitle: "C Note", subdir: "Journal", mode: "journal", createdOrDate: 200 },
-      { text: "t2", checked: true, uri: "file:///v/Ideas/a.md", noteTitle: "A Note", subdir: "Ideas", mode: "idea", createdOrDate: 100 },
-      { text: "t1", checked: false, uri: "file:///v/Ideas/b.md", noteTitle: "B Note", subdir: "Ideas", mode: "idea", createdOrDate: 100 },
+      { text: "t3", checked: false, uri: "file:///v/Journal/c.md", noteTitle: "C Note", subdir: "Journal", mode: "journal", createdOrDate: 200, ordinal: 0 },
+      { text: "t4", checked: false, uri: "file:///v/Journal/c.md", noteTitle: "C Note", subdir: "Journal", mode: "journal", createdOrDate: 200, ordinal: 1 },
+      { text: "t2", checked: true, uri: "file:///v/Ideas/a.md", noteTitle: "A Note", subdir: "Ideas", mode: "idea", createdOrDate: 100, ordinal: 0 },
+      { text: "t1", checked: false, uri: "file:///v/Ideas/b.md", noteTitle: "B Note", subdir: "Ideas", mode: "idea", createdOrDate: 100, ordinal: 0 },
     ]);
+  });
+
+  it("getAllTodos > assigns ordinal by position within each note's own todos array", () => {
+    const index: NoteIndex = {
+      builtAt: 1,
+      notes: [
+        {
+          uri: "file:///v/Ideas/dup.md",
+          subdir: "Ideas",
+          title: "Dup Note",
+          createdOrDate: 100,
+          tags: [],
+          mode: "idea",
+          excerpt: "",
+          todos: [
+            { text: "same text", checked: false },
+            { text: "same text", checked: false },
+          ],
+        },
+      ],
+    };
+
+    const todos = getAllTodos(index);
+    expect(todos.map((t) => t.ordinal)).toEqual([0, 1]);
+    // Ordinal is what makes these two otherwise-identical rows addressable
+    // independently (e.g. TodosScreen's flipInIndex) without touching text.
+    expect(todos[0].text).toBe(todos[1].text);
   });
 
   it("returns [] and doesn't throw for an index with no todos at all", () => {
