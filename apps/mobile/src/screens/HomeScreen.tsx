@@ -237,6 +237,11 @@ export default function HomeScreen({ navigation }: Props) {
             accessibilityLabel="Search notes"
           />
           <IconButton
+            icon="checkbox-marked-outline"
+            onPress={() => navigation.navigate("Todos")}
+            accessibilityLabel="View todos"
+          />
+          <IconButton
             icon="cog"
             onPress={() => navigation.navigate("Settings")}
             accessibilityLabel="Settings"

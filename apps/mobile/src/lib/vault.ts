@@ -19,6 +19,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { deriveTitle } from "@carnet/shared";
 
+import { extractChecklistLines, type ChecklistLine } from "./checklist";
 import {
   extractFrontmatterField,
   getFrontmatterTags,
@@ -79,6 +80,10 @@ export interface NoteIndexEntry {
    * raw note awaiting enrichment) — drives the per-note sync badge. Optional
    * so cached v1 blobs without it stay valid; absent means no badge. */
   status?: string;
+  /** Checklist lines (`- [ ]` / `- [x]`) found in the body. Optional so
+   * cached v1 blobs without it stay valid — absent means "not yet
+   * re-indexed", not "no todos"; treat as [] when reading. */
+  todos?: ChecklistLine[];
 }
 
 export interface NoteIndex {
@@ -134,6 +139,7 @@ function makeExcerpt(markdown: string): string {
 /** Build a note index row from a note's ref + markdown. */
 function buildNoteEntry(uri: string, subdir: NoteSubdir, markdown: string): NoteIndexEntry {
   const status = extractFrontmatterField(markdown, "status");
+  const todos = extractChecklistLines(markdown);
   return {
     uri,
     subdir,
@@ -146,6 +152,7 @@ function buildNoteEntry(uri: string, subdir: NoteSubdir, markdown: string): Note
     mode: inferNoteMode(uri),
     excerpt: makeExcerpt(markdown),
     ...(status ? { status } : {}),
+    ...(todos.length ? { todos } : {}),
   };
 }
 
@@ -182,6 +189,45 @@ export async function buildNoteIndex(): Promise<NoteIndex> {
     builtAt: Date.now(),
     notes: slots.filter((n): n is NoteIndexEntry => n !== null),
   };
+}
+
+// ── Todo aggregation (checklist lines across the note index) ─────────────────
+
+export interface AggregatedTodo extends ChecklistLine {
+  uri: string;
+  noteTitle: string;
+  subdir: NoteSubdir;
+  mode: CaptureMode;
+  createdOrDate: number;
+  /** This line's position within its OWN note's `todos` array — stable
+   * across a rebuild as long as extraction order is (it is: extraction walks
+   * the body top-to-bottom). UI-local identity only — a target for matching
+   * a specific row in the CACHED index (e.g. TodosScreen's flipInIndex, so
+   * two notes-with-duplicate-text lines don't both flip when only one was
+   * tapped) — NEVER sent to updateChecklistItem, which stays text-anchored. */
+  ordinal: number;
+}
+
+/** Flatten every note's checklist lines into one list, newest-note-first
+ * (ties by note title) — the source TodosScreen renders. */
+export function getAllTodos(index: NoteIndex): AggregatedTodo[] {
+  const out: AggregatedTodo[] = [];
+  for (const note of index.notes) {
+    (note.todos ?? []).forEach((line, ordinal) => {
+      out.push({
+        ...line,
+        uri: note.uri,
+        noteTitle: note.title,
+        subdir: note.subdir,
+        mode: note.mode,
+        createdOrDate: note.createdOrDate,
+        ordinal,
+      });
+    });
+  }
+  return out.sort(
+    (a, b) => b.createdOrDate - a.createdOrDate || a.noteTitle.localeCompare(b.noteTitle),
+  );
 }
 
 /** Derive the tag index (tag → carrying notes, count-sorted) from a note index.

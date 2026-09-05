@@ -44,6 +44,7 @@ import {
 // are re-exported at the bottom of this file.
 import { listPairedBinaries, mimeFromFilename } from "./pairedBinaries";
 import { extractH1, personFilename } from "./noteNaming";
+import { toggleChecklistLine } from "./checklist";
 
 
 /** Upper bound on collision-bumped filename variants ({stem}-2.md … {stem}-99.md).
@@ -337,6 +338,32 @@ export async function readNote(filepath: string): Promise<string> {
 /** Overwrite a note file with new content. Supports both file:// and content:// URIs. */
 export async function updateNote(filepath: string, markdown: string): Promise<void> {
   await writeByUri(filepath, markdown);
+}
+
+export type ChecklistUpdateResult =
+  | { ok: true }
+  | { ok: false; reason: "not_found" | "ambiguous" };
+
+/**
+ * Toggle one checklist line in a note by TEXT, not by position. Always reads
+ * the file fresh (inside the same serialized call it writes from) and hands
+ * that exact content to the pure toggleChecklistLine — the read IS the
+ * write's baseline, so there is no separate staleness guard to maintain.
+ * Serialized per-filepath so two toggles racing on the same file (or a
+ * toggle racing an offline-drain write) don't interleave.
+ */
+export async function updateChecklistItem(
+  filepath: string,
+  text: string,
+  expectedChecked: boolean,
+): Promise<ChecklistUpdateResult> {
+  return serialize(filepath, async () => {
+    const current = await readByUri(filepath);
+    const result = toggleChecklistLine(current, text, expectedChecked);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    await writeByUri(filepath, result.markdown);
+    return { ok: true };
+  });
 }
 
 /**

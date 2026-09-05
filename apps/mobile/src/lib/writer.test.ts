@@ -83,6 +83,7 @@ import {
   writePerson,
   readNote,
   updateNote,
+  updateChecklistItem,
   moveToArchive,
   rewriteFrontmatterField,
   safLastSegment,
@@ -224,6 +225,127 @@ describe("appendJournal", () => {
     const content = _files.get(filepath)!.content;
     expect(content).toContain("location: 40.00000,-74.00000"); // latest same-day wins
     expect(content.match(/^location:/gm)?.length).toBe(1); // single frontmatter block
+  });
+});
+
+// ── updateChecklistItem ───────────────────────────────────────────────────────
+
+describe("updateChecklistItem", () => {
+  beforeEach(clearFiles);
+
+  it("toggles an unchecked line to checked", async () => {
+    const original = "---\ndate: 2026-05-16\n---\n# Notes\n\n- [ ] buy milk\n- [ ] call home\n";
+    const { filepath } = await appendJournal("2026-05-16", original);
+
+    const result = await updateChecklistItem(filepath, "buy milk", false);
+    expect(result).toEqual({ ok: true });
+
+    const updated = _files.get(filepath)!.content;
+    expect(updated).toContain("- [x] buy milk");
+    expect(updated).toContain("- [ ] call home"); // unchanged
+  });
+
+  it("toggles a checked line to unchecked", async () => {
+    const original = "---\ndate: 2026-05-16\n---\n# Notes\n\n- [x] buy milk\n- [ ] call home\n";
+    const { filepath } = await appendJournal("2026-05-16", original);
+
+    const result = await updateChecklistItem(filepath, "buy milk", true);
+    expect(result).toEqual({ ok: true });
+
+    const updated = _files.get(filepath)!.content;
+    expect(updated).toContain("- [ ] buy milk");
+    expect(updated).toContain("- [ ] call home"); // unchanged
+  });
+
+  it("returns not_found when the line doesn't exist", async () => {
+    const original = "---\ndate: 2026-05-16\n---\n# Notes\n\n- [ ] buy milk\n";
+    const { filepath } = await appendJournal("2026-05-16", original);
+
+    const result = await updateChecklistItem(filepath, "nonexistent task", false);
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+
+    // File should not be modified
+    const content = _files.get(filepath)!.content;
+    expect(content).toBe(original);
+  });
+
+  it("returns not_found when the line's state doesn't match expectedChecked", async () => {
+    const original = "---\ndate: 2026-05-16\n---\n# Notes\n\n- [x] buy milk\n";
+    const { filepath } = await appendJournal("2026-05-16", original);
+
+    // Line is checked, but we're looking for an unchecked one
+    const result = await updateChecklistItem(filepath, "buy milk", false);
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+
+    // File should not be modified
+    const content = _files.get(filepath)!.content;
+    expect(content).toBe(original);
+  });
+
+  it("returns ambiguous when two identical lines exist", async () => {
+    const original =
+      "---\ndate: 2026-05-16\n---\n# Notes\n\n- [ ] buy milk\n- [ ] buy milk\n";
+    const { filepath } = await appendJournal("2026-05-16", original);
+
+    const result = await updateChecklistItem(filepath, "buy milk", false);
+    expect(result).toEqual({ ok: false, reason: "ambiguous" });
+
+    // File should not be modified
+    const content = _files.get(filepath)!.content;
+    expect(content).toBe(original);
+  });
+
+  it("preserves frontmatter and other content when toggling", async () => {
+    const original =
+      "---\ndate: 2026-05-16\ntags: [todo]\nstatus: active\n---\n# Notes\n\nSome intro text.\n\n- [ ] task 1\n- [x] task 2\n\nSome outro text.\n";
+    const { filepath } = await appendJournal("2026-05-16", original);
+
+    await updateChecklistItem(filepath, "task 1", false);
+
+    const updated = _files.get(filepath)!.content;
+    // Frontmatter preserved
+    expect(updated).toContain("date: 2026-05-16");
+    expect(updated).toContain("tags: [todo]");
+    expect(updated).toContain("status: active");
+    // Body text preserved
+    expect(updated).toContain("Some intro text.");
+    expect(updated).toContain("Some outro text.");
+    // Task 1 toggled
+    expect(updated).toContain("- [x] task 1");
+    // Task 2 unchanged
+    expect(updated).toContain("- [x] task 2");
+  });
+
+  it("handles indented checklist items", async () => {
+    const original = "---\ndate: 2026-05-16\n---\n# Notes\n\n- [ ] parent task\n  - [ ] subtask\n";
+    const { filepath } = await appendJournal("2026-05-16", original);
+
+    const result = await updateChecklistItem(filepath, "subtask", false);
+    expect(result).toEqual({ ok: true });
+
+    const updated = _files.get(filepath)!.content;
+    expect(updated).toContain("  - [x] subtask");
+    expect(updated).toContain("- [ ] parent task"); // parent unchanged
+  });
+
+  it("serializes concurrent toggles on the same file", async () => {
+    const original =
+      "---\ndate: 2026-05-16\n---\n# Notes\n\n- [ ] task A\n- [ ] task B\n";
+    const { filepath } = await appendJournal("2026-05-16", original);
+
+    // Launch two concurrent updates
+    const [result1, result2] = await Promise.all([
+      updateChecklistItem(filepath, "task A", false),
+      updateChecklistItem(filepath, "task B", false),
+    ]);
+
+    expect(result1).toEqual({ ok: true });
+    expect(result2).toEqual({ ok: true });
+
+    const final = _files.get(filepath)!.content;
+    // Both tasks should be toggled
+    expect(final).toContain("- [x] task A");
+    expect(final).toContain("- [x] task B");
   });
 });
 

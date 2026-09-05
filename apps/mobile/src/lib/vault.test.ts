@@ -41,15 +41,19 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
 import {
   buildNoteIndex,
   buildTagIndex,
+  getAllTodos,
   getTagIndex,
   inferNoteMode,
   invalidateTagIndex,
+  loadCachedNoteIndex,
   loadCachedTagIndex,
   notesForTag,
   refreshTagIndex,
   suggestTags,
   synthesizeEntry,
   tagsForNote,
+  upsertNoteInIndex,
+  type NoteIndex,
   type TagIndex,
 } from "./vault";
 import { listNoteFiles, readNote } from "./writer";
@@ -111,6 +115,33 @@ describe("buildNoteIndex titles", () => {
     expect(index.notes[0].excerpt).toBe(
       "Jack made the team. See the roster.",
     );
+  });
+});
+
+// ── buildNoteIndex todos ──────────────────────────────────────────────────────
+
+describe("buildNoteIndex todos", () => {
+  it("populates todos from checklist lines in the body", async () => {
+    addNote(
+      "file:///v/Ideas/todo.md",
+      "Ideas",
+      "---\ntags: [x]\n---\n# T\n\n- [ ] buy milk\n- [x] done thing\n",
+    );
+    const index = await buildNoteIndex();
+    expect(index.notes[0].todos).toEqual([
+      { text: "buy milk", checked: false },
+      { text: "done thing", checked: true },
+    ]);
+  });
+
+  it("omits the todos key entirely when there are no checklist lines (not an empty array)", async () => {
+    addNote(
+      "file:///v/Ideas/plain.md",
+      "Ideas",
+      "---\ntags: [x]\n---\n# T\n\nno checklist here\n",
+    );
+    const index = await buildNoteIndex();
+    expect(index.notes[0]).not.toHaveProperty("todos");
   });
 });
 
@@ -361,5 +392,159 @@ describe("notesForTag", () => {
 
     const notes = await notesForTag(index, "x");
     expect(notes.map((n) => n.title)).toEqual(["A"]);
+  });
+});
+
+// ── upsertNoteInIndex + todos ─────────────────────────────────────────────────
+
+describe("upsertNoteInIndex picks up todos with no extra wiring", () => {
+  it("reflects a note's new checklist lines on an incremental upsert, without a full rescan", async () => {
+    addNote("file:///v/Ideas/a.md", "Ideas", "---\ntags: [x]\n---\n# A\n\nno checklist yet\n");
+    await refreshTagIndex(); // builds + persists the note index cache
+    const before = await loadCachedNoteIndex();
+    expect(before!.notes[0].todos).toBeUndefined();
+    expect(listNoteFiles).toHaveBeenCalledOnce();
+
+    await upsertNoteInIndex(
+      "file:///v/Ideas/a.md",
+      "---\ntags: [x]\n---\n# A\n\n- [ ] new task\n",
+    );
+
+    const after = await loadCachedNoteIndex();
+    expect(after!.notes[0].todos).toEqual([{ text: "new task", checked: false }]);
+    // Still just the one vault scan (from refreshTagIndex) — upsert never rescans.
+    expect(listNoteFiles).toHaveBeenCalledOnce();
+  });
+});
+
+// ── getAllTodos ───────────────────────────────────────────────────────────────
+
+describe("getAllTodos", () => {
+  it("flattens every note's todos, newest-note-first, ties broken by note title", () => {
+    const index: NoteIndex = {
+      builtAt: 0,
+      notes: [
+        {
+          uri: "file:///v/Ideas/b.md",
+          subdir: "Ideas",
+          title: "B Note",
+          createdOrDate: 100,
+          tags: [],
+          mode: "idea",
+          excerpt: "",
+          todos: [{ text: "t1", checked: false }],
+        },
+        {
+          uri: "file:///v/Ideas/a.md",
+          subdir: "Ideas",
+          title: "A Note",
+          createdOrDate: 100,
+          tags: [],
+          mode: "idea",
+          excerpt: "",
+          todos: [{ text: "t2", checked: true }],
+        },
+        {
+          uri: "file:///v/Journal/c.md",
+          subdir: "Journal",
+          title: "C Note",
+          createdOrDate: 200,
+          tags: [],
+          mode: "journal",
+          excerpt: "",
+          todos: [
+            { text: "t3", checked: false },
+            { text: "t4", checked: false },
+          ],
+        },
+        {
+          uri: "file:///v/Ideas/d.md",
+          subdir: "Ideas",
+          title: "D Note",
+          createdOrDate: 50,
+          tags: [],
+          mode: "idea",
+          excerpt: "",
+          // no `todos` key at all — must contribute nothing, not throw.
+        },
+      ],
+    };
+
+    expect(getAllTodos(index)).toEqual([
+      { text: "t3", checked: false, uri: "file:///v/Journal/c.md", noteTitle: "C Note", subdir: "Journal", mode: "journal", createdOrDate: 200, ordinal: 0 },
+      { text: "t4", checked: false, uri: "file:///v/Journal/c.md", noteTitle: "C Note", subdir: "Journal", mode: "journal", createdOrDate: 200, ordinal: 1 },
+      { text: "t2", checked: true, uri: "file:///v/Ideas/a.md", noteTitle: "A Note", subdir: "Ideas", mode: "idea", createdOrDate: 100, ordinal: 0 },
+      { text: "t1", checked: false, uri: "file:///v/Ideas/b.md", noteTitle: "B Note", subdir: "Ideas", mode: "idea", createdOrDate: 100, ordinal: 0 },
+    ]);
+  });
+
+  it("getAllTodos > assigns ordinal by position within each note's own todos array", () => {
+    const index: NoteIndex = {
+      builtAt: 1,
+      notes: [
+        {
+          uri: "file:///v/Ideas/dup.md",
+          subdir: "Ideas",
+          title: "Dup Note",
+          createdOrDate: 100,
+          tags: [],
+          mode: "idea",
+          excerpt: "",
+          todos: [
+            { text: "same text", checked: false },
+            { text: "same text", checked: false },
+          ],
+        },
+      ],
+    };
+
+    const todos = getAllTodos(index);
+    expect(todos.map((t) => t.ordinal)).toEqual([0, 1]);
+    // Ordinal is what makes these two otherwise-identical rows addressable
+    // independently (e.g. TodosScreen's flipInIndex) without touching text.
+    expect(todos[0].text).toBe(todos[1].text);
+  });
+
+  it("returns [] and doesn't throw for an index with no todos at all", () => {
+    const index: NoteIndex = {
+      builtAt: 0,
+      notes: [
+        {
+          uri: "file:///v/Ideas/a.md",
+          subdir: "Ideas",
+          title: "A",
+          createdOrDate: 1,
+          tags: [],
+          mode: "idea",
+          excerpt: "",
+        },
+      ],
+    };
+    expect(() => getAllTodos(index)).not.toThrow();
+    expect(getAllTodos(index)).toEqual([]);
+  });
+
+  it("doesn't throw on a cached index loaded from a pre-todos blob (no todos key on any entry)", async () => {
+    _store.set(
+      "carnet:noteindex:v1",
+      JSON.stringify({
+        builtAt: 0,
+        notes: [
+          {
+            uri: "file:///v/Ideas/old.md",
+            subdir: "Ideas",
+            title: "Old",
+            createdOrDate: 1,
+            tags: [],
+            mode: "idea",
+            excerpt: "old note",
+            // pre-todos v1 blob: no `todos` key.
+          },
+        ],
+      }),
+    );
+    const cached = await loadCachedNoteIndex();
+    expect(() => getAllTodos(cached!)).not.toThrow();
+    expect(getAllTodos(cached!)).toEqual([]);
   });
 });
