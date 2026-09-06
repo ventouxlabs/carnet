@@ -325,14 +325,22 @@ export default function App() {
                   component={SearchScreen}
                   options={({ navigation }) => ({
                     title: "Search",
-                    // Tags moved out of the Home header (one primary action per
-                    // screen) — browsing by tag now lives with search.
+                    // Tags and Todos both moved out of the Home header (one
+                    // primary action per screen) — secondary browse surfaces
+                    // live with search instead.
                     headerRight: () => (
-                      <IconButton
-                        icon="tag-multiple-outline"
-                        onPress={() => navigation.navigate("TagBrowser")}
-                        accessibilityLabel="Browse tags"
-                      />
+                      <View style={{ flexDirection: "row" }}>
+                        <IconButton
+                          icon="tag-multiple-outline"
+                          onPress={() => navigation.navigate("TagBrowser")}
+                          accessibilityLabel="Browse tags"
+                        />
+                        <IconButton
+                          icon="checkbox-marked-outline"
+                          onPress={() => navigation.navigate("Todos")}
+                          accessibilityLabel="View todos"
+                        />
+                      </View>
                     ),
                   })}
                 />

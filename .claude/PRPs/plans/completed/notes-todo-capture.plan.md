@@ -1,6 +1,6 @@
 # Plan: Vault checklist aggregation — todo index + safe toggle write-back
 
-Status: draft
+Status: shipped
 
 ## Summary
 Users already write `- [ ] task` lines inside notes captured through Carnet's
