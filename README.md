@@ -126,7 +126,7 @@ Open the **Settings** screen in the app and set:
 |---------|-------------|
 | OmniRoute URL | Base URL of your OmniRoute instance (e.g. `https://llm.grepon.cc`) |
 | OmniRoute API key | Your API key — stored in the OS secure keystore via `expo-secure-store` |
-| Capture folder | Path to your Syncthing-watched folder on Android (e.g. `/storage/emulated/0/carnet`). Leave blank to use the app sandbox. |
+| Capture folder | Your Syncthing-watched folder on Android (e.g. `/storage/emulated/0/carnet`) — choose it with **Pick folder**, which grants the app access; typing the path doesn't work on current Android. Leave blank to use the app sandbox. |
 | Karakeep URL | *(Optional)* Base URL of a self-hosted Karakeep, for per-note export (e.g. `https://keep.example.com`) |
 | Karakeep API key | *(Optional)* Karakeep API key (Karakeep UI → User Settings → API Keys) — stored via `expo-secure-store` |
 
