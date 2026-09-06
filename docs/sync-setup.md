@@ -59,19 +59,23 @@ Install **Syncthing** from:
 
 ### On Android (sender)
 
-1. In Syncthing Android, tap **+** to add a folder
-2. Set **Folder Path** to the carnet capture folder:
-   - Default: `/data/user/0/com.yourorg.carnet/files/carnet`
-   - Or a custom path if you configured one in carnet Settings
-     (e.g. `/storage/emulated/0/carnet`)
-3. Set **Folder ID** to `carnet` (must match workstation)
-4. Under **Sharing**, enable sharing with your workstation device
-5. Save
+1. First, give carnet a folder on shared storage: in carnet → Settings →
+   Storage, tap **Pick folder** and choose (or create) a folder such as
+   `/storage/emulated/0/carnet`, then **Save**. The system picker is what
+   grants carnet access to that folder — on current Android, *typing* a
+   shared-storage path into the field does not work (the app holds no
+   storage permission, so it can't read a path it wasn't granted). Existing
+   sandbox captures are moved into the folder on that first save.
+2. In Syncthing Android, tap **+** to add a folder
+3. Set **Folder Path** to the same folder you picked in step 1
+4. Set **Folder ID** to `carnet` (must match workstation)
+5. Under **Sharing**, enable sharing with your workstation device
+6. Save
 
-> If using the default app sandbox path, the Syncthing Android app needs
-> storage permission for that directory. Consider configuring a custom
-> `captureFolderPath` in carnet Settings pointing to
-> `/storage/emulated/0/carnet` (external storage) for easier Syncthing access.
+> Don't try to sync the default app-sandbox location
+> (`/data/user/0/com.ventouxlabs.carnet/files/carnet`) — it's private to
+> carnet, so Syncthing can't read it. A shared-storage folder chosen via
+> **Pick folder** is the supported route.
 
 ### On Workstation (receiver)
 
@@ -89,8 +93,10 @@ Install **Syncthing** from:
 ## 4. Configure carnet
 
 In carnet → Settings:
-- Set **Capture folder** to match the Android Syncthing folder path
-  (leave empty to use the default app sandbox)
+- **Capture folder** should already point at the folder you picked in
+  step 3 (shown as a label like `primary:carnet`). If not, use **Pick
+  folder** — not the text field — then **Save**. Leave it empty only if you
+  don't want to sync (default app sandbox).
 - Enable **OmniRoute (experimental)** toggle
 - Configure **OmniRoute URL** and **API key**
 
@@ -111,7 +117,7 @@ In carnet → Settings:
 |-------|-----|
 | Files not syncing | Check Syncthing is running on both devices; verify folder ID matches |
 | Syncthing killed on Android | Disable battery optimization for Syncthing (see step 1) |
-| Permission denied on folder | Use external storage path (`/storage/emulated/0/carnet`) |
+| Permission denied on folder / captures not appearing | In carnet → Settings → Storage, choose the folder with **Pick folder** (not by typing the path) and tap **Save** — the picker is what grants carnet access on current Android |
 | Obsidian doesn't see new files | Obsidian vault → ⋮ → Reload vault |
 
 ---
