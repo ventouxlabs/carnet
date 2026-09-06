@@ -6,11 +6,14 @@ follow-up hardening that review turned up along the way.
 
 ## State at handoff
 
-`main` at **`fa8f3c9`** (#202), CI green. Mobile suite **2123/2123** (was 2062
+`main` at **`4fd9119`** (#205), CI green. Mobile suite **2123/2123** (was 2062
 at the last handoff), capture-flow fixture gate 314/314. Release **v0.10.0**
-(versionCode 8) published 2026-09-06 15:01 UTC, signed APK workflow-verified.
-Only open issue: **#182** (F-Droid), unchanged. No open PRs, tree clean, no
-active worktrees.
+(versionCode 8) published 2026-09-06 15:01 UTC from `fa8f3c9` (#202), signed
+APK workflow-verified. Three docs/copy PRs landed on `main` after the release
+(#203 this handoff, #204 Pixel 10 results, #205 vault-path helper-text fix) —
+**#205 is user-facing copy that is NOT in v0.10.0**; it ships with the next
+release. Only open issue: **#182** (F-Droid), unchanged. No open PRs, tree
+clean, no active worktrees.
 
 ## The feature — vault-wide todo aggregation (#200, #201)
 
@@ -104,8 +107,11 @@ Things learned that the next session should not rediscover:
   holds no storage permission (`READ/WRITE_EXTERNAL_STORAGE granted=false`, no
   `MANAGE_EXTERNAL_STORAGE`). The scan silently finds nothing. **Use "Pick
   folder"** (SAF) — it grants a `content://` tree URI, shown in the field as
-  the friendly label `primary:carnet`. The helper text is misleading on modern
-  Android; worth a one-line doc fix.
+  the friendly label `primary:carnet`. The misleading helper text — and the
+  same advice in README.md and docs/sync-setup.md (whose troubleshooting row
+  recommended the *failing* typed path as the fix for "permission denied") —
+  was corrected in **#205** (copy only, field kept for legacy-storage
+  devices). Not in v0.10.0; lands with the next release.
 - Saving a real folder for the first time runs `migratePreVaultNotes` (#172):
   the two 8/18 QA notes moved from the app sandbox into the folder ("Moved 2
   earlier captures into your vault"). Non-destructive, by design.
@@ -173,3 +179,6 @@ local) now documents the channel map derived this session:
    `enhance-source-citations.plan.md` stays blocked on the OmniRoute gateway.
 3. `apps/mobile/android/` may still exist locally from this session's release
    build — it's gitignored prebuild output, safe to delete.
+4. The #205 vault-path copy fix is on `main` but not in any published build.
+   Whenever the next release is cut, its changelog should mention that the
+   Storage settings text now points users to "Pick folder".
