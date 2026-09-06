@@ -1,0 +1,3 @@
+- New: a Todos screen aggregates every "- [ ] task" checklist line across your vault in one place, with an Open/All filter — tap to check something off and it writes straight back to that exact line in the note
+- Duplicate or since-edited checklist items are never guessed at: Carnet asks you to make the text unique rather than risk toggling the wrong one
+- The Todos icon lives on the Search screen's header, next to Tags
