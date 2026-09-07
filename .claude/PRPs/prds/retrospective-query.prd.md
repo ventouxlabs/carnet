@@ -103,8 +103,29 @@ references note-folder names at all. The actual change set:
 variant is *not* introduced in this feature. `CaptureMode` is declared twice with
 different members (`storage.ts:6` includes `photo`/`audio`; `queue.ts:63` does not), so
 adding a variant means reconciling two type declarations and every exhaustive consumer
-— real work, unrelated to this feature, for a cosmetic gain (a distinct icon). Deferred
-as an explicit non-goal.
+— real work, unrelated to this feature. Deferred as an explicit non-goal.
+
+**But that shortcut has three traced consequences, and two are functional.** They are
+listed here because an implementer who takes the one-line `inferNoteMode` branch and
+stops will ship all three:
+
+1. **Related-notes self-exclusion breaks (functional).** `noteRelated.ts:34` builds its
+   query with `subdir: relatedSubdirForMode(entry.mode)`, whose own doc comment says
+   "the mode maps 1:1 onto the subdir" — an invariant `Notes/` violates. A synthesis
+   note would report `subdir: "Ideas"` while living in `Notes/`. **Fix: derive the
+   subdir from the uri.** `computeRelatedNotes` already receives `entry.filepath`, so
+   this is a small change at one call site, and it removes a latent assumption rather
+   than adding a special case.
+2. **"Re-enrich" is offered on a synthesis note (functional).**
+   `RecentDetailScreen.tsx:741` gates it on `isReEnrichableMode(entry.mode)`, and
+   `"idea"` is re-enrichable — so the idea prompt would run over a computed answer and
+   overwrite it. **Fix: gate on the uri-derived subdir, excluding `Notes/`.**
+3. **`RecentDetail` labels it "Idea" (cosmetic).** Via `formatMode(entry.mode)` at
+   `:770`. Accepted as-is; it is the only one of the three that is purely display, and
+   fixing it properly is the deferred `CaptureMode` variant.
+
+The pattern: `mode` stays the storage/display default, and the two behaviors that
+actually branch on folder identity read the **uri**, which is authoritative.
 
 ## Design
 
@@ -118,6 +139,7 @@ as an explicit non-goal.
 | `lib/prompts.ts` | edit | `buildRetrospectivePrompt` + `INJECTION_GUARD` over the whole bundle. |
 | `lib/settings.ts` | edit | `retrospective?: string` on `PromptOverrides`; `sanitisePromptOverrides` picks it up via `Object.keys`, no change needed there. |
 | `lib/writer.ts` | edit | `NOTE_SUBDIRS` entry + `writeSynthesis`. |
+| `lib/recentDetailView.ts` + `lib/noteRelated.ts` | edit | Derive subdir from uri, not mode — see the three traced consequences above. |
 | `screens/AskScreen.tsx` | **new** | Renders answer, tappable sources, Save. Gets `AskScreen.test.tsx` per the 7-of-9 screen-coverage norm. |
 | `screens/SearchScreen.tsx` | edit | A button and a `navigation.navigate` — deliberately near-zero growth; the file is already 474 lines. |
 
@@ -149,6 +171,12 @@ Steps 2, 6 and the security section all mean the retrieval set, not the candidat
    text rather than a link to nothing. Taps go `resolveNoteEntry` → `RecentDetail`.
 7. **Save (explicit).** `writeSynthesis` into `Notes/`, slug from the question via the
    existing `slugify`, collision handling inherited from `findCollisionFreeName`.
+   **The write must be paired with `upsertNoteInIndex`**, matching every other write
+   site in the app (`CaptureScreen.tsx:426,706,810`, `RecentDetailScreen.tsx:341`,
+   `TodosScreen.tsx:146`; the queue and edit-session use `invalidateNoteIndex`
+   instead). Without it the saved note is on disk but absent from Search and
+   TagBrowser until a manual pull-to-refresh — which reads to the user as "I saved it
+   and it vanished."
 
 ### Saved note shape
 
@@ -238,18 +266,31 @@ comment at `llmClient.ts:620` explaining exactly this for `enhanceProse`. Pass
 2. A citation to a note **not** in the retrieval set renders as inert text, not a link.
 3. Save writes exactly one file under `Notes/`, with frontmatter that round-trips
    through `lib/frontmatter.ts` unchanged.
-4. The saved note appears in Search and TagBrowser (under `synthesis`) after a refresh —
-   i.e. the new subdir is genuinely indexed, proving the one-line `NOTE_SUBDIRS` change.
-5. With no backend configured, the button surfaces the existing not-configured error
+4. The saved note appears in Search and TagBrowser (under `synthesis`) **without a
+   manual refresh** — proving both the one-line `NOTE_SUBDIRS` change and the paired
+   `upsertNoteInIndex`. A pass that requires pull-to-refresh is a failure of this
+   criterion, not a pass with a caveat.
+5. Opening a saved synthesis note in `RecentDetail` offers **no "Re-enrich" action**,
+   and its related-notes self-exclusion resolves against `Notes/`, not `Ideas/`.
+6. With no backend configured, the button surfaces the existing not-configured error
    rather than a blank answer or an opaque fetch failure.
-6. The whole flow works against a local backend with no network.
+7. The whole flow works against a local backend with no network.
 
-## Open decisions for plan time
+## Open decisions
 
-- Exact budget constants, calibrated against a real Relais model.
+**Before implementation (blocking):**
+
+- **The subdir name.** `Notes/` is the working choice, but this is the one decision that
+  cannot be deferred: it is a one-string change *today* and a migration once users have
+  files in it. Settle it before the first write lands.
+
+**At plan time:**
+
 - Whether the one-time remote-backend explainer is a dialog or an inline dismissible
   banner on `AskScreen`.
-- Whether `Notes/` or a more specific name (`Syntheses/`, `Questions/`) reads better in
-  Obsidian's file tree. `Notes/` is the working choice; it is a one-string change and
-  should be settled before first write, since renaming after users have files is a
-  migration.
+- Budget constants ship **conservative by default** (`MAX_NOTES` 12 / `PER_NOTE_CHARS`
+  2000 / `TOTAL_BUDGET_CHARS` 16000) and are tuned on device. Calibrating against a real
+  Relais model is desirable but explicitly *not* a prerequisite — Relais runs as a
+  separate app on the handset and may not be reachable from the dev environment, so a
+  plan that blocks on it would stall. The constants live in one place for exactly this
+  reason.
