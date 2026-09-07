@@ -278,11 +278,10 @@ comment at `llmClient.ts:620` explaining exactly this for `enhanceProse`. Pass
 
 ## Open decisions
 
-**Before implementation (blocking):**
-
-- **The subdir name.** `Notes/` is the working choice, but this is the one decision that
-  cannot be deferred: it is a one-string change *today* and a migration once users have
-  files in it. Settle it before the first write lands.
+**Settled 2026-09-07:** the subdir is **`Notes/`** (confirmed with the user; `Syntheses/`
+and `Questions/` were the alternatives). This was raised as blocking because it is a
+one-string change before the first write and a migration afterwards. It is now closed —
+do not reopen it at plan time.
 
 **At plan time:**
 
