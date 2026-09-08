@@ -73,3 +73,71 @@ export function packBodies(
   }
   return out;
 }
+
+/** One run of answer text. `linkUri` present ⇒ render as a tappable link. */
+export interface AnswerSegment {
+  text: string;
+  linkUri?: string;
+}
+
+const WIKILINK = /\[\[([^\]]+)\]\]/g;
+
+const normalizeTitle = (s: string): string => s.trim().toLowerCase();
+
+/**
+ * Split an answer into renderable segments, linkifying `[[title]]` ONLY when
+ * the title resolves to a note that was actually in the retrieval set.
+ *
+ * SECURITY: the model is told to cite only supplied notes; this enforces it.
+ * An invented citation renders as its literal source text (brackets included)
+ * rather than becoming a link to nothing — the user can see the model made
+ * something up instead of tapping into a dead end.
+ */
+export function resolveCitations(
+  answer: string,
+  retrievalSet: readonly SelectedNote[],
+): AnswerSegment[] {
+  const byTitle = new Map(retrievalSet.map((n) => [normalizeTitle(n.title), n.uri]));
+  const out: AnswerSegment[] = [];
+  let last = 0;
+  for (const m of answer.matchAll(WIKILINK)) {
+    const start = m.index ?? 0;
+    const uri = byTitle.get(normalizeTitle(m[1]));
+    if (start > last) out.push({ text: answer.slice(last, start) });
+    if (uri) out.push({ text: m[1].trim(), linkUri: uri });
+    else out.push({ text: m[0] }); // inert: keep the literal [[…]]
+    last = start + m[0].length;
+  }
+  if (last < answer.length) out.push({ text: answer.slice(last) });
+  return out;
+}
+
+/**
+ * Assemble the saved note. `today` is injected rather than read from the
+ * clock so the test is deterministic — same reason prompts.ts's todayLocal
+ * exists separately from its callers.
+ */
+export function buildSynthesisNote(
+  question: string,
+  answer: string,
+  sources: readonly SelectedNote[],
+  today: string,
+): string {
+  const safeQuestion = question.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const sourceList = sources.map((s) => `- [[${s.title}]]`).join("\n");
+  return [
+    "---",
+    `created: ${today}`,
+    "tags: [synthesis]",
+    `question: "${safeQuestion}"`,
+    "---",
+    `# ${question}`,
+    "",
+    answer.trim(),
+    "",
+    "## Sources",
+    "",
+    sourceList,
+    "",
+  ].join("\n");
+}

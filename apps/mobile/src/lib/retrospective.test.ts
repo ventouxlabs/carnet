@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_NOTES, PER_NOTE_CHARS, TOTAL_BUDGET_CHARS,
   orderCandidates, pickForRead, packBodies,
+  resolveCitations, buildSynthesisNote,
 } from "./retrospective";
 
 const cand = (uri: string, title: string, fromBodyMatch = false) => ({ uri, title, fromBodyMatch });
@@ -48,5 +49,47 @@ describe("packBodies", () => {
 
   it("skips a uri with no body read (unreadable note)", () => {
     expect(packBodies([cand("u1", "A")], new Map())).toEqual([]);
+  });
+});
+
+const sel = (uri: string, title: string, body = "b") => ({ uri, title, body, truncated: false });
+
+describe("resolveCitations", () => {
+  const set = [sel("file:///v/Ideas/a.md", "Coffee roasting")];
+
+  it("linkifies a citation that is in the retrieval set", () => {
+    const out = resolveCitations("I wrote [[Coffee roasting]] about it.", set);
+    expect(out.find((s) => s.linkUri)).toEqual({
+      text: "Coffee roasting",
+      linkUri: "file:///v/Ideas/a.md",
+    });
+  });
+
+  it("leaves a citation NOT in the retrieval set as inert text", () => {
+    const out = resolveCitations("See [[Invented note]].", set);
+    expect(out.every((s) => s.linkUri === undefined)).toBe(true);
+    expect(out.map((s) => s.text).join("")).toBe("See [[Invented note]].");
+  });
+
+  it("matches titles case-insensitively and ignores surrounding whitespace", () => {
+    const out = resolveCitations("[[  coffee ROASTING  ]]", set);
+    expect(out.find((s) => s.linkUri)?.linkUri).toBe("file:///v/Ideas/a.md");
+  });
+});
+
+describe("buildSynthesisNote", () => {
+  it("emits frontmatter, the answer, and a Sources list", () => {
+    const md = buildSynthesisNote("what about coffee?", "You wrote a lot.", [
+      sel("file:///v/Ideas/a.md", "Coffee roasting"),
+    ], "2026-09-07");
+    expect(md).toContain("tags: [synthesis]");
+    expect(md).toContain('question: "what about coffee?"');
+    expect(md).toContain("## Sources");
+    expect(md).toContain("- [[Coffee roasting]]");
+  });
+
+  it("escapes a double quote in the question so frontmatter stays parseable", () => {
+    const md = buildSynthesisNote('say "hi"', "a", [], "2026-09-07");
+    expect(md).toContain('question: "say \\"hi\\""');
   });
 });
