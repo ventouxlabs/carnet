@@ -59,8 +59,19 @@ vi.mock("../lib/vault", () => ({
   })),
 }));
 
+// The explainer's own gating logic (remote-vs-local provider, the
+// AsyncStorage-backed "seen" flag) is unit-tested in askExplainer.test.ts.
+// Here it's a plain mock so the screen's wiring — show dialog vs. navigate
+// straight through, persist "don't show again", never navigate on Cancel —
+// is what's under test, independent of settings/provider plumbing.
+vi.mock("../lib/askExplainer", () => ({
+  shouldShowAskExplainer: vi.fn(async () => false),
+  markAskExplainerSeen: vi.fn(async () => undefined),
+}));
+
 import SearchScreen from "./SearchScreen";
-import { resolveNoteEntry, searchNoteBodies } from "../lib/vault";
+import { resolveNoteEntry, searchNoteBodies, getNoteIndex } from "../lib/vault";
+import { shouldShowAskExplainer, markAskExplainerSeen } from "../lib/askExplainer";
 
 type ScreenProps = Parameters<typeof SearchScreen>[0];
 
@@ -452,5 +463,191 @@ describe("body search", () => {
       await Promise.resolve();
     });
     expect(screen.getByText("Scanned 1 notes")).toBeTruthy();
+  });
+});
+
+describe("ask entry point", () => {
+  async function typeQuery(value: string) {
+    const input = screen.getByPlaceholderText("Search notes") as HTMLInputElement;
+    fireEvent.change(input, { target: { value } });
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  it("labels the ask button with the number that will actually be sent", async () => {
+    const many: NoteIndexEntry[] = Array.from({ length: 50 }, (_, i) => ({
+      uri: `file:///v/Ideas/note-${i}.md`,
+      subdir: "Ideas",
+      title: `Note ${i}`,
+      createdOrDate: 1_700_000_000_000 + i,
+      tags: [],
+      mode: "idea",
+      excerpt: "",
+    }));
+    vi.mocked(getNoteIndex).mockResolvedValueOnce({ builtAt: 1, notes: many });
+
+    renderScreen();
+    await screen.findByText("Note 0");
+    await typeQuery("hello");
+
+    await waitFor(() => expect(screen.getByText("Ask about these 12 notes")).toBeTruthy());
+  });
+
+  it("uses singular phrasing when exactly one note would be sent", async () => {
+    vi.mocked(getNoteIndex).mockResolvedValueOnce({
+      builtAt: 1,
+      notes: [
+        {
+          uri: "file:///v/Ideas/only.md",
+          subdir: "Ideas",
+          title: "Only note",
+          createdOrDate: 1_700_000_000_000,
+          tags: [],
+          mode: "idea",
+          excerpt: "",
+        },
+      ],
+    });
+
+    renderScreen();
+    await screen.findByText("Only note");
+    await typeQuery("hello");
+
+    await waitFor(() => expect(screen.getByText("Ask about this 1 note")).toBeTruthy());
+  });
+
+  it("hides the ask button when there are no results", async () => {
+    vi.mocked(getNoteIndex).mockResolvedValueOnce({ builtAt: 1, notes: [] });
+
+    renderScreen();
+    await waitFor(() =>
+      expect(screen.getByText("No notes yet — capture something first.")).toBeTruthy(),
+    );
+    await typeQuery("hello");
+
+    await waitFor(() =>
+      expect(screen.getByText("Nothing matches — try fewer filters or different words.")).toBeTruthy(),
+    );
+    expect(screen.queryByText(/^Ask about th/)).toBeNull();
+  });
+
+  it("hides the ask button on an empty query even with results present", async () => {
+    renderScreen();
+    await screen.findByText("First idea");
+    expect(screen.queryByText(/^Ask about th/)).toBeNull();
+  });
+
+  it("navigates straight to Ask when the explainer isn't needed", async () => {
+    vi.mocked(shouldShowAskExplainer).mockResolvedValueOnce(false);
+    const { navigation } = renderScreen();
+    await screen.findByText("First idea");
+    await typeQuery("hello");
+
+    await waitFor(() => expect(screen.getByText("Ask about these 2 notes")).toBeTruthy());
+    fireEvent.click(screen.getByText("Ask about these 2 notes"));
+
+    await waitFor(() =>
+      expect(navigation.navigate).toHaveBeenCalledWith(
+        "Ask",
+        expect.objectContaining({ question: "hello" }),
+      ),
+    );
+  });
+
+  it("builds candidates with body matches (resolved titles) first, then indexed results", async () => {
+    vi.mocked(shouldShowAskExplainer).mockResolvedValueOnce(false);
+    vi.mocked(searchNoteBodies).mockImplementation((_query, onMatch, _onProgress, _signal) => {
+      onMatch({ uri: "file:///v/Journal/2026-07-08.md", snippet: "…matched…" });
+      return Promise.resolve({ scanned: 1, total: 1 });
+    });
+
+    const { navigation } = renderScreen();
+    await screen.findByText("First idea");
+    await typeQuery("hello");
+
+    await waitFor(() => expect(screen.getByText("Search note contents")).toBeTruthy());
+    fireEvent.click(screen.getByText("Search note contents"));
+    await waitFor(() => expect(screen.getByText("…matched…")).toBeTruthy());
+
+    // TWO, not three: the journal day matched both the body scan and the
+    // index, and orderCandidates dedupes it downstream — so three entries in
+    // the payload are only two notes read and sent. The label must name what
+    // is actually exposed, never more (PRD decision 3).
+    await waitFor(() => expect(screen.getByText("Ask about these 2 notes")).toBeTruthy());
+    fireEvent.click(screen.getByText("Ask about these 2 notes"));
+
+    await waitFor(() => expect(navigation.navigate).toHaveBeenCalled());
+    const call = vi.mocked(navigation.navigate).mock.calls[0];
+    expect(call[1]).toEqual(
+      expect.objectContaining({
+        candidates: [
+          { uri: "file:///v/Journal/2026-07-08.md", title: "A journal day", fromBodyMatch: true },
+          { uri: "file:///v/Ideas/first.md", title: "First idea", fromBodyMatch: false },
+          {
+            uri: "file:///v/Journal/2026-07-08.md",
+            title: "A journal day",
+            fromBodyMatch: false,
+          },
+        ],
+      }),
+    );
+  });
+
+  it("shows the one-time explainer before a remote ask, and persists don't-show-again on Continue", async () => {
+    vi.mocked(shouldShowAskExplainer).mockResolvedValueOnce(true);
+    const { navigation } = renderScreen();
+    await screen.findByText("First idea");
+    await typeQuery("hello");
+
+    await waitFor(() => expect(screen.getByText("Ask about these 2 notes")).toBeTruthy());
+    fireEvent.click(screen.getByText("Ask about these 2 notes"));
+
+    await screen.findByText("Sending notes to your provider");
+    expect(navigation.navigate).not.toHaveBeenCalledWith("Ask", expect.anything());
+
+    fireEvent.click(screen.getByText("Don't show again"));
+    fireEvent.click(screen.getByText("Continue"));
+
+    await waitFor(() => expect(markAskExplainerSeen).toHaveBeenCalled());
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      "Ask",
+      expect.objectContaining({ question: "hello" }),
+    );
+  });
+
+  it("cancelling the explainer does not navigate or persist don't-show-again", async () => {
+    vi.mocked(shouldShowAskExplainer).mockResolvedValueOnce(true);
+    const { navigation } = renderScreen();
+    await screen.findByText("First idea");
+    await typeQuery("hello");
+
+    await waitFor(() => expect(screen.getByText("Ask about these 2 notes")).toBeTruthy());
+    fireEvent.click(screen.getByText("Ask about these 2 notes"));
+
+    await screen.findByText("Sending notes to your provider");
+    fireEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() =>
+      expect(screen.queryByText("Sending notes to your provider")).toBeNull(),
+    );
+    expect(navigation.navigate).not.toHaveBeenCalledWith("Ask", expect.anything());
+    expect(markAskExplainerSeen).not.toHaveBeenCalled();
+  });
+
+  it("fails toward showing the explainer, and surfaces an error, when shouldShowAskExplainer rejects", async () => {
+    vi.mocked(shouldShowAskExplainer).mockRejectedValueOnce(new Error("storage unavailable"));
+    const { navigation } = renderScreen();
+    await screen.findByText("First idea");
+    await typeQuery("hello");
+
+    await waitFor(() => expect(screen.getByText("Ask about these 2 notes")).toBeTruthy());
+    fireEvent.click(screen.getByText("Ask about these 2 notes"));
+
+    // A rejection must not read as "nothing happened": the dialog still
+    // appears (fail toward disclosure, never toward silently skipping it)
+    // AND the failure itself is visible, not swallowed by the `void` at the
+    // call site.
+    await screen.findByText("Sending notes to your provider");
+    expect(screen.getByText(/storage unavailable/)).toBeTruthy();
+    expect(navigation.navigate).not.toHaveBeenCalledWith("Ask", expect.anything());
   });
 });

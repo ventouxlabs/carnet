@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "verify:capture-flow": "vitest run src/lib/writer.test.ts src/lib/writerMarkdown.test.ts src/lib/pairedBinaries.test.ts src/lib/noteNaming.test.ts src/lib/mimeTypes.test.ts src/lib/frontmatter.test.ts src/lib/queue.test.ts src/lib/vault.test.ts src/lib/vaultSearch.test.ts src/lib/journalTagIndex.test.ts src/lib/markdownRoundTrip.test.ts test/fixtures/repro.test.ts",
+    "verify:capture-flow": "vitest run src/lib/writer.test.ts src/lib/writerMarkdown.test.ts src/lib/pairedBinaries.test.ts src/lib/noteNaming.test.ts src/lib/mimeTypes.test.ts src/lib/frontmatter.test.ts src/lib/queue.test.ts src/lib/vault.test.ts src/lib/vaultSearch.test.ts src/lib/journalTagIndex.test.ts src/lib/markdownRoundTrip.test.ts test/fixtures/repro.test.ts src/lib/retrospective.test.ts",
     "editor:build": "vite --config ./editor-web/vite.config.mts build && npm run editor:post-build",
     "editor:post-build": "node ../../node_modules/@10play/tentap-editor/scripts/buildEditor.js ./editor-web/generated/index.html"
   },

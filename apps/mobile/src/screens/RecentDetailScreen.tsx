@@ -87,6 +87,7 @@ import { useNoteEditSession } from "../lib/useNoteEditSession";
 import {
   loadCachedNoteIndex,
   resolveNoteEntry,
+  subdirForUri,
   tagsForNote,
   upsertNoteInIndex,
   type NoteIndexEntry,
@@ -738,7 +739,11 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
           canReEnrich={canReEnrich}
           canFinishEnrichment={!missing && isPendingEnrich(body)}
           onFinishEnrichment={fromSheet(() => void handleFinishEnrichment())}
-          canReEnrichGeneral={!missing && isReEnrichableMode(entry.mode)}
+          canReEnrichGeneral={
+            !missing &&
+            isReEnrichableMode(entry.mode) &&
+            subdirForUri(entry.filepath) !== "Notes"
+          }
           onGeneralReEnrich={fromSheet(() => void handleGeneralReEnrich())}
           canTranscribe={canTranscribe}
           canEnhance={canEnhance}

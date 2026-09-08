@@ -8,6 +8,7 @@ import {
   buildIdeaPrompt,
   buildJournalPrompt,
   buildPersonPrompt,
+  buildRetrospectivePrompt,
   buildSharedImagePrompt,
   buildSharedLinkPrompt,
 } from "../lib/prompts";
@@ -21,6 +22,9 @@ const PROMPT_MODES = [
   { key: "sharedLink", label: "Link + Text", icon: "link" },
   // Not a capture mode — this one runs post-hoc, from a saved note's ⋮ sheet.
   { key: "enhanceProse", label: "Enhance prose", icon: "feather" },
+  // Not a capture mode either — this one runs from Search, synthesizing an
+  // answer over many retrieved notes rather than processing one capture.
+  { key: "retrospective", label: "Retrospective query", icon: "history" },
 ] as const;
 
 type PromptModeKey = (typeof PROMPT_MODES)[number]["key"];
@@ -42,6 +46,8 @@ function defaultPromptFor(mode: PromptModeKey): string {
       return buildSharedLinkPrompt("", "", "", null).system;
     case "enhanceProse":
       return buildEnhanceProsePrompt("placeholder").system;
+    case "retrospective":
+      return buildRetrospectivePrompt("placeholder", []).system;
   }
 }
 

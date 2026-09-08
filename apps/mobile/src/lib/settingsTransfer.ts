@@ -159,12 +159,26 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
 }
 
+/** MUST list every key of PromptOverrides (settings.ts). This is used as a
+ * VALIDATOR below, not a filter, so a key missing from here doesn't get
+ * quietly dropped on import — it fails shape validation and the user's whole
+ * settings file is refused. It has drifted twice already (enhanceProse, then
+ * retrospective); add the key here in the same change that adds it there. */
+const PROMPT_OVERRIDE_KEYS: readonly (keyof Settings["promptOverrides"])[] = [
+  "idea",
+  "journal",
+  "person",
+  "sharedImage",
+  "sharedLink",
+  "enhanceProse",
+  "retrospective",
+];
+
 function isPromptOverrides(value: unknown): value is Settings["promptOverrides"] {
   if (!isRecord(value)) return false;
   return Object.entries(value).every(
     ([key, item]) =>
-      ["idea", "journal", "person", "sharedImage", "sharedLink"].includes(key) &&
-      typeof item === "string",
+      (PROMPT_OVERRIDE_KEYS as readonly string[]).includes(key) && typeof item === "string",
   );
 }
 

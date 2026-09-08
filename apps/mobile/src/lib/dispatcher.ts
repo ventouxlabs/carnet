@@ -54,6 +54,7 @@ import {
 import * as providerKeys from "./providerKeys";
 import * as llmClient from "./llmClient";
 import type { EnrichResult, ProviderConfig } from "./llmClient";
+import type { SelectedNote } from "./retrospective";
 import { isLocalNetworkUrl } from "./netAllowlist";
 import { upsertFrontmatterField } from "./frontmatter";
 import {
@@ -455,6 +456,46 @@ export async function enhanceProse(body: string): Promise<EnhanceOutcome> {
       enhanceModel && primaryAttempt ? { ...config, model: enhanceModel } : config;
     primaryAttempt = false;
     return llmClient.enhanceProse(body, effective, overrides.enhanceProse);
+  });
+  return {
+    result: outcome.result,
+    usedFallback: outcome.usedFallback,
+    fallbackProviderId: outcome.fallbackProviderId,
+    providerLabel: provider.label,
+  };
+}
+
+/** What {@link askVault} hands back — same shape as EnhanceOutcome, for the
+ * same reason (the success snackbar names the provider that answered). */
+export interface AskOutcome {
+  result: EnrichResult;
+  usedFallback: boolean;
+  fallbackProviderId: string | null;
+  providerLabel: string;
+}
+
+/**
+ * Answer `question` from `notes`. Routed through the same provider seam as
+ * every other enrichment, so it works against OmniRoute and a local Relais
+ * with no branching here.
+ */
+export async function askVault(
+  question: string,
+  notes: readonly SelectedNote[],
+): Promise<AskOutcome> {
+  const [settings, overrides] = await Promise.all([getSettings(), getPromptOverrides()]);
+  const provider = resolveEnhanceProvider(
+    settings.llmProviders,
+    settings.activeProviderId,
+    settings.enhanceProviderId,
+  );
+  const enhanceModel = settings.enhanceModel.trim();
+  let primaryAttempt = true;
+  const outcome = await withFallbackChain(settings, provider.id, (config) => {
+    const effective =
+      enhanceModel && primaryAttempt ? { ...config, model: enhanceModel } : config;
+    primaryAttempt = false;
+    return llmClient.askRetrospective(question, notes, effective, overrides.retrospective);
   });
   return {
     result: outcome.result,

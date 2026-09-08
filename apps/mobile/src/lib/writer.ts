@@ -45,7 +45,9 @@ import {
 import { listPairedBinaries, mimeFromFilename } from "./pairedBinaries";
 import { extractH1, personFilename } from "./noteNaming";
 import { toggleChecklistLine } from "./checklist";
+import { NOTE_SUBDIRS, type NoteSubdir } from "./noteSubdirs";
 
+export type { NoteSubdir };
 
 /** Upper bound on collision-bumped filename variants ({stem}-2.md … {stem}-99.md).
  * If 99 variants are taken, the user has a real cleanup problem and we throw
@@ -169,6 +171,28 @@ export async function writeIdea(
   const ideasUri = await root.fs.findOrCreateSubdir(root.uri, "Ideas");
   const filename = await findCollisionFreeName(ideasUri, slug, ".md", root.fs);
   const filepath = await writeNewFile(ideasUri, filename, markdown, root.fs);
+  return { filepath };
+}
+
+/**
+ * Write a synthesis note (a saved retrospective-query answer) under Notes/.
+ *
+ * Notes/ holds computed artifacts that cite other notes, as distinct from
+ * Ideas/ which holds things the user jotted. Create-only with collision
+ * suffixing, exactly like writeIdea — a re-asked question saves a second file
+ * rather than overwriting the first answer.
+ *
+ * Does NOT touch the note index; the caller pairs this with
+ * upsertNoteInIndex, matching every other write site.
+ */
+export async function writeSynthesis(
+  slug: string,
+  markdown: string,
+): Promise<{ filepath: string }> {
+  const root = await resolveRoot();
+  const notesUri = await root.fs.findOrCreateSubdir(root.uri, "Notes");
+  const filename = await findCollisionFreeName(notesUri, slug, ".md", root.fs);
+  const filepath = await writeNewFile(notesUri, filename, markdown, root.fs);
   return { filepath };
 }
 
@@ -449,11 +473,6 @@ export async function updateNoteIfUnchanged(
   return { ok: true };
 }
 
-/** Vault subdirs that hold markdown notes. Photos/Audio/Files hold binaries
- * and are deliberately excluded from note enumeration. */
-const NOTE_SUBDIRS = ["Ideas", "Journal", "People"] as const;
-export type NoteSubdir = (typeof NOTE_SUBDIRS)[number];
-
 export interface NoteFileRef {
   /** Full readable URI (file:// path or SAF content:// document URI). */
   uri: string;
@@ -482,7 +501,7 @@ async function listNoteDirMarkdown(): Promise<NoteFileRef[]> {
 
 /**
  * Enumerate every CANONICAL markdown note across the vault's note subdirs
- * (Ideas, Journal, People). Binaries (Photos/Audio/Files) are excluded, and so
+ * (Ideas, Journal, Notes, People). Binaries (Photos/Audio/Files) are excluded, and so
  * are Syncthing `*.sync-conflict-*` copies — before that filter they were
  * indexed as regular notes, appearing in Search and inflating tag counts.
  * This is the source the tag index scans — Recents (AsyncStorage, max 20) is a
@@ -500,7 +519,7 @@ export async function listNoteFiles(): Promise<NoteFileRef[]> {
  *
  * Deliberately does NOT reuse listNoteDirMarkdown's `findOrCreateSubdir` —
  * that CREATES the subdir on read, which would fabricate empty
- * Ideas/Journal/People folders inside a never-used internal root on a fresh
+ * Ideas/Journal/Notes/People folders inside a never-used internal root on a fresh
  * install (and make an "empty root → no migration" test lie). This uses the
  * read-only `findSubdir`, which returns null for an absent subdir instead.
  * Syncthing conflict copies are excluded, matching listNoteFiles' scope.

@@ -54,6 +54,7 @@ const fetchMock = vi.fn();
 globalThis.fetch = fetchMock as unknown as typeof fetch;
 
 import {
+  askRetrospective,
   enrichIdea,
   enrichJournal,
   enrichPerson,
@@ -71,7 +72,9 @@ import {
   buildJournalPrompt,
   buildPersonPrompt,
   buildPromoteIdeaPrompt,
+  buildRetrospectivePrompt,
 } from "./prompts";
+import type { SelectedNote } from "./retrospective";
 
 interface RequestBody {
   model: string;
@@ -369,6 +372,49 @@ describe("promoteIdea", () => {
     expect(body.messages[0].content).toBe(prompt.system);
     expect(body.messages[1].content).toBe(prompt.user);
     expect(result.markdown).toBe(updatedMd);
+  });
+});
+
+describe("askRetrospective", () => {
+  const NOTES: SelectedNote[] = [
+    { uri: "file:///v/Ideas/a.md", title: "A", body: "notes about X", truncated: false },
+  ];
+
+  it("POSTs the retrospective prompt and returns the synthesized answer", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("You wrote about X in March."));
+
+    const result = await askRetrospective("What did I write about X?", NOTES, CONFIG);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as RequestBody;
+    const prompt = buildRetrospectivePrompt("What did I write about X?", NOTES);
+    expect(body.messages[0].content).toBe(prompt.system);
+    expect(body.messages[1].content).toBe(prompt.user);
+    expect(result.markdown).toBe("You wrote about X in March.");
+  });
+
+  it("rejects a blank config URL immediately, without ever POSTing", async () => {
+    await expect(
+      askRetrospective("q?", NOTES, { ...CONFIG, baseUrl: "" }),
+    ).rejects.toThrow(/not configured/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the override system message when configured", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("answer"));
+
+    await askRetrospective(
+      "q?",
+      NOTES,
+      CONFIG,
+      "You are an extremely terse retrospective assistant.",
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as RequestBody;
+    expect(body.messages[0].content).toBe(
+      "You are an extremely terse retrospective assistant.",
+    );
   });
 });
 

@@ -26,7 +26,8 @@ import {
   normalizeTag,
   stripFrontmatter,
 } from "./frontmatter";
-import { listNoteFiles, readNote, type NoteFileRef, type NoteSubdir } from "./writer";
+import { listNoteFiles, readNote, type NoteFileRef } from "./writer";
+import { parentSegment, subdirForUri, type NoteSubdir } from "./noteSubdirs";
 import type { CaptureEntry, CaptureMode } from "./storage";
 
 /** One AsyncStorage blob holding per-note metadata for browse + search; the tag
@@ -303,7 +304,14 @@ export async function getNoteIndex(): Promise<NoteIndex> {
 export async function upsertNoteInIndex(uri: string, markdown: string): Promise<void> {
   const cached = await loadCachedNoteIndex();
   if (!cached) return;
-  const entry = buildNoteEntry(uri, subdirForMode(inferNoteMode(uri)), markdown);
+  // The uri is authoritative; the mode round-trip is only a fallback. Going
+  // through subdirForMode alone would record "Ideas" for anything outside
+  // Journal/People — including a Notes/ synthesis note — while a full rebuild
+  // reads "Notes" straight off the NoteFileRef, so the same note's subdir
+  // flipped on the next pull-to-refresh. subdirForUri returns null outside the
+  // known note subdirs, which is when the mode collapse is the best guess left.
+  const subdir = subdirForUri(uri) ?? subdirForMode(inferNoteMode(uri));
+  const entry = buildNoteEntry(uri, subdir, markdown);
   const idx = cached.notes.findIndex((n) => n.uri === uri);
   const notes =
     idx === -1
@@ -394,18 +402,16 @@ function basenameTitle(uri: string): string {
  * parent segment (not a substring anywhere in the path) so a vault rooted under
  * a folder literally named "Journal"/"People" doesn't misclassify its Ideas. */
 export function inferNoteMode(uri: string): CaptureMode {
-  let decoded = uri;
-  try {
-    decoded = decodeURIComponent(uri);
-  } catch {
-    /* keep raw */
-  }
-  const segments = decoded.split("/").filter(Boolean);
-  const parent = segments[segments.length - 2];
+  const parent = parentSegment(uri);
   if (parent === "Journal") return "journal";
   if (parent === "People") return "person";
   return "idea";
 }
+
+// subdirForUri is the uri-authoritative counterpart to inferNoteMode above
+// (mode collapses every unrecognized parent to "idea"); re-exported here so
+// existing callers that import it from "./vault" keep working unchanged.
+export { subdirForUri };
 
 /** Parse a `created:`/`date:` frontmatter value to epoch ms, or null. */
 function frontmatterDateMs(markdown: string): number | null {
@@ -569,6 +575,46 @@ function extractSnippet(strippedBody: string, query: string): string | null {
   const prefix = start > 0 ? "…" : "";
   const suffix = end < strippedBody.length ? "…" : "";
   return prefix + strippedBody.slice(start, end).replace(/\s+/g, " ").trim() + suffix;
+}
+
+/**
+ * Read the frontmatter-stripped bodies of `uris`, keyed by uri.
+ *
+ * Lives here rather than in the calling screen so the vault scan's concurrency
+ * bound (SCAN_CONCURRENCY) stays owned by the module that owns the scan —
+ * exporting mapWithConcurrency to let a screen pick its own limit is how one
+ * screen ends up reading the vault 50-wide.
+ *
+ * Frontmatter is stripped because every consumer wants the prose:
+ * buildRetrospectivePrompt renders the body verbatim into a tightly budgeted
+ * prompt (PER_NOTE_CHARS), and YAML the model has no use for would eat that
+ * budget. Same "body" convention as searchNoteBodies and buildNoteIndex.
+ *
+ * Unreadable notes (deleted mid-scan, permission revoked) are simply absent
+ * from the returned map rather than rejecting the whole read — matching
+ * buildNoteIndex and searchNoteBodies, and matching packBodies, which already
+ * treats a missing uri as "not selected". Aborting starts no NEW reads;
+ * already-issued ones finish (there is no read-cancel primitive for
+ * file:// or SAF).
+ */
+export async function readNoteBodies(
+  uris: readonly string[],
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const bodies = new Map<string, string>();
+  await mapWithConcurrency(
+    uris,
+    SCAN_CONCURRENCY,
+    async (uri) => {
+      try {
+        bodies.set(uri, stripFrontmatter(await readNote(uri)));
+      } catch {
+        // unreadable — skip it, exactly as buildNoteIndex does
+      }
+    },
+    signal,
+  );
+  return bodies;
 }
 
 /**

@@ -49,7 +49,8 @@ writer.test.ts (file://) + writerSaf.test.ts (SAF harness).
 `listNoteFiles` excludes Syncthing `*.sync-conflict-*` copies;
 `listSyncConflictFiles` enumerates them (lib/syncConflicts.ts pairs them —
 Home banner + review dialog).
-`writeIdea` `writePerson` `writeBinary` `appendJournal` `updateNote` `moveToArchive`
+`writeIdea` `writeSynthesis` (Notes/{slug}.md — saved retrospective-query answers)
+`writePerson` `writeBinary` `appendJournal` `updateNote` `moveToArchive`
 `readNote` `listNoteFiles`; attachments `injectAttachments` `listPairedBinaries`
 `resolvePairedUri` (read-only `findSubdir` — never creates dirs) `stripPairedBinaryLinks`;
 `slugify` `personFilename` `mimeFromFilename`.

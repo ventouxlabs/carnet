@@ -47,10 +47,12 @@ import {
   buildJournalPrompt,
   buildPersonPrompt,
   buildPromoteIdeaPrompt,
+  buildRetrospectivePrompt,
   buildSharedImagePrompt,
   buildSharedLinkPrompt,
   type PromptPair,
 } from "./prompts";
+import type { SelectedNote } from "./retrospective";
 import { withTimeout } from "./httpClient";
 import { fetchUrlPreview, type UrlPreview } from "./urlpreview";
 import type { IdeaStatus } from "@carnet/shared";
@@ -641,6 +643,38 @@ export async function enhanceProse(
     config.apiKey,
     model,
     withSystemOverride(buildEnhanceProsePrompt(body), override),
+    "journal",
+    config.label,
+    ENHANCE_TIMEOUT_MS,
+    config.allowInsecureTransport ?? false,
+  );
+}
+
+/**
+ * Synthesize an answer to `question` over `notes`.
+ *
+ * The `"journal"` NoteType is inert for this call, and deliberately so — same
+ * reasoning as enhanceProse above (see the comment at the top of that
+ * function): the response is bare prose with no frontmatter, and
+ * chatCompletion's sanitize pass neutralizes Templater/HTML/dataviewjs
+ * regardless of which NoteType member is passed.
+ *
+ * Reuses ENHANCE_TIMEOUT_MS: the payload is larger than an enrich call but of
+ * the same order, and the request shape is identical.
+ */
+export async function askRetrospective(
+  question: string,
+  notes: readonly SelectedNote[],
+  config: ProviderConfig,
+  override?: string,
+): Promise<EnrichResult> {
+  const model = assertModelConfigured(config.model, config.label);
+  assertUrlConfigured(config.baseUrl, config.label);
+  return chatCompletion(
+    config.baseUrl,
+    config.apiKey,
+    model,
+    withSystemOverride(buildRetrospectivePrompt(question, notes), override),
     "journal",
     config.label,
     ENHANCE_TIMEOUT_MS,

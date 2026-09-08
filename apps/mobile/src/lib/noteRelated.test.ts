@@ -2,10 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 // vault.ts pulls AsyncStorage + expo-file-system at import time; only its pure
 // tagsForNote matters here, so restate it over the real frontmatter parser
-// (same shape the RecentDetailScreen oracle uses).
+// (same shape the RecentDetailScreen oracle uses). subdirForUri is pure
+// (lives in ./noteSubdirs, which vault.ts merely re-exports), so it's
+// imported for real rather than hand-copied.
 vi.mock("./vault", async () => {
   const fm = await import("./frontmatter");
-  return { tagsForNote: (md: string) => fm.getFrontmatterTags(md) };
+  const { subdirForUri } = await import("./noteSubdirs");
+  return {
+    tagsForNote: (md: string) => fm.getFrontmatterTags(md),
+    subdirForUri,
+  };
 });
 
 import { computeRelatedNotes } from "./noteRelated";
@@ -90,24 +96,55 @@ describe("computeRelatedNotes", () => {
     expect(computeRelatedNotes(body, ENTRY, index(self))).toEqual([]);
   });
 
-  it("maps the capture mode onto the subdir used for self-exclusion", () => {
-    // Same basename in a DIFFERENT subdir must not be excluded as self: a
-    // journal-mode entry queries with subdir "Journal".
+  it("derives the subdir from the uri, not the mode, for self-exclusion", () => {
+    // Mode and uri deliberately DISAGREE here (mode: "person" would map to
+    // "People" via relatedSubdirForMode, but the uri is actually in Journal/)
+    // so this test can only pass under uri-derivation — under the old
+    // mode-derived subdir, the query would carry "People", which wrongly
+    // matches this same-basename People/ note's subdir + basename and
+    // excludes it as "self", dropping a genuinely different, genuinely
+    // related note.
     const body = "---\ntags: [hydroponics]\n---\n# Open note\n";
-    const journalEntry: CaptureEntry = {
+    const mismatchedEntry: CaptureEntry = {
       ...ENTRY,
-      mode: "journal",
+      mode: "person",
       filepath: "file:///v/Journal/open-note.md",
     };
     const sameNameOtherSubdir = note({
-      uri: "file:///v/Ideas/open-note.md",
-      subdir: "Ideas",
+      uri: "file:///v/People/open-note.md",
+      subdir: "People",
       tags: ["hydroponics"],
     });
 
     expect(
-      computeRelatedNotes(body, journalEntry, index(sameNameOtherSubdir)),
+      computeRelatedNotes(body, mismatchedEntry, index(sameNameOtherSubdir)),
     ).toEqual([sameNameOtherSubdir]);
+  });
+
+  it("excludes a Notes/ note against Notes/, not Ideas/ (mode reports idea for Notes/)", () => {
+    // inferNoteMode falls back to "idea" for any uri it doesn't recognize,
+    // including Notes/ — so a synthesis note's entry.mode is "idea" even
+    // though it lives in Notes/. Under the OLD mode-derived subdir, the query
+    // would carry subdir "Ideas" (relatedSubdirForMode("idea")), which wrongly
+    // matches this same-basename Ideas/ note's subdir + basename and excludes
+    // it as "self" — dropping a genuinely different, genuinely related note.
+    // The uri-derived subdir ("Notes") does not match "Ideas", so the note
+    // survives as a real related hit.
+    const body = "---\ntags: [hydroponics]\n---\n# Synth\n";
+    const synthEntry: CaptureEntry = {
+      ...ENTRY,
+      mode: "idea",
+      filepath: "file:///v/Notes/synth.md",
+    };
+    const sameNameInIdeas = note({
+      uri: "file:///v/Ideas/synth.md",
+      subdir: "Ideas",
+      tags: ["hydroponics"],
+    });
+
+    expect(computeRelatedNotes(body, synthEntry, index(sameNameInIdeas))).toEqual([
+      sameNameInIdeas,
+    ]);
   });
 
   it("returns nothing when no indexed note shares a tag or title term", () => {

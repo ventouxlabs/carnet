@@ -50,10 +50,14 @@ vi.mock("../lib/writer", async () => {
 // relatedNotes is pure — imported real; the index feed below controls it.
 vi.mock("../lib/vault", async () => {
   const fm = await import("../lib/frontmatter");
+  const { subdirForUri } = await import("../lib/noteSubdirs");
   return {
     getTagIndex: vi.fn(async () => ({ builtAt: 1, tags: [] })),
     invalidateNoteIndex: vi.fn(async () => {}),
     tagsForNote: (md: string) => fm.getFrontmatterTags(md),
+    // subdirForUri is pure (lives in ../lib/noteSubdirs, which vault.ts merely
+    // re-exports), so it's imported for real rather than hand-copied.
+    subdirForUri,
     // null index → the Related card stays hidden in existing tests.
     loadCachedNoteIndex: vi.fn(async () => null),
     resolveNoteEntry: vi.fn(async () => null),
@@ -566,6 +570,24 @@ describe("RecentDetailScreen — re-enrich family", () => {
   it("does not offer Re-enrich for a mode with no text enrichment path", async () => {
     vi.mocked(readNote).mockResolvedValue(ENRICHED_MD);
     const { navigation } = renderScreen({ ...ENTRY, mode: "audio" });
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+
+    expect(await screen.findByText("File info")).toBeTruthy();
+    expect(screen.queryByText("Re-enrich")).toBeNull();
+  });
+
+  it("does not offer Re-enrich for a synthesis note in Notes/, even though its mode reports idea", async () => {
+    // inferNoteMode falls back to "idea" for Notes/ (no CaptureMode variant
+    // exists for it yet), so isReEnrichableMode(entry.mode) alone would wrongly
+    // pass. Re-enrich on a synthesis note would run the idea prompt over a
+    // computed answer and overwrite it — must be gated by the uri, not mode.
+    vi.mocked(readNote).mockResolvedValue(ENRICHED_MD);
+    const { navigation } = renderScreen({
+      ...ENTRY,
+      mode: "idea",
+      filepath: "file:///v/Notes/synth.md",
+    });
     await screen.findByText(/Hello body text\./);
     openActionsSheet(navigation);
 

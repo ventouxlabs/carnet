@@ -95,6 +95,7 @@ const fetchMock = vi.fn();
 globalThis.fetch = fetchMock as unknown as typeof fetch;
 
 import {
+  askVault,
   enrichIdea,
   enhanceProse,
   enrichJournal,
@@ -605,5 +606,76 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
       messages: Array<{ content: string }>;
     };
     expect(body.messages[0].content).not.toContain("OVERRIDE-");
+  });
+});
+
+describe("askVault routing", () => {
+  it("resolves the enhance provider and returns its label with the result", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("You wrote about X in March."));
+
+    const outcome = await askVault("What did I write about X?", [
+      { uri: "file:///v/Ideas/a.md", title: "A", body: "notes about X", truncated: false },
+    ]);
+
+    expect(outcome.providerLabel).toBe("OmniRoute");
+    expect(outcome.result.markdown).toBe("You wrote about X in March.");
+    expect(outcome.usedFallback).toBe(false);
+  });
+
+  it("falls back to the fallback provider on a retryable primary failure", async () => {
+    // Same shape as "does NOT force enhanceModel onto the fallback provider"
+    // above: the primary attempt fails in the unreachable class, triggering
+    // exactly one retry against the configured fallback.
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      ...BASE_SETTINGS,
+      fallbackProviderId: "relais",
+      llmProviders: BASE_SETTINGS.llmProviders.map((p) =>
+        p.id === "relais" ? { ...p, model: "local-small" } : p,
+      ),
+    });
+    fetchMock.mockRejectedValueOnce(new TypeError("Network request failed"));
+    fetchMock.mockResolvedValueOnce(makeOkResponse("fallback answer"));
+
+    const outcome = await askVault("q?", []);
+
+    expect(outcome.usedFallback).toBe(true);
+    expect(outcome.fallbackProviderId).toBe("relais");
+    expect(outcome.result.markdown).toBe("fallback answer");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT force enhanceModel onto the fallback provider", async () => {
+    // Verbatim twin of the enhanceProse case above, and that duplication is
+    // the point: askVault carries its own copy of the primary-only model
+    // latch. Until this test existed the copy was inert under test —
+    // BASE_SETTINGS.enhanceModel is "" and the askVault fallback test above
+    // never inspects a request body, so deleting `primaryAttempt` from
+    // askVault failed nothing and the two copies could silently drift. This
+    // is the feature's headline cross-backend path (remote primary, local
+    // Relais fallback), which is exactly where forcing a primary's model id
+    // onto an endpoint that never listed it turns a recoverable network blip
+    // into a hard "model not found".
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      ...BASE_SETTINGS,
+      enhanceModel: "anthropic/claude-sonnet-5",
+      fallbackProviderId: "relais",
+      llmProviders: BASE_SETTINGS.llmProviders.map((p) =>
+        p.id === "relais" ? { ...p, model: "local-small" } : p,
+      ),
+    });
+    fetchMock.mockRejectedValueOnce(new TypeError("Network request failed"));
+    fetchMock.mockResolvedValueOnce(makeOkResponse("fallback answer"));
+
+    await askVault("q?", []);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const primary = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string,
+    ) as { model: string };
+    const fallback = JSON.parse(
+      (fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string,
+    ) as { model: string };
+    expect(primary.model).toBe("anthropic/claude-sonnet-5");
+    expect(fallback.model).toBe("local-small");
   });
 });

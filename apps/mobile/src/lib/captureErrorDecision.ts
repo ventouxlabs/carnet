@@ -69,3 +69,26 @@ export function classifyCaptureError(
   }
   return { kind: "transient" };
 }
+
+/**
+ * The message to surface when a retrospective ask fails.
+ *
+ * Deliberately NOT classifyCaptureError: that function's three-way split
+ * exists to decide whether CaptureScreen should enqueue, and its `transient`
+ * branch carries no copy because the queue is the user-visible outcome there.
+ * Ask has no queue — a timeout has to say something — so this collapses the
+ * split to the only distinction that changes the wording: a config problem
+ * names the provider and points at Settings, everything else surfaces the
+ * provider's own message, which is more specific than anything generic.
+ *
+ * Behaviourally identical to classifyCaptureError on every branch that has
+ * copy (an insecure-transport refusal falls through to its verbatim message,
+ * exactly as that function returns it).
+ */
+export function askErrorMessage(
+  e: unknown,
+  providerLabel: string = UNKNOWN_PROVIDER_LABEL,
+): string {
+  if (isNotConfiguredError(e)) return notConfiguredMessage(providerLabel);
+  return e instanceof Error ? e.message : String(e);
+}

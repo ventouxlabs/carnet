@@ -77,7 +77,11 @@ export function isAllowedPlaintextHost(url: string): boolean {
  *     fast-fail-for-the-offline-queue cloud one.
  *   - providerReadiness.ts's isLocalProvider — which providers get the
  *     "make sure it's running" reachability hint vs. always-on cloud
- *     treatment.
+ *     treatment. In turn consumed (transitively, still via isLocalProvider)
+ *     by askExplainer.ts's shouldShowAskExplainer, which skips the
+ *     retrospective-query privacy disclosure for a local/tailnet backend —
+ *     no credential is at stake there either, just whether a dismissible
+ *     notice shows.
  *   - dispatcher.ts's assertVisionCredentialPresent — whether a missing API
  *     key gets an advisory "usually requires one" banner.
  *
