@@ -32,6 +32,7 @@ vi.mock("expo-secure-store", () => ({
 import {
   DEFAULT_OMNIROUTE_MODEL,
   DEFAULT_VISION_MODEL,
+  getPromptOverrides,
   getSettings,
   hasLocalLlmApiKey,
   hasOmniRouteApiKey,
@@ -496,6 +497,24 @@ describe("fallbackProviderId/visionProviderId default via the v3 migration", () 
 
     await saveSettings({ ...base, enhanceModel: "" });
     expect((await getSettings()).enhanceModel).toBe("");
+  });
+
+  it("round-trips a retrospective prompt override, sanitised of surrounding whitespace", async () => {
+    const base = await getSettings();
+    await saveSettings({
+      ...base,
+      promptOverrides: { ...base.promptOverrides, retrospective: "  custom  " },
+    });
+    expect((await getPromptOverrides()).retrospective).toBe("custom");
+  });
+
+  it("sanitises a whitespace-only retrospective override to absent", async () => {
+    const base = await getSettings();
+    await saveSettings({
+      ...base,
+      promptOverrides: { ...base.promptOverrides, retrospective: "   " },
+    });
+    expect((await getPromptOverrides()).retrospective).toBeUndefined();
   });
 
   it("treats a non-string persisted value as corrupt and falls back to null", async () => {

@@ -11,6 +11,8 @@
  * inside the delimiters as data, not as instructions.
  */
 
+import type { SelectedNote } from "./retrospective";
+
 export interface PromptPair {
   system: string;
   user: string;
@@ -352,5 +354,50 @@ ${INJECTION_GUARD}
 Respond ONLY with the complete updated Obsidian markdown (keep the frontmatter
 format identical, just change status and optionally expand the body).`;
   const user = `<USER_INPUT>\n${currentMarkdown}\n</USER_INPUT>`;
+  return { system, user };
+}
+
+/**
+ * Prompt for the retrospective query. Deliberately NOT a reuse of
+ * buildEnhanceProsePrompt: that one is instructed to ADD real-world fact,
+ * which is the exact opposite of what is wanted here.
+ *
+ * Every other builder in this file wraps ONE user-authored capture in
+ * INJECTION_GUARD. This one bundles up to twelve notes — a single hostile
+ * note ("ignore previous instructions") rides along with eleven innocent
+ * ones — so every note body goes inside its own <USER_INPUT> tags, and each
+ * note is individually delimited by a `### [[Title]]` header so the model
+ * can attribute a claim to the source it came from.
+ */
+export function buildRetrospectivePrompt(
+  question: string,
+  notes: readonly SelectedNote[],
+): PromptPair {
+  const system = `You are helping someone search their own personal notes. You are given a
+question and a set of notes they wrote themselves.
+
+1. ANSWER ONLY FROM THE SUPPLIED NOTES. Do not use general knowledge. If the
+   notes do not answer the question, say so plainly and briefly — "your notes
+   don't say much about this" is a correct and useful answer.
+2. NEVER INVENT. Do not attribute a thought, plan, opinion or fact to the
+   author that is not present in the notes.
+3. CITE WITH [[Note Title]] using EXACTLY the titles given below. Cite the
+   note each claim came from, inline, as you make the claim. Never cite a
+   title that does not appear below.
+4. Write in second person ("you wrote", "you kept coming back to"). Be
+   concise — a few short paragraphs at most.
+5. Some notes may be marked truncated. Do not treat a truncated note as
+   complete; do not speculate about what the omitted part said.
+
+${INJECTION_GUARD}`;
+
+  const rendered = notes
+    .map(
+      (n) =>
+        `### [[${n.title}]]${n.truncated ? " (truncated)" : ""}\n<USER_INPUT>\n${n.body}\n</USER_INPUT>`,
+    )
+    .join("\n\n");
+
+  const user = `Question: ${question}\n\nNotes:\n\n${rendered}`;
   return { system, user };
 }

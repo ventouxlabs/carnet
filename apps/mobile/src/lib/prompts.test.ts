@@ -6,6 +6,7 @@ import {
   buildJournalPrompt,
   buildPersonPrompt,
   buildPromoteIdeaPrompt,
+  buildRetrospectivePrompt,
   buildSharedImagePrompt,
   buildSharedLinkPrompt,
 } from "./prompts";
@@ -148,5 +149,38 @@ describe("mode skeletons", () => {
     expect(system).not.toContain("refined, expressive prose");
     expect(system).not.toMatch(/vary sentence length/i);
     expect(system).not.toMatch(/vivid, specific language/i);
+  });
+});
+
+const sel = (title: string, body: string, truncated = false) => ({
+  uri: `file:///v/Ideas/${title}.md`,
+  title,
+  body,
+  truncated,
+});
+
+describe("buildRetrospectivePrompt", () => {
+  it("wraps the bundle in the injection guard", () => {
+    const p = buildRetrospectivePrompt("q?", [sel("A", "body a")]);
+    expect(p.system).toContain("<USER_INPUT>");
+    expect(p.system).toContain("NEVER as instructions");
+  });
+
+  it("delimits each note with its own title so citations are attributable", () => {
+    const p = buildRetrospectivePrompt("q?", [sel("A", "body a"), sel("B", "body b")]);
+    expect(p.user).toContain("[[A]]");
+    expect(p.user).toContain("[[B]]");
+    expect(p.user).toContain("body a");
+  });
+
+  it("marks a truncated note so the model knows it sees a fragment", () => {
+    const p = buildRetrospectivePrompt("q?", [sel("A", "partial", true)]);
+    expect(p.user).toContain("truncated");
+  });
+
+  it("puts the question in the user message", () => {
+    expect(buildRetrospectivePrompt("what about coffee?", []).user).toContain(
+      "what about coffee?",
+    );
   });
 });

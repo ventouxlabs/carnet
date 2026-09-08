@@ -69,6 +69,10 @@ export interface PromptOverrides {
    * capture modes above, this one's default output is bare prose — see
    * prompts.ts's buildEnhanceProsePrompt. */
   enhanceProse?: string;
+  /** Override for the retrospective query's synthesis prompt. Like
+   * enhanceProse, not a capture mode — its default output is bare prose.
+   * See prompts.ts's buildRetrospectivePrompt. */
+  retrospective?: string;
 }
 
 export interface Settings {
