@@ -86,10 +86,50 @@ informational skip, not an error.
 ## Enrichment dispatch — `lib/dispatcher.ts` (B7 seam, COMPLETE)
 ALL backend-divergent calls cross it now: the 6 enrich fns + predicates PLUS
 `transcribeAudio` / `autoTranscribeIfEnabled` / `ocrCardViaVision` /
-`listModels`. Screens/components import from dispatcher only; payload caps
-(`assertBase64UnderLimit`, `MAX_*`) stay omniroute imports by design.
+`listModels` / `askVault`. Screens/components import from dispatcher only;
+payload caps (`assertBase64UnderLimit`, `MAX_*`) stay omniroute imports by design.
+`askVault` (retrospective query) mirrors `enhanceProse` exactly — same
+`resolveEnhanceProvider`, same `withFallbackChain`, same primary-attempt-only
+model override — so it works against OmniRoute and a local Relais unbranched.
 Prompts (`lib/prompts.ts`, tested): idea/journal emit `## Actions` as `- [ ]`
 checkboxes, faithful-only, section omitted when none.
+`buildRetrospectivePrompt` wraps EACH note body in its own `<USER_INPUT>` block
+(every other prompt wraps a single capture) and runs bodies through `stripGuard`
+/ titles through `stripTitle` — a hostile note must not be able to forge the
+delimiters, open a header naming a real note in the bundle, and get a fabricated
+claim attributed to it. Body brackets are deliberately kept (legitimate
+cross-references); title brackets are stripped.
+
+## Retrospective query — `lib/retrospective.ts` (pure, 209 ln)
+Selection and presentation for "what have I been thinking about X?".
+`orderCandidates` (body matches first, then Search's own order, deduped by uri —
+it owns dedup, callers must not re-implement it) → `pickForRead` (`MAX_NOTES`) →
+`vault.readNoteBodies` (bounded at `SCAN_CONCURRENCY`, abortable, frontmatter
+stripped) → `packBodies` (`PER_NOTE_CHARS` / `TOTAL_BUDGET_CHARS`, skips
+unreadable and empty bodies) → `dispatcher.askVault` → `sanitizeMarkdown` →
+`normalizeLeadingMarkdown` → `resolveCitations`.
+`resolveCitations` linkifies `[[Title]]` ONLY when the title is in the retrieval
+set; anything else renders as its literal bracketed text, so an invented
+citation is visible rather than a link to nowhere. It answers "does this note
+exist?", never "did this claim come from it?" — that second property is what the
+prompt-side delimiter stripping protects.
+`normalizeLeadingMarkdown` is DISPLAY-ONLY; `buildSynthesisNote` saves real
+markdown because Obsidian renders it natively (a test reads `writeSynthesis`'s
+payload to keep those apart).
+`lib/askExplainer.ts` (61 ln) gates the one-time remote-backend disclosure on
+`isLocalProvider`; `carnet:askExplainerSeen:v1`.
+
+## Vault subdir derivation — `lib/noteSubdirs.ts` (pure, zero imports, 45 ln)
+`NOTE_SUBDIRS` / `NoteSubdir` / `parentSegment` / `subdirForUri`. Zero imports by
+design: `vault.ts` pulls AsyncStorage at import time, so test mocks can import
+the real `subdirForUri` instead of hand-copying it.
+**The uri is authoritative wherever a decision turns on folder identity.**
+`inferNoteMode` collapses every unrecognized parent to `"idea"`, which is fine
+for display but wrong for the related-notes self-exclusion and for whether a
+note has an in-place re-enrichment path — both read `subdirForUri`. The
+`RecentDetail` label still shows "Idea" for a `Notes/` note; knowingly deferred,
+since fixing it means a new `CaptureMode` variant and that type is declared
+twice with different members (`storage.ts` vs `queue.ts`).
 
 ## Review-surface intelligence
 - `lib/relatedNotes.ts` (pure) — lexical related-note scoring over the cached

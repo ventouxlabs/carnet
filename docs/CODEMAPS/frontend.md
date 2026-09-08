@@ -18,7 +18,9 @@ behind the "more modes" chevron sheet).
 | `AudioCaptureScreen` | 629 | record → on-device transcribe → journal |
 | `RecentDetailScreen` | ~1560 | note view + WYSIWYG edit, tags, geo, attachments, Related card (lib/relatedNotes), Karakeep export (unreachable → pending-sync queue) |
 | `ShareReceiveScreen` | 633 | Android share-sheet intake (image / audio / link / any file; reads via content:// grant) |
-| `SearchScreen` | 284 | vault full-text/tag search (B6), stamp-based filters |
+| `SearchScreen` | 609 | vault full-text/tag search (B6), stamp-based filters; "Ask about these N notes" → `AskScreen` (N = what will be *sent*, capped at `MAX_NOTES`) |
+| `AskScreen` | 380 | retrospective query: reads the selected notes, asks via `dispatcher.askVault`, renders a cited answer, explicit Save → `Notes/` |
+| `TodosScreen` | 262 | vault-wide checklist aggregation (v0.10.0); text-anchored toggle write-back |
 | `TagBrowserScreen` | 140 | tags + counts → routes into Search |
 | `SettingsScreen` | 802 | OmniRoute URL/key + chat/vision models, Karakeep, voice check, flags |
 
@@ -27,8 +29,13 @@ behind the "more modes" chevron sheet).
 
 Business logic lives in extracted `lib/*.ts` modules (ideaSaveFirst, saveFirstOutcome,
 captureErrorDecision, attachmentPersistence, promoteIdeaOnDisk, noteReprocess,
-enhanceProse, wysiwygSave, vaultImageInsert, settingsForm, modelBrowser, shareHelpers…)
+enhanceProse, wysiwygSave, vaultImageInsert, settingsForm, modelBrowser, shareHelpers,
+retrospective, askExplainer, checklist…)
 — screens are mostly UI. Prefer extending those modules over adding inline screen logic.
+
+`AskScreen` is the clearest current example of that split: ordering, budget packing,
+citation resolution, the "top N of M" line and markdown normalization all live in the
+pure `lib/retrospective.ts`, so the screen holds only the async pipeline and render.
 
 `enhanceProse` is the ⋮-sheet "Enhance" action: it splits frontmatter + the `# Title` off
 a saved note, sends only the prose to `dispatcher.enhanceProse`, and re-attaches them
