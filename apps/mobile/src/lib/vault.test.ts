@@ -16,7 +16,6 @@ let _listRefs: FakeNote[] = [];
 const _unreadable: Set<string> = new Set();
 
 vi.mock("./writer", () => ({
-  NOTE_SUBDIRS: ["Ideas", "Journal", "Notes", "People"],
   listNoteFiles: vi.fn(async () => _listRefs),
   readNote: vi.fn(async (uri: string) => {
     if (_unreadable.has(uri)) throw new Error(`unreadable: ${uri}`);
@@ -50,7 +49,6 @@ import {
   loadCachedTagIndex,
   notesForTag,
   refreshTagIndex,
-  subdirForUri,
   suggestTags,
   synthesizeEntry,
   tagsForNote,
@@ -335,25 +333,8 @@ describe("inferNoteMode", () => {
   });
 });
 
-// ── subdirForUri ──────────────────────────────────────────────────────────────
-
-describe("subdirForUri", () => {
-  it("reads the subdir from the uri, including Notes", () => {
-    expect(subdirForUri("file:///v/Notes/a.md")).toBe("Notes");
-    expect(subdirForUri("file:///v/Ideas/a.md")).toBe("Ideas");
-    expect(subdirForUri("file:///v/Journal/2026-09-07.md")).toBe("Journal");
-    expect(subdirForUri("file:///v/People/x.md")).toBe("People");
-  });
-
-  it("returns null for a uri outside the known subdirs", () => {
-    expect(subdirForUri("file:///v/Photos/a.png")).toBeNull();
-    expect(subdirForUri("file:///v/loose.md")).toBeNull();
-  });
-
-  it("decodes a percent-encoded SAF uri", () => {
-    expect(subdirForUri("content://x/tree/primary%3Av%2FNotes%2Fa.md")).toBe("Notes");
-  });
-});
+// subdirForUri now lives in noteSubdirs.ts, tested in noteSubdirs.test.ts —
+// vault.ts only re-exports it for existing callers.
 
 // ── synthesizeEntry ───────────────────────────────────────────────────────────
 

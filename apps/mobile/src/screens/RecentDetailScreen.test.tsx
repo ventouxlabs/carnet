@@ -50,24 +50,14 @@ vi.mock("../lib/writer", async () => {
 // relatedNotes is pure — imported real; the index feed below controls it.
 vi.mock("../lib/vault", async () => {
   const fm = await import("../lib/frontmatter");
-  const NOTE_SUBDIRS = ["Ideas", "Journal", "Notes", "People"];
+  const { subdirForUri } = await import("../lib/noteSubdirs");
   return {
     getTagIndex: vi.fn(async () => ({ builtAt: 1, tags: [] })),
     invalidateNoteIndex: vi.fn(async () => {}),
     tagsForNote: (md: string) => fm.getFrontmatterTags(md),
-    // Restates vault.ts's real subdirForUri (parent-segment match, SAF-decoded)
-    // rather than importing it — vault.ts pulls AsyncStorage at import time.
-    subdirForUri: (uri: string) => {
-      let decoded = uri;
-      try {
-        decoded = decodeURIComponent(uri);
-      } catch {
-        /* keep raw */
-      }
-      const segments = decoded.split("/").filter(Boolean);
-      const parent = segments[segments.length - 2];
-      return NOTE_SUBDIRS.includes(parent ?? "") ? parent : null;
-    },
+    // subdirForUri is pure (lives in ../lib/noteSubdirs, which vault.ts merely
+    // re-exports), so it's imported for real rather than hand-copied.
+    subdirForUri,
     // null index → the Related card stays hidden in existing tests.
     loadCachedNoteIndex: vi.fn(async () => null),
     resolveNoteEntry: vi.fn(async () => null),

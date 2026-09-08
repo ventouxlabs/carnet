@@ -45,7 +45,9 @@ import {
 import { listPairedBinaries, mimeFromFilename } from "./pairedBinaries";
 import { extractH1, personFilename } from "./noteNaming";
 import { toggleChecklistLine } from "./checklist";
+import { NOTE_SUBDIRS, type NoteSubdir } from "./noteSubdirs";
 
+export type { NoteSubdir };
 
 /** Upper bound on collision-bumped filename variants ({stem}-2.md … {stem}-99.md).
  * If 99 variants are taken, the user has a real cleanup problem and we throw
@@ -470,11 +472,6 @@ export async function updateNoteIfUnchanged(
   await writeByUri(filepath, markdown);
   return { ok: true };
 }
-
-/** Vault subdirs that hold markdown notes. Photos/Audio/Files hold binaries
- * and are deliberately excluded from note enumeration. */
-export const NOTE_SUBDIRS = ["Ideas", "Journal", "Notes", "People"] as const;
-export type NoteSubdir = (typeof NOTE_SUBDIRS)[number];
 
 export interface NoteFileRef {
   /** Full readable URI (file:// path or SAF content:// document URI). */

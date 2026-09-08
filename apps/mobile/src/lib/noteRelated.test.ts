@@ -2,25 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 // vault.ts pulls AsyncStorage + expo-file-system at import time; only its pure
 // tagsForNote matters here, so restate it over the real frontmatter parser
-// (same shape the RecentDetailScreen oracle uses).
+// (same shape the RecentDetailScreen oracle uses). subdirForUri is pure
+// (lives in ./noteSubdirs, which vault.ts merely re-exports), so it's
+// imported for real rather than hand-copied.
 vi.mock("./vault", async () => {
   const fm = await import("./frontmatter");
-  const NOTE_SUBDIRS = ["Ideas", "Journal", "Notes", "People"];
+  const { subdirForUri } = await import("./noteSubdirs");
   return {
     tagsForNote: (md: string) => fm.getFrontmatterTags(md),
-    // Restates vault.ts's real subdirForUri (parent-segment match, SAF-decoded)
-    // rather than importing it — vault.ts pulls AsyncStorage at import time.
-    subdirForUri: (uri: string) => {
-      let decoded = uri;
-      try {
-        decoded = decodeURIComponent(uri);
-      } catch {
-        /* keep raw */
-      }
-      const segments = decoded.split("/").filter(Boolean);
-      const parent = segments[segments.length - 2];
-      return NOTE_SUBDIRS.includes(parent ?? "") ? parent : null;
-    },
+    subdirForUri,
   };
 });
 

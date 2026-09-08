@@ -26,7 +26,8 @@ import {
   normalizeTag,
   stripFrontmatter,
 } from "./frontmatter";
-import { listNoteFiles, NOTE_SUBDIRS, readNote, type NoteFileRef, type NoteSubdir } from "./writer";
+import { listNoteFiles, readNote, type NoteFileRef } from "./writer";
+import { parentSegment, subdirForUri, type NoteSubdir } from "./noteSubdirs";
 import type { CaptureEntry, CaptureMode } from "./storage";
 
 /** One AsyncStorage blob holding per-note metadata for browse + search; the tag
@@ -394,41 +395,16 @@ function basenameTitle(uri: string): string {
  * parent segment (not a substring anywhere in the path) so a vault rooted under
  * a folder literally named "Journal"/"People" doesn't misclassify its Ideas. */
 export function inferNoteMode(uri: string): CaptureMode {
-  let decoded = uri;
-  try {
-    decoded = decodeURIComponent(uri);
-  } catch {
-    /* keep raw */
-  }
-  const segments = decoded.split("/").filter(Boolean);
-  const parent = segments[segments.length - 2];
+  const parent = parentSegment(uri);
   if (parent === "Journal") return "journal";
   if (parent === "People") return "person";
   return "idea";
 }
 
-/**
- * The vault subdir a note actually lives in, read from its uri.
- *
- * Authoritative where `inferNoteMode` is not: mode collapses every unknown
- * parent to "idea", which is right for display but wrong for any decision
- * that branches on folder identity (related-notes self-exclusion, whether a
- * note has an in-place re-enrichment path). Returns null outside the known
- * note subdirs.
- */
-export function subdirForUri(uri: string): NoteSubdir | null {
-  let decoded = uri;
-  try {
-    decoded = decodeURIComponent(uri);
-  } catch {
-    /* keep raw */
-  }
-  const segments = decoded.split("/").filter(Boolean);
-  const parent = segments[segments.length - 2];
-  return (NOTE_SUBDIRS as readonly string[]).includes(parent ?? "")
-    ? (parent as NoteSubdir)
-    : null;
-}
+// subdirForUri is the uri-authoritative counterpart to inferNoteMode above
+// (mode collapses every unrecognized parent to "idea"); re-exported here so
+// existing callers that import it from "./vault" keep working unchanged.
+export { subdirForUri };
 
 /** Parse a `created:`/`date:` frontmatter value to epoch ms, or null. */
 function frontmatterDateMs(markdown: string): number | null {
