@@ -16,7 +16,7 @@ import { deriveTitle } from "@carnet/shared";
 import { relatedSubdirForMode } from "./recentDetailView";
 import { findRelatedNotes } from "./relatedNotes";
 import type { CaptureEntry } from "./storage";
-import { tagsForNote, type NoteIndex, type NoteIndexEntry } from "./vault";
+import { subdirForUri, tagsForNote, type NoteIndex, type NoteIndexEntry } from "./vault";
 
 /**
  * Related notes for `body` (the live note text, which an edit or a re-enrich
@@ -31,7 +31,11 @@ export function computeRelatedNotes(
   return findRelatedNotes(
     {
       uri: entry.filepath,
-      subdir: relatedSubdirForMode(entry.mode),
+      // The uri is authoritative — relatedSubdirForMode(entry.mode) is kept
+      // only as a fallback, since inferNoteMode collapses any unrecognized
+      // parent (e.g. Notes/) to "idea" and would wrongly self-exclude against
+      // Ideas/ for those notes.
+      subdir: subdirForUri(entry.filepath) ?? relatedSubdirForMode(entry.mode),
       title: deriveTitle(body) || entry.title,
       tags: tagsForNote(body),
     },

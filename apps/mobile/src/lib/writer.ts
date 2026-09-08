@@ -473,7 +473,7 @@ export async function updateNoteIfUnchanged(
 
 /** Vault subdirs that hold markdown notes. Photos/Audio/Files hold binaries
  * and are deliberately excluded from note enumeration. */
-const NOTE_SUBDIRS = ["Ideas", "Journal", "Notes", "People"] as const;
+export const NOTE_SUBDIRS = ["Ideas", "Journal", "Notes", "People"] as const;
 export type NoteSubdir = (typeof NOTE_SUBDIRS)[number];
 
 export interface NoteFileRef {

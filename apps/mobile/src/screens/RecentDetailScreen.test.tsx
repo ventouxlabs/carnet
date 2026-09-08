@@ -50,10 +50,24 @@ vi.mock("../lib/writer", async () => {
 // relatedNotes is pure — imported real; the index feed below controls it.
 vi.mock("../lib/vault", async () => {
   const fm = await import("../lib/frontmatter");
+  const NOTE_SUBDIRS = ["Ideas", "Journal", "Notes", "People"];
   return {
     getTagIndex: vi.fn(async () => ({ builtAt: 1, tags: [] })),
     invalidateNoteIndex: vi.fn(async () => {}),
     tagsForNote: (md: string) => fm.getFrontmatterTags(md),
+    // Restates vault.ts's real subdirForUri (parent-segment match, SAF-decoded)
+    // rather than importing it — vault.ts pulls AsyncStorage at import time.
+    subdirForUri: (uri: string) => {
+      let decoded = uri;
+      try {
+        decoded = decodeURIComponent(uri);
+      } catch {
+        /* keep raw */
+      }
+      const segments = decoded.split("/").filter(Boolean);
+      const parent = segments[segments.length - 2];
+      return NOTE_SUBDIRS.includes(parent ?? "") ? parent : null;
+    },
     // null index → the Related card stays hidden in existing tests.
     loadCachedNoteIndex: vi.fn(async () => null),
     resolveNoteEntry: vi.fn(async () => null),
@@ -566,6 +580,24 @@ describe("RecentDetailScreen — re-enrich family", () => {
   it("does not offer Re-enrich for a mode with no text enrichment path", async () => {
     vi.mocked(readNote).mockResolvedValue(ENRICHED_MD);
     const { navigation } = renderScreen({ ...ENTRY, mode: "audio" });
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+
+    expect(await screen.findByText("File info")).toBeTruthy();
+    expect(screen.queryByText("Re-enrich")).toBeNull();
+  });
+
+  it("does not offer Re-enrich for a synthesis note in Notes/, even though its mode reports idea", async () => {
+    // inferNoteMode falls back to "idea" for Notes/ (no CaptureMode variant
+    // exists for it yet), so isReEnrichableMode(entry.mode) alone would wrongly
+    // pass. Re-enrich on a synthesis note would run the idea prompt over a
+    // computed answer and overwrite it — must be gated by the uri, not mode.
+    vi.mocked(readNote).mockResolvedValue(ENRICHED_MD);
+    const { navigation } = renderScreen({
+      ...ENTRY,
+      mode: "idea",
+      filepath: "file:///v/Notes/synth.md",
+    });
     await screen.findByText(/Hello body text\./);
     openActionsSheet(navigation);
 
