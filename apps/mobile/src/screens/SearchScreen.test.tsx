@@ -605,4 +605,22 @@ describe("ask entry point", () => {
     expect(navigation.navigate).not.toHaveBeenCalledWith("Ask", expect.anything());
     expect(markAskExplainerSeen).not.toHaveBeenCalled();
   });
+
+  it("fails toward showing the explainer, and surfaces an error, when shouldShowAskExplainer rejects", async () => {
+    vi.mocked(shouldShowAskExplainer).mockRejectedValueOnce(new Error("storage unavailable"));
+    const { navigation } = renderScreen();
+    await screen.findByText("First idea");
+    await typeQuery("hello");
+
+    await waitFor(() => expect(screen.getByText("Ask about these 2 notes")).toBeTruthy());
+    fireEvent.click(screen.getByText("Ask about these 2 notes"));
+
+    // A rejection must not read as "nothing happened": the dialog still
+    // appears (fail toward disclosure, never toward silently skipping it)
+    // AND the failure itself is visible, not swallowed by the `void` at the
+    // call site.
+    await screen.findByText("Sending notes to your provider");
+    expect(screen.getByText(/storage unavailable/)).toBeTruthy();
+    expect(navigation.navigate).not.toHaveBeenCalledWith("Ask", expect.anything());
+  });
 });

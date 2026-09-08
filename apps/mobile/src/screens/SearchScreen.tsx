@@ -254,10 +254,28 @@ export default function SearchScreen({ route, navigation }: Props) {
     null,
   );
   const [explainerVisible, setExplainerVisible] = useState(false);
+  // Mirrors refreshError below (Snackbar). A rejection here must not read as
+  // "nothing happened" — see handleAskPress.
+  const [askError, setAskError] = useState<string | null>(null);
 
   const handleAskPress = useCallback(async () => {
     const params = { question: query, candidates };
-    if (await shouldShowAskExplainer()) {
+    let showExplainer: boolean;
+    try {
+      showExplainer = await shouldShowAskExplainer();
+    } catch (e: unknown) {
+      // AsyncStorage/settings read failed — we genuinely don't know whether
+      // the user has already dismissed the explainer. FAIL TOWARD SHOWING
+      // IT: a repeated disclosure is a minor annoyance; silently skipping a
+      // privacy notice because a read failed is not an acceptable trade.
+      // Same discipline as startBodySearch's .catch() above — surface the
+      // failure rather than let `void handleAskPress()` at the call site
+      // swallow it into "tapped Ask, nothing happened".
+      const msg = e instanceof Error ? e.message : String(e);
+      setAskError(`Couldn't check your Ask settings — showing the notice to be safe: ${msg}`);
+      showExplainer = true;
+    }
+    if (showExplainer) {
       pendingAskRef.current = params;
       setExplainerVisible(true);
       return;
@@ -535,6 +553,10 @@ export default function SearchScreen({ route, navigation }: Props) {
         duration={5000}
       >
         {refreshError ?? ""}
+      </Snackbar>
+
+      <Snackbar visible={askError !== null} onDismiss={() => setAskError(null)} duration={7000}>
+        {askError ?? ""}
       </Snackbar>
 
       <Portal>

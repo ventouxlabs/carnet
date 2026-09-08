@@ -7,9 +7,22 @@
  * it bundles up to MAX_NOTES past notes — including ones never chosen for
  * enrichment — and sends them to whichever provider is configured. That
  * escalation in what leaves the device is why this dialog exists, and why it
- * is gated on the resolved provider rather than shown unconditionally: a
- * local/loopback backend (Relais, a LAN OmniRoute) never sends the bundle
- * off-device, so there is nothing to disclose.
+ * is gated on the resolved provider: for a local/loopback or tailnet backend
+ * (Relais, a LAN or Tailscale-reachable OmniRoute) the bundle stays on the
+ * user's own machines/network rather than reaching a third-party provider,
+ * so there is nothing to disclose.
+ *
+ * Classification is `providerReadiness.ts`'s isLocalProvider (built on
+ * `netAllowlist.ts`'s isLocalNetworkUrl) — the same UX-locality predicate
+ * that widened to include Tailscale's CGNAT range for exactly this class of
+ * decision. That module's #176-reviewed split treats a tailnet as "the
+ * user's own network" ONLY for consumers with no credential/security
+ * consequence for a wrong answer (a timeout tier, a reachability hint, and
+ * now this dismissible disclosure) — never for the credential gate
+ * (isAllowedPlaintextHost/isCredentialSafeUrl) that decides whether a Bearer
+ * key may travel in the clear. A wrong answer here costs an extra or a
+ * skipped notice, never a leaked key, so reusing the wider predicate is the
+ * same trade this codebase already made deliberately, not a new one.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
