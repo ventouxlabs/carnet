@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
-import { Searchbar, Snackbar, Text } from "react-native-paper";
+import { Button, Portal, Searchbar, Snackbar, Text } from "react-native-paper";
 import { useFocusEffect } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
@@ -27,9 +27,12 @@ import {
   type NoteIndex,
   type NoteIndexEntry,
 } from "../lib/vault";
+import { MAX_NOTES, type RetrievalCandidate } from "../lib/retrospective";
+import { markAskExplainerSeen, shouldShowAskExplainer } from "../lib/askExplainer";
 import { MIN_TAP_TARGET, useCarnetTheme } from "../lib/theme";
 import { NoteCard, modeStamp } from "../components/NoteCard";
 import { StampChip } from "../components/StampChip";
+import { AskExplainerDialog } from "../components/AskExplainerDialog";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Search">;
 
@@ -216,6 +219,68 @@ export default function SearchScreen({ route, navigation }: Props) {
   const noteForUri = useCallback(
     (uri: string) => index?.notes.find((n) => n.uri === uri),
     [index],
+  );
+
+  // Retrospective query entry point (Task 8). Body matches outrank indexed
+  // results here too — orderCandidates (lib/retrospective.ts) is what
+  // actually enforces that plus dedup once AskScreen receives this list;
+  // this union invents no ranking of its own. `noteForUri` covers the case
+  // a body match's own metadata carries no title (BodyMatch is uri+snippet
+  // only).
+  const candidates = useMemo<RetrievalCandidate[]>(() => {
+    const fromBody = bodyMatches.map((m) => ({
+      uri: m.uri,
+      title: noteForUri(m.uri)?.title ?? m.uri,
+      fromBodyMatch: true,
+    }));
+    const fromIndex = results.map((r) => ({
+      uri: r.uri,
+      title: r.title,
+      fromBodyMatch: false,
+    }));
+    return [...fromBody, ...fromIndex];
+  }, [bodyMatches, results, noteForUri]);
+
+  // The label's number is what AskScreen will actually READ (capped at
+  // MAX_NOTES), not how many are on screen — see this task's brief for why
+  // those two counts are deliberately different and both required.
+  const askCount = Math.min(candidates.length, MAX_NOTES);
+  const showAskButton = query.trim().length > 0 && candidates.length > 0;
+
+  // Holds the question/candidates chosen at press time, across the async
+  // explainer check and (if shown) the dialog round-trip. A ref, not state:
+  // nothing here needs to trigger a re-render while it's pending.
+  const pendingAskRef = useRef<{ question: string; candidates: RetrievalCandidate[] } | null>(
+    null,
+  );
+  const [explainerVisible, setExplainerVisible] = useState(false);
+
+  const handleAskPress = useCallback(async () => {
+    const params = { question: query, candidates };
+    if (await shouldShowAskExplainer()) {
+      pendingAskRef.current = params;
+      setExplainerVisible(true);
+      return;
+    }
+    navigation.navigate("Ask", params);
+  }, [query, candidates, navigation]);
+
+  const handleExplainerCancel = useCallback(() => {
+    pendingAskRef.current = null;
+    setExplainerVisible(false);
+  }, []);
+
+  const handleExplainerContinue = useCallback(
+    (dontShowAgain: boolean) => {
+      setExplainerVisible(false);
+      const params = pendingAskRef.current;
+      pendingAskRef.current = null;
+      if (dontShowAgain) {
+        void markAskExplainerSeen();
+      }
+      if (params) navigation.navigate("Ask", params);
+    },
+    [navigation],
   );
 
   const bodySearchFooter = query.trim() ? (
@@ -451,6 +516,19 @@ export default function SearchScreen({ route, navigation }: Props) {
         />
       )}
 
+      {showAskButton && (
+        <View
+          style={[
+            styles.askBar,
+            { padding: theme.carnet.spacing.md, backgroundColor: theme.colors.background },
+          ]}
+        >
+          <Button mode="contained-tonal" onPress={() => void handleAskPress()}>
+            {`Ask about these ${askCount} notes`}
+          </Button>
+        </View>
+      )}
+
       <Snackbar
         visible={refreshError !== null}
         onDismiss={() => setRefreshError(null)}
@@ -458,6 +536,15 @@ export default function SearchScreen({ route, navigation }: Props) {
       >
         {refreshError ?? ""}
       </Snackbar>
+
+      <Portal>
+        <AskExplainerDialog
+          theme={theme}
+          visible={explainerVisible}
+          onCancel={handleExplainerCancel}
+          onContinue={handleExplainerContinue}
+        />
+      </Portal>
     </View>
   );
 }
@@ -469,6 +556,7 @@ const styles = StyleSheet.create({
   // The stamp glyph is small by design; the touch target must not be
   // (DESIGN.md: 48dp minimum) — pad the Pressable, not the stamp.
   pillHit: { minHeight: MIN_TAP_TARGET, justifyContent: "center" },
+  askBar: { minHeight: MIN_TAP_TARGET },
   skeletonCard: { height: 96 },
   center: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
 });

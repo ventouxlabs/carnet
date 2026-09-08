@@ -34,6 +34,7 @@ import RecentDetailScreen from "./src/screens/RecentDetailScreen";
 import TagBrowserScreen from "./src/screens/TagBrowserScreen";
 import SearchScreen from "./src/screens/SearchScreen";
 import TodosScreen from "./src/screens/TodosScreen";
+import AskScreen, { type AskRouteParams } from "./src/screens/AskScreen";
 import type { CaptureEntry, CaptureMode } from "./src/lib/storage";
 import { carnetDark, carnetLight } from "./src/lib/theme";
 import {
@@ -67,6 +68,7 @@ export type RootStackParamList = {
   /** `tag` pre-applies a tag filter — how "tap a tag anywhere" lands here. */
   Search: { tag?: string } | undefined;
   Todos: undefined;
+  Ask: AskRouteParams;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -344,6 +346,7 @@ export default function App() {
                     ),
                   })}
                 />
+                <Stack.Screen name="Ask" component={AskScreen} options={{ title: "Ask" }} />
               </Stack.Navigator>
               <ShareIntentRouter navigation={navRef} />
             </NavigationContainer>
