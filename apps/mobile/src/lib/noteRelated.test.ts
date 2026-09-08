@@ -96,23 +96,28 @@ describe("computeRelatedNotes", () => {
     expect(computeRelatedNotes(body, ENTRY, index(self))).toEqual([]);
   });
 
-  it("derives the subdir from the uri (not the mode) for self-exclusion", () => {
-    // Same basename in a DIFFERENT subdir must not be excluded as self: a
-    // journal-mode entry queries with subdir "Journal", read off its uri.
+  it("derives the subdir from the uri, not the mode, for self-exclusion", () => {
+    // Mode and uri deliberately DISAGREE here (mode: "person" would map to
+    // "People" via relatedSubdirForMode, but the uri is actually in Journal/)
+    // so this test can only pass under uri-derivation — under the old
+    // mode-derived subdir, the query would carry "People", which wrongly
+    // matches this same-basename People/ note's subdir + basename and
+    // excludes it as "self", dropping a genuinely different, genuinely
+    // related note.
     const body = "---\ntags: [hydroponics]\n---\n# Open note\n";
-    const journalEntry: CaptureEntry = {
+    const mismatchedEntry: CaptureEntry = {
       ...ENTRY,
-      mode: "journal",
+      mode: "person",
       filepath: "file:///v/Journal/open-note.md",
     };
     const sameNameOtherSubdir = note({
-      uri: "file:///v/Ideas/open-note.md",
-      subdir: "Ideas",
+      uri: "file:///v/People/open-note.md",
+      subdir: "People",
       tags: ["hydroponics"],
     });
 
     expect(
-      computeRelatedNotes(body, journalEntry, index(sameNameOtherSubdir)),
+      computeRelatedNotes(body, mismatchedEntry, index(sameNameOtherSubdir)),
     ).toEqual([sameNameOtherSubdir]);
   });
 
