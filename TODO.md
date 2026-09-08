@@ -2,7 +2,7 @@
 
 Tracking deferred v0.3 scope and known issues.
 
-**Last reconciled against git history: 2026-08-15.** This file had drifted before (see
+**Last reconciled against git history: 2026-09-08.** This file had drifted before (see
 prior reconciliation history in git blame) — items were listed as deferred after they had
 already shipped. When planning from it, re-verify anything you're about to act on (`git
 log --oneline --all | grep -i <topic>`, or look for the module it names); a stale
@@ -87,11 +87,21 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   (2026-07-04 decision): the persistent notification (shipped) + B5's inline-reply cover
   the same latency profile. iOS share extension and Android Auto remain open; Android
   share sheet is already shipped.
-- [ ] **Browse/search Phase 3** — the retrospective query ("What have I been thinking
-  about regarding X?"). Phase 1 (note index) and Phase 2 (full-text body search) both
-  shipped — see above. Phase 3 is the only remaining piece, and unlike 1–2 it needs an
-  LLM round-trip over retrieved notes, so it should be specified against the
-  `dispatcher.ts` seam (either backend) rather than assuming OmniRoute.
+- [x] **Browse/search Phase 3 — SHIPPED 2026-09-08** (PR #207) — the retrospective query
+  ("What have I been thinking about regarding X?"). **This closes the browse/search axis:
+  Phases 1, 2 and 3 are all done.** Ask from Search over the notes currently on screen;
+  `dispatcher.askVault` synthesizes an answer citing them with `[[wikilinks]]`; the answer
+  is ephemeral until explicitly saved into a new `Notes/` subdir. Specified against the
+  `dispatcher.ts` seam as this item required, so it works on OmniRoute and a local Relais
+  unbranched. The v0.5 PRD gated this on "after S4's fate is known" — S4 shipped
+  *lexically* (`relatedNotes.ts`, no embeddings), which satisfied that gate; do not
+  re-open the embeddings question on the strength of the old text. Spec:
+  `.claude/PRPs/prds/retrospective-query.prd.md`. **Not** the same as
+  `enhance-source-citations.plan.md`, which is still blocked on an OmniRoute gateway
+  change and concerns external URL annotations, not internal wikilinks.
+  **Outstanding: acceptance criteria 6 and 7 are device-unverified** (not-configured error
+  path; local backend with no network), as are the `<Text onPress>` citation taps — jsdom
+  cannot cover them. See `docs/session-handoffs/2026-09-08-retrospective-query-shipped.md`.
 - [ ] **Bidirectional sync awareness** — Mostly works via Syncthing. A mobile file watcher to detect workstation edits is a v0.3 enhancement.
 - [ ] **Card auto-detection** — Current button-press OCR flow works. Auto-detect when camera sees a business card is polish.
 - [ ] **Cross-capture linking — largely superseded, narrow remainder.** The "you've thought
