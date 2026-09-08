@@ -1,6 +1,6 @@
 # Plan: Retrospective query — synthesized answers over your own notes
 
-Status: draft
+Status: shipped
 
 > **For agentic workers:** implement task-by-task with an independent reviewer
 > per task, as the notes-todo-capture plan did. Steps use `- [ ]` for tracking.
