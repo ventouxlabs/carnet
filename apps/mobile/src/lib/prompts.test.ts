@@ -173,6 +173,18 @@ describe("buildRetrospectivePrompt", () => {
     expect(p.user).toContain("body a");
   });
 
+  it("forbids headings and lists — the answer renders as inline Text runs", () => {
+    // Not a style preference: AskScreen renders resolveCitations' flat
+    // AnswerSegment[] as inline Text runs so citations stay pressable, and it
+    // has no block-level renderer. A "## " that reaches it shows up literally.
+    // The renderer's limitation is a real constraint on the output contract,
+    // so the contract states it.
+    const p = buildRetrospectivePrompt("q?", [sel("A", "body a")]);
+    expect(p.system).toMatch(/headings/i);
+    expect(p.system).toMatch(/bullet/i);
+    expect(p.system).toMatch(/paragraphs/i);
+  });
+
   it("marks a truncated note so the model knows it sees a fragment", () => {
     const p = buildRetrospectivePrompt("q?", [sel("A", "partial", true)]);
     expect(p.user).toContain("truncated");

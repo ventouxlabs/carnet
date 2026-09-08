@@ -388,6 +388,10 @@ question and a set of notes they wrote themselves.
    concise — a few short paragraphs at most.
 5. Some notes may be marked truncated. Do not treat a truncated note as
    complete; do not speculate about what the omitted part said.
+6. PLAIN PARAGRAPHS ONLY. Do not use markdown headings (#), bullet lists
+   (- or *), or numbered lists. Your answer is displayed as running text, so
+   those markers would appear literally instead of formatting anything.
+   Separate ideas with a blank line.
 
 ${INJECTION_GUARD}`;
 

@@ -165,6 +165,44 @@ describe("AskScreen", () => {
     expect(screen.queryByText(/tp\.file\.title/)).toBeNull();
   });
 
+  it("renders a model heading as prose, not as a literal '## '", async () => {
+    // Belt and braces: the prompt forbids headings, but a smaller local model
+    // (Relais on-device) will sometimes emit one anyway, and this is the one
+    // screen whose whole value is that its output looks trustworthy.
+    askVault.mockResolvedValue({
+      result: { markdown: "## What you wrote\n- point one", model: "m" },
+      usedFallback: false,
+      fallbackProviderId: null,
+      providerLabel: "Test",
+    });
+    renderScreen();
+
+    await waitFor(() => expect(screen.getByText(/What you wrote/)).toBeTruthy());
+    expect(screen.queryByText(/## /)).toBeNull();
+    expect(screen.getByText(/• point one/)).toBeTruthy();
+  });
+
+  it("saves the answer as real markdown, not the flattened render form", async () => {
+    // The normalizer exists for THIS screen's inline renderer. Obsidian renders
+    // `- ` natively, so flattening it into the vault file would degrade the
+    // note the user keeps.
+    askVault.mockResolvedValue({
+      result: { markdown: "## What you wrote\n- point one", model: "m" },
+      usedFallback: false,
+      fallbackProviderId: null,
+      providerLabel: "Test",
+    });
+    renderScreen();
+    await waitFor(() => screen.getByText(/What you wrote/));
+    fireEvent.click(screen.getByLabelText("Save answer to vault"));
+
+    await waitFor(() => expect(writeSynthesis).toHaveBeenCalled());
+    const written = writeSynthesis.mock.calls[0][1] as string;
+    expect(written).toContain("## What you wrote");
+    expect(written).toContain("- point one");
+    expect(written).not.toContain("• ");
+  });
+
   it("surfaces an ask failure instead of a permanently empty answer", async () => {
     askVault.mockRejectedValue(new Error("timed out after 30s"));
     renderScreen();

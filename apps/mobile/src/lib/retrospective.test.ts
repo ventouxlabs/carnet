@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_NOTES, PER_NOTE_CHARS, TOTAL_BUDGET_CHARS,
   orderCandidates, pickForRead, packBodies,
-  resolveCitations, buildSynthesisNote, disclosureLine,
+  resolveCitations, buildSynthesisNote, disclosureLine, normalizeLeadingMarkdown,
 } from "./retrospective";
 
 const cand = (uri: string, title: string, fromBodyMatch = false) => ({ uri, title, fromBodyMatch });
@@ -137,5 +137,40 @@ describe("disclosureLine", () => {
 
   it("says nothing when nothing was matched at all", () => {
     expect(disclosureLine(0, 0)).toBeNull();
+  });
+});
+
+describe("normalizeLeadingMarkdown", () => {
+  it("strips heading markers at a line start", () => {
+    expect(normalizeLeadingMarkdown("## About A\nprose")).toBe("About A\nprose");
+    expect(normalizeLeadingMarkdown("###### deep")).toBe("deep");
+  });
+
+  it("turns a bullet marker into a real bullet character", () => {
+    expect(normalizeLeadingMarkdown("- one\n* two")).toBe("• one\n• two");
+  });
+
+  it("leaves numbered lists intact — they read correctly as plain text", () => {
+    expect(normalizeLeadingMarkdown("1. first\n2. second")).toBe("1. first\n2. second");
+  });
+
+  it("passes text with no leading markers through byte-identical", () => {
+    const prose = "You wrote about [[A]] on Tuesday.\nIt mattered # a lot - really.";
+    expect(normalizeLeadingMarkdown(prose)).toBe(prose);
+  });
+
+  it("preserves indentation so nested bullets keep their shape", () => {
+    expect(normalizeLeadingMarkdown("- top\n  - nested")).toBe("• top\n  • nested");
+  });
+
+  it("does not eat a horizontal rule, a hashtag, or leading emphasis", () => {
+    // Each of these lacks the whitespace that makes a marker a block marker.
+    expect(normalizeLeadingMarkdown("---")).toBe("---");
+    expect(normalizeLeadingMarkdown("#tag stays")).toBe("#tag stays");
+    expect(normalizeLeadingMarkdown("*emphasis* leads")).toBe("*emphasis* leads");
+  });
+
+  it("leaves an empty string alone", () => {
+    expect(normalizeLeadingMarkdown("")).toBe("");
   });
 });

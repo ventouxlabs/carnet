@@ -112,6 +112,40 @@ export function resolveCitations(
   return out;
 }
 
+/** A block marker only counts at a line start AND only when followed by
+ * whitespace — which is what keeps `---` (rule), `#tag`, and `*emphasis*` out
+ * of its jaws. Indentation is captured separately so nested bullets keep their
+ * shape. */
+const LEADING_BLOCK_MARKER = /^([ \t]*)(#{1,6}[ \t]+|[-*][ \t]+)/;
+
+/**
+ * Flatten leading block markdown into something that reads correctly as plain
+ * running text: headings lose their `#`s, `-`/`*` bullets become `• `, and
+ * numbered lists are left exactly as they are (`1. ` already reads fine).
+ *
+ * This is the RENDER-side half of a two-layer guard. buildRetrospectivePrompt
+ * forbids headings and lists outright, but a prompt is a request — an
+ * instruction-following model mostly honors it, and this feature is explicitly
+ * built to also run against a small local model (Relais), which sometimes
+ * won't. AskScreen renders resolveCitations' flat segments as inline Text runs
+ * with no block-level renderer, so an unhonored request puts a literal "## " on
+ * the one screen whose entire value proposition is looking trustworthy.
+ *
+ * Display only — never apply this to what gets written to the vault. Obsidian
+ * renders `- ` and `## ` natively, so flattening them into the saved note would
+ * degrade the file the user keeps in exchange for nothing.
+ */
+export function normalizeLeadingMarkdown(text: string): string {
+  return text
+    .split("\n")
+    .map((line) =>
+      line.replace(LEADING_BLOCK_MARKER, (_match, indent: string, marker: string) =>
+        marker[0] === "#" ? indent : `${indent}• `,
+      ),
+    )
+    .join("\n");
+}
+
 /**
  * The disclosure the answer screen shows when it was built from fewer notes
  * than the user had on screen. Null when nothing was withheld.

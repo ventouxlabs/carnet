@@ -29,6 +29,7 @@ import { ActivityIndicator, Button, Snackbar, Text } from "react-native-paper";
 
 import {
   disclosureLine,
+  normalizeLeadingMarkdown,
   orderCandidates,
   packBodies,
   pickForRead,
@@ -87,7 +88,8 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The sanitized answer + the notes it was actually built from, held for the
-   * save path so it writes the same bytes that were rendered. */
+   * save path. Deliberately the sanitized-but-NOT-flattened text: the vault
+   * gets real markdown, `segments` gets the display-flattened form. */
   const answerRef = useRef<{ markdown: string; sources: SelectedNote[] } | null>(null);
 
   // Plain useEffect keyed to an attempt counter, NOT useFocusEffect: re-running
@@ -146,8 +148,16 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
           return;
         }
 
+        // The vault copy keeps the model's real markdown; only the DISPLAY copy
+        // is flattened. Obsidian renders `## ` and `- ` natively, so saving the
+        // flattened form would degrade the note the user keeps.
         answerRef.current = { markdown: sanitized, sources: selected };
-        setSegments(resolveCitations(sanitized, selected));
+        // Normalized before segmentation, not per segment: a segment's text
+        // does not necessarily begin at a line start (`See [[A]] ## later`), so
+        // a per-segment pass would strip mid-line markers it shouldn't. Here
+        // line starts are unambiguous, and the normalizer never touches
+        // `[[...]]`, so citations resolve exactly as before.
+        setSegments(resolveCitations(normalizeLeadingMarkdown(sanitized), selected));
         setDisclosure(disclosureLine(selected.length, ordered.length));
         setPhase("answered");
       } catch (e: unknown) {
