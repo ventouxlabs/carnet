@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_NOTES, PER_NOTE_CHARS, TOTAL_BUDGET_CHARS,
   orderCandidates, pickForRead, packBodies,
-  resolveCitations, buildSynthesisNote,
+  resolveCitations, buildSynthesisNote, disclosureLine,
 } from "./retrospective";
 
 const cand = (uri: string, title: string, fromBodyMatch = false) => ({ uri, title, fromBodyMatch });
@@ -114,5 +114,28 @@ describe("buildSynthesisNote", () => {
     const headingLines = md.split("\n").filter((l) => l.startsWith("# "));
     expect(headingLines).toHaveLength(1);
     expect(headingLines[0]).toBe("# coffee more");
+  });
+});
+
+describe("disclosureLine", () => {
+  it("stays silent when every match was sent", () => {
+    expect(disclosureLine(5, 5)).toBeNull();
+  });
+
+  it("discloses the shortfall when fewer notes were sent than matched", () => {
+    // The specific failure this avoids: a partial answer that reads as if it
+    // considered everything on screen.
+    expect(disclosureLine(9, 50)).toBe("Synthesized from the top 9 of 50 matches.");
+  });
+
+  it("counts what was PACKED, not what was picked", () => {
+    // packBodies drops unreadable notes and stops at TOTAL_BUDGET_CHARS, so
+    // 12 picked can pack to 9 — the honest line is "top 9 of 12", and a naive
+    // picked-vs-candidates check would print nothing at all here.
+    expect(disclosureLine(9, 12)).toBe("Synthesized from the top 9 of 12 matches.");
+  });
+
+  it("says nothing when nothing was matched at all", () => {
+    expect(disclosureLine(0, 0)).toBeNull();
   });
 });

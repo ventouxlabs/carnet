@@ -113,6 +113,26 @@ export function resolveCitations(
 }
 
 /**
+ * The disclosure the answer screen shows when it was built from fewer notes
+ * than the user had on screen. Null when nothing was withheld.
+ *
+ * `sent` MUST be the packed count (packBodies' output), not the picked count:
+ * packing drops notes that could not be read and stops at TOTAL_BUDGET_CHARS,
+ * so 12 picked routinely becomes 9 sent. `total` is the deduped candidate
+ * count (orderCandidates' output), not the raw list — otherwise a note that
+ * matched both the body scan and the index is counted twice and the ratio
+ * overstates what was withheld.
+ *
+ * A partial answer that does not admit its partiality is the specific failure
+ * this feature has to avoid: the user cannot tell "your notes don't say much
+ * about this" from "the 38 notes holding the answer were never read."
+ */
+export function disclosureLine(sent: number, total: number): string | null {
+  if (sent >= total) return null;
+  return `Synthesized from the top ${sent} of ${total} matches.`;
+}
+
+/**
  * Assemble the saved note. `today` is injected rather than read from the
  * clock so the test is deterministic — same reason prompts.ts's todayLocal
  * exists separately from its callers.

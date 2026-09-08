@@ -571,6 +571,46 @@ function extractSnippet(strippedBody: string, query: string): string | null {
 }
 
 /**
+ * Read the frontmatter-stripped bodies of `uris`, keyed by uri.
+ *
+ * Lives here rather than in the calling screen so the vault scan's concurrency
+ * bound (SCAN_CONCURRENCY) stays owned by the module that owns the scan —
+ * exporting mapWithConcurrency to let a screen pick its own limit is how one
+ * screen ends up reading the vault 50-wide.
+ *
+ * Frontmatter is stripped because every consumer wants the prose:
+ * buildRetrospectivePrompt renders the body verbatim into a tightly budgeted
+ * prompt (PER_NOTE_CHARS), and YAML the model has no use for would eat that
+ * budget. Same "body" convention as searchNoteBodies and buildNoteIndex.
+ *
+ * Unreadable notes (deleted mid-scan, permission revoked) are simply absent
+ * from the returned map rather than rejecting the whole read — matching
+ * buildNoteIndex and searchNoteBodies, and matching packBodies, which already
+ * treats a missing uri as "not selected". Aborting starts no NEW reads;
+ * already-issued ones finish (there is no read-cancel primitive for
+ * file:// or SAF).
+ */
+export async function readNoteBodies(
+  uris: readonly string[],
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const bodies = new Map<string, string>();
+  await mapWithConcurrency(
+    uris,
+    SCAN_CONCURRENCY,
+    async (uri) => {
+      try {
+        bodies.set(uri, stripFrontmatter(await readNote(uri)));
+      } catch {
+        // unreadable — skip it, exactly as buildNoteIndex does
+      }
+    },
+    signal,
+  );
+  return bodies;
+}
+
+/**
  * Stream on-demand body matches for `query` across every vault note — the
  * Phase 2 "Search note contents" escape hatch for a match Phase 1's indexed
  * title/tags/excerpt search misses (a hit deeper in the body than the

@@ -48,6 +48,7 @@ import {
   loadCachedNoteIndex,
   loadCachedTagIndex,
   notesForTag,
+  readNoteBodies,
   refreshTagIndex,
   suggestTags,
   synthesizeEntry,
@@ -549,5 +550,62 @@ describe("getAllTodos", () => {
     const cached = await loadCachedNoteIndex();
     expect(() => getAllTodos(cached!)).not.toThrow();
     expect(getAllTodos(cached!)).toEqual([]);
+  });
+});
+
+// ── readNoteBodies ────────────────────────────────────────────────────────────
+
+describe("readNoteBodies", () => {
+  it("returns bodies keyed by uri with frontmatter stripped", async () => {
+    // Frontmatter is stripped here, not by the caller: buildRetrospectivePrompt
+    // renders `note.body` verbatim, and PER_NOTE_CHARS is a tight budget that
+    // must not be spent on YAML the model has no use for.
+    addNote(
+      "file:///v/Ideas/a.md",
+      "Ideas",
+      "---\ncreated: 2026-01-01\ntags: [x]\n---\n# A\n\nbody of a\n",
+    );
+    addNote("file:///v/Ideas/b.md", "Ideas", "no frontmatter here\n");
+
+    const bodies = await readNoteBodies([
+      "file:///v/Ideas/a.md",
+      "file:///v/Ideas/b.md",
+    ]);
+
+    expect(bodies.get("file:///v/Ideas/a.md")).toBe("# A\n\nbody of a\n");
+    expect(bodies.get("file:///v/Ideas/a.md")).not.toContain("tags: [x]");
+    expect(bodies.get("file:///v/Ideas/b.md")).toBe("no frontmatter here\n");
+  });
+
+  it("skips unreadable notes instead of rejecting, like buildNoteIndex", async () => {
+    // A note deleted mid-scan or with permission revoked must not sink the
+    // whole retrospective read — packBodies already treats an absent uri as
+    // "not selected".
+    addNote("file:///v/Ideas/ok.md", "Ideas", "readable\n");
+    addNote("file:///v/Ideas/gone.md", "Ideas", "unreadable\n");
+    _unreadable.add("file:///v/Ideas/gone.md");
+
+    const bodies = await readNoteBodies([
+      "file:///v/Ideas/ok.md",
+      "file:///v/Ideas/gone.md",
+    ]);
+
+    expect(bodies.get("file:///v/Ideas/ok.md")).toBe("readable\n");
+    expect(bodies.has("file:///v/Ideas/gone.md")).toBe(false);
+    expect(bodies.size).toBe(1);
+  });
+
+  it("starts no new reads once the signal aborts", async () => {
+    for (let i = 0; i < 40; i += 1) {
+      addNote(`file:///v/Ideas/n${i}.md`, "Ideas", `body ${i}\n`);
+    }
+    const uris = Array.from({ length: 40 }, (_, i) => `file:///v/Ideas/n${i}.md`);
+    const controller = new AbortController();
+    controller.abort();
+
+    const bodies = await readNoteBodies(uris, controller.signal);
+
+    expect(bodies.size).toBe(0);
+    expect(vi.mocked(readNote)).not.toHaveBeenCalled();
   });
 });
