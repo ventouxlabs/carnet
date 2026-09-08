@@ -357,6 +357,11 @@ format identical, just change status and optionally expand the body).`;
   return { system, user };
 }
 
+/** Remove any literal USER_INPUT tag from content that is about to be placed
+ * BETWEEN those tags. Case-insensitive: the guard text names them in caps,
+ * but a model will honor a lowercase pair just as readily. */
+const stripGuard = (s: string): string => s.replace(/<\/?USER_INPUT>/gi, "");
+
 /**
  * Prompt for the retrospective query. Deliberately NOT a reuse of
  * buildEnhanceProsePrompt: that one is instructed to ADD real-world fact,
@@ -368,6 +373,14 @@ format identical, just change status and optionally expand the body).`;
  * ones — so every note body goes inside its own <USER_INPUT> tags, and each
  * note is individually delimited by a `### [[Title]]` header so the model
  * can attribute a claim to the source it came from.
+ *
+ * That per-note delimiting is the mitigation, so it must be unforgeable from
+ * inside the content — hence stripGuard below. Without it a hostile note can
+ * close its own block, open a header naming a REAL note in the same bundle,
+ * and reopen the tag: the model then attributes the attacker's claim to an
+ * innocent note, and resolveCitations passes it through (its contract is
+ * "does this note exist?", and it does), rendering a working, tappable
+ * citation for something that note never said.
  */
 export function buildRetrospectivePrompt(
   question: string,
@@ -398,7 +411,8 @@ ${INJECTION_GUARD}`;
   const rendered = notes
     .map(
       (n) =>
-        `### [[${n.title}]]${n.truncated ? " (truncated)" : ""}\n<USER_INPUT>\n${n.body}\n</USER_INPUT>`,
+        `### [[${stripGuard(n.title)}]]${n.truncated ? " (truncated)" : ""}\n` +
+        `<USER_INPUT>\n${stripGuard(n.body)}\n</USER_INPUT>`,
     )
     .join("\n\n");
 

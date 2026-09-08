@@ -20,8 +20,13 @@
  *  - A save reports what actually happened: a write that lands on disk but
  *    fails to index says so, rather than claiming a plain success.
  *
- * Every failure state is recoverable — each one renders a Retry rather than
- * leaving the question on screen with nothing under it.
+ * Every FAILED state renders a Retry rather than leaving the question on
+ * screen with nothing under it — a read error, a provider error, and an empty
+ * answer all land in `phase === "failed"` and are one tap from another go.
+ * The "empty" phase deliberately does not: it means no note in the set could
+ * be read at all, so a Retry would re-read the same uris and land straight
+ * back here. Its recovery is the back button, to a Search that can offer a
+ * different set.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
@@ -94,10 +99,18 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
 
   // Plain useEffect keyed to an attempt counter, NOT useFocusEffect: re-running
   // on focus would re-ask the model (a paid, slow call) every time the user
-  // returns from tapping a citation. `candidates` is a fresh array identity on
-  // every render, so a dependency list alone cannot hold this to one run — the
-  // ref does. Retry bumps `attempt`, which is the only thing that lets the
-  // effect body run a second time.
+  // returns from tapping a citation.
+  //
+  // The deps below are in fact stable — React Navigation hands back the same
+  // `route.params` object across re-renders — so the effect does not re-fire
+  // on its own today. The ref is belt-and-braces around that: it makes "ask
+  // exactly once per attempt" a property of this file rather than of
+  // navigation's identity semantics, which is what a paid, slow, one-shot
+  // call wants. Do NOT read it as evidence the deps churn; if they did, the
+  // cleanup below would abort the in-flight run while the ref blocked any
+  // restart, pinning the screen on "Reading your notes…" with no Retry.
+  // Retry bumps `attempt`, which is the only thing that lets the effect body
+  // run a second time.
   const [attempt, setAttempt] = useState(0);
   const ranForAttemptRef = useRef(-1);
   useEffect(() => {
@@ -199,7 +212,12 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
     setSaving(true);
     try {
       const md = buildSynthesisNote(question, answer.markdown, answer.sources, todayLocal());
-      const { filepath } = await writeSynthesis(slugify(question), md);
+      // `|| "synthesis"`: slugify keeps only ASCII alphanumerics, so a question
+      // written entirely in CJK/Cyrillic/Greek/Arabic — or "???" — slugs to "",
+      // and an empty stem makes findCollisionFreeName write a file named ".md":
+      // a hidden dotfile, invisible in Obsidian, saved "successfully". Every
+      // other slugify call site in this repo pairs it with a fallback stem.
+      const { filepath } = await writeSynthesis(slugify(question) || "synthesis", md);
       // The file is on disk from here on, so latch Save closed no matter how
       // indexing goes — re-saving would duplicate the note, not repair it.
       setSaved(true);

@@ -54,8 +54,12 @@ export function pickForRead(ordered: readonly RetrievalCandidate[]): RetrievalCa
 }
 
 /** Apply both character caps. A candidate whose body was not read (deleted
- * mid-scan, permission revoked) is skipped, matching buildNoteIndex and
- * searchNoteBodies. Stops at the first note that would exceed the total. */
+ * mid-scan, permission revoked) — or whose body is empty once stripped, as a
+ * frontmatter-only note is — is skipped, matching buildNoteIndex and
+ * searchNoteBodies. Skipping the empty ones is not just tidiness: a packed
+ * note is counted in disclosureLine's "top N of M", so keeping one that
+ * contributes nothing overstates what the answer was built from.
+ * Stops at the first note that would exceed the total. */
 export function packBodies(
   picked: readonly RetrievalCandidate[],
   bodies: ReadonlyMap<string, string>,
@@ -64,7 +68,7 @@ export function packBodies(
   let used = 0;
   for (const c of picked) {
     const raw = bodies.get(c.uri);
-    if (raw === undefined) continue;
+    if (!raw?.trim()) continue;
     const truncated = raw.length > PER_NOTE_CHARS;
     const body = truncated ? raw.slice(0, PER_NOTE_CHARS) : raw;
     if (used + body.length > TOTAL_BUDGET_CHARS) break;

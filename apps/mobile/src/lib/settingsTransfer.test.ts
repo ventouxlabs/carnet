@@ -52,6 +52,27 @@ describe("settings transfer", () => {
     expect(imported.themePreference).toBe("light");
   });
 
+  it("round-trips every prompt override key, including the two non-capture-mode ones", () => {
+    // isPromptOverrides is an allowlist used as a VALIDATOR by
+    // isValidSettingsShape, so an unlisted key doesn't merely get dropped —
+    // it fails shape validation and the whole import is refused. That made a
+    // user's own export unimportable as soon as they customized the Enhance
+    // or Ask prompt, neither of which is a capture mode.
+    const overrides = {
+      idea: "Keep it brief",
+      journal: "Second person",
+      person: "Just the facts",
+      sharedImage: "Describe it",
+      sharedLink: "Summarize it",
+      enhanceProse: "Tighten the prose",
+      retrospective: "Cite every claim",
+    };
+    const imported = parseSettingsTransfer(
+      serializeSettingsTransfer(settings({ promptOverrides: overrides })),
+    );
+    expect(imported.promptOverrides).toEqual(overrides);
+  });
+
   it("drops a SAF capture folder URI because its permission cannot transfer", () => {
     const imported = parseSettingsTransfer(
       serializeSettingsTransfer(

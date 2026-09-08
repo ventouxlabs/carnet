@@ -492,6 +492,29 @@ describe("ask entry point", () => {
     await waitFor(() => expect(screen.getByText("Ask about these 12 notes")).toBeTruthy());
   });
 
+  it("uses singular phrasing when exactly one note would be sent", async () => {
+    vi.mocked(getNoteIndex).mockResolvedValueOnce({
+      builtAt: 1,
+      notes: [
+        {
+          uri: "file:///v/Ideas/only.md",
+          subdir: "Ideas",
+          title: "Only note",
+          createdOrDate: 1_700_000_000_000,
+          tags: [],
+          mode: "idea",
+          excerpt: "",
+        },
+      ],
+    });
+
+    renderScreen();
+    await screen.findByText("Only note");
+    await typeQuery("hello");
+
+    await waitFor(() => expect(screen.getByText("Ask about this 1 note")).toBeTruthy());
+  });
+
   it("hides the ask button when there are no results", async () => {
     vi.mocked(getNoteIndex).mockResolvedValueOnce({ builtAt: 1, notes: [] });
 
@@ -504,13 +527,13 @@ describe("ask entry point", () => {
     await waitFor(() =>
       expect(screen.getByText("Nothing matches — try fewer filters or different words.")).toBeTruthy(),
     );
-    expect(screen.queryByText(/^Ask about these/)).toBeNull();
+    expect(screen.queryByText(/^Ask about th/)).toBeNull();
   });
 
   it("hides the ask button on an empty query even with results present", async () => {
     renderScreen();
     await screen.findByText("First idea");
-    expect(screen.queryByText(/^Ask about these/)).toBeNull();
+    expect(screen.queryByText(/^Ask about th/)).toBeNull();
   });
 
   it("navigates straight to Ask when the explainer isn't needed", async () => {
@@ -545,8 +568,12 @@ describe("ask entry point", () => {
     fireEvent.click(screen.getByText("Search note contents"));
     await waitFor(() => expect(screen.getByText("…matched…")).toBeTruthy());
 
-    await waitFor(() => expect(screen.getByText("Ask about these 3 notes")).toBeTruthy());
-    fireEvent.click(screen.getByText("Ask about these 3 notes"));
+    // TWO, not three: the journal day matched both the body scan and the
+    // index, and orderCandidates dedupes it downstream — so three entries in
+    // the payload are only two notes read and sent. The label must name what
+    // is actually exposed, never more (PRD decision 3).
+    await waitFor(() => expect(screen.getByText("Ask about these 2 notes")).toBeTruthy());
+    fireEvent.click(screen.getByText("Ask about these 2 notes"));
 
     await waitFor(() => expect(navigation.navigate).toHaveBeenCalled());
     const call = vi.mocked(navigation.navigate).mock.calls[0];

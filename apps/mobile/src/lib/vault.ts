@@ -304,7 +304,14 @@ export async function getNoteIndex(): Promise<NoteIndex> {
 export async function upsertNoteInIndex(uri: string, markdown: string): Promise<void> {
   const cached = await loadCachedNoteIndex();
   if (!cached) return;
-  const entry = buildNoteEntry(uri, subdirForMode(inferNoteMode(uri)), markdown);
+  // The uri is authoritative; the mode round-trip is only a fallback. Going
+  // through subdirForMode alone would record "Ideas" for anything outside
+  // Journal/People — including a Notes/ synthesis note — while a full rebuild
+  // reads "Notes" straight off the NoteFileRef, so the same note's subdir
+  // flipped on the next pull-to-refresh. subdirForUri returns null outside the
+  // known note subdirs, which is when the mode collapse is the best guess left.
+  const subdir = subdirForUri(uri) ?? subdirForMode(inferNoteMode(uri));
+  const entry = buildNoteEntry(uri, subdir, markdown);
   const idx = cached.notes.findIndex((n) => n.uri === uri);
   const notes =
     idx === -1

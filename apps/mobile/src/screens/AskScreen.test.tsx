@@ -114,6 +114,23 @@ describe("AskScreen", () => {
     });
   });
 
+  it("falls back to a generic slug when the question has no ASCII alphanumerics", async () => {
+    // slugify keeps only [a-zA-Z0-9] after NFD folding, so an all-CJK (or
+    // Cyrillic/Greek/Arabic, or "???") question yields "". Unguarded,
+    // findCollisionFreeName writes a file literally named ".md" — a hidden
+    // dotfile, invisible in Obsidian and most file managers — while Save
+    // reports plain success. Every other slugify call site in the repo pairs
+    // it with a `|| fallback`; this one is the most exposed of them, because
+    // it slugifies the user's raw typed question rather than an
+    // LLM-produced English title.
+    renderScreen({ question: "去年の夏について何を書いた？" });
+    await waitFor(() => screen.getByText(/You wrote about/));
+    fireEvent.click(screen.getByLabelText("Save answer to vault"));
+
+    await waitFor(() => expect(writeSynthesis).toHaveBeenCalled());
+    expect(writeSynthesis.mock.calls[0][0]).toBe("synthesis");
+  });
+
   it("opens the note behind a citation that WAS in the retrieval set", async () => {
     const entry = {
       filepath: CANDIDATE_A.uri,

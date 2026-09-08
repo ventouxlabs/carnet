@@ -419,6 +419,27 @@ describe("upsertNoteInIndex picks up todos with no extra wiring", () => {
     // Still just the one vault scan (from refreshTagIndex) — upsert never rescans.
     expect(listNoteFiles).toHaveBeenCalledOnce();
   });
+
+  it("records a Notes/ note under its real subdir, so it survives the next rebuild", async () => {
+    // The upsert path used to derive the subdir from the note's MODE, and
+    // subdirForMode only knows Journal/People/Ideas — so a saved synthesis
+    // note in Notes/ landed as "Ideas". A full rebuild takes the subdir from
+    // the NoteFileRef instead and records "Notes", so the same note's subdir
+    // flipped on the next pull-to-refresh, changing its TodosScreen label and
+    // whether searchNotes' subdir filter matched it. The uri is authoritative
+    // here, which is exactly what subdirForUri exists for.
+    addNote("file:///v/Ideas/a.md", "Ideas", "---\ntags: [x]\n---\n# A\n\nbody\n");
+    await refreshTagIndex(); // builds + persists the note index cache
+
+    await upsertNoteInIndex(
+      "file:///v/Notes/what-did-i-write.md",
+      "---\ncreated: 2026-09-08\ntags: [synthesis]\n---\n# What did I write\n\nYou wrote about it.\n",
+    );
+
+    const after = await loadCachedNoteIndex();
+    const entry = after!.notes.find((n) => n.uri === "file:///v/Notes/what-did-i-write.md");
+    expect(entry?.subdir).toBe("Notes");
+  });
 });
 
 // ── getAllTodos ───────────────────────────────────────────────────────────────

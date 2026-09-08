@@ -643,4 +643,39 @@ describe("askVault routing", () => {
     expect(outcome.result.markdown).toBe("fallback answer");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("does NOT force enhanceModel onto the fallback provider", async () => {
+    // Verbatim twin of the enhanceProse case above, and that duplication is
+    // the point: askVault carries its own copy of the primary-only model
+    // latch. Until this test existed the copy was inert under test —
+    // BASE_SETTINGS.enhanceModel is "" and the askVault fallback test above
+    // never inspects a request body, so deleting `primaryAttempt` from
+    // askVault failed nothing and the two copies could silently drift. This
+    // is the feature's headline cross-backend path (remote primary, local
+    // Relais fallback), which is exactly where forcing a primary's model id
+    // onto an endpoint that never listed it turns a recoverable network blip
+    // into a hard "model not found".
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      ...BASE_SETTINGS,
+      enhanceModel: "anthropic/claude-sonnet-5",
+      fallbackProviderId: "relais",
+      llmProviders: BASE_SETTINGS.llmProviders.map((p) =>
+        p.id === "relais" ? { ...p, model: "local-small" } : p,
+      ),
+    });
+    fetchMock.mockRejectedValueOnce(new TypeError("Network request failed"));
+    fetchMock.mockResolvedValueOnce(makeOkResponse("fallback answer"));
+
+    await askVault("q?", []);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const primary = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string,
+    ) as { model: string };
+    const fallback = JSON.parse(
+      (fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string,
+    ) as { model: string };
+    expect(primary.model).toBe("anthropic/claude-sonnet-5");
+    expect(fallback.model).toBe("local-small");
+  });
 });

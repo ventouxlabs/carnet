@@ -50,6 +50,22 @@ describe("packBodies", () => {
   it("skips a uri with no body read (unreadable note)", () => {
     expect(packBodies([cand("u1", "A")], new Map())).toEqual([]);
   });
+
+  it("skips a note whose body is empty or whitespace-only", () => {
+    // A frontmatter-only note strips to "". Packing it ships an empty
+    // <USER_INPUT> block the model can do nothing with, and — worse — counts
+    // it in disclosureLine's "top N of M", inflating the numerator with a
+    // note that contributed nothing. The disclosure's whole job is to be an
+    // honest count of what the answer was actually built from.
+    const out = packBodies(
+      [cand("u1", "Empty"), cand("u2", "Real")],
+      new Map([
+        ["u1", "   \n\n  "],
+        ["u2", "real body"],
+      ]),
+    );
+    expect(out.map((n) => n.uri)).toEqual(["u2"]);
+  });
 });
 
 const sel = (uri: string, title: string, body = "b") => ({ uri, title, body, truncated: false });

@@ -27,7 +27,7 @@ import {
   type NoteIndex,
   type NoteIndexEntry,
 } from "../lib/vault";
-import { MAX_NOTES, type RetrievalCandidate } from "../lib/retrospective";
+import { MAX_NOTES, orderCandidates, type RetrievalCandidate } from "../lib/retrospective";
 import { markAskExplainerSeen, shouldShowAskExplainer } from "../lib/askExplainer";
 import { MIN_TAP_TARGET, useCarnetTheme } from "../lib/theme";
 import { NoteCard, modeStamp } from "../components/NoteCard";
@@ -36,7 +36,10 @@ import { AskExplainerDialog } from "../components/AskExplainerDialog";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Search">;
 
-/** Modes that can appear in the note index (one per note subdir). */
+/** Capture modes that can appear in the note index. NOT one per note subdir —
+ * there are four subdirs (noteSubdirs.ts) and three modes: a `Notes/` note
+ * (a saved synthesis) has no mode of its own and filters under "Idea", which
+ * is inferNoteMode's documented collapse-to-idea behaviour, not a gap here. */
 const MODE_FILTERS: readonly CaptureMode[] = ["idea", "journal", "person"];
 
 /** Max tag pills offered in the expanded filter row — the most-used tags
@@ -241,10 +244,27 @@ export default function SearchScreen({ route, navigation }: Props) {
     return [...fromBody, ...fromIndex];
   }, [bodyMatches, results, noteForUri]);
 
-  // The label's number is what AskScreen will actually READ (capped at
-  // MAX_NOTES), not how many are on screen — see this task's brief for why
-  // those two counts are deliberately different and both required.
-  const askCount = Math.min(candidates.length, MAX_NOTES);
+  // The label's number is what AskScreen will actually READ, not how many
+  // rows are on screen — see this task's brief for why those two counts are
+  // deliberately different and both required. Two corrections apply, in this
+  // order: the union above can list one note twice (matched by both the body
+  // scan and the index) and orderCandidates drops the duplicate downstream,
+  // then MAX_NOTES caps the read. Counting the raw rows would name a number
+  // larger than what is read or sent, and this label's whole job is to not
+  // overstate the exposure (PRD decision 3). Post-read shortfalls — a note
+  // that could not be read, or one dropped at the character budget — belong
+  // to AskScreen's disclosure line, not here.
+  const askCount = useMemo(
+    () =>
+      Math.min(
+        orderCandidates(
+          candidates.filter((c) => c.fromBodyMatch),
+          candidates.filter((c) => !c.fromBodyMatch),
+        ).length,
+        MAX_NOTES,
+      ),
+    [candidates],
+  );
   const showAskButton = query.trim().length > 0 && candidates.length > 0;
 
   // Holds the question/candidates chosen at press time, across the async
@@ -259,7 +279,12 @@ export default function SearchScreen({ route, navigation }: Props) {
   const [askError, setAskError] = useState<string | null>(null);
 
   const handleAskPress = useCallback(async () => {
-    const params = { question: query, candidates };
+    // Trimmed here, once: the button is gated on `query.trim()`, so the raw
+    // string's surrounding whitespace is never what the user meant to ask.
+    // This is the only place the params are built — the explainer path
+    // re-navigates from pendingAskRef, not from `query` — so trimming at this
+    // call site covers both routes into AskScreen.
+    const params = { question: query.trim(), candidates };
     let showExplainer: boolean;
     try {
       showExplainer = await shouldShowAskExplainer();
@@ -542,7 +567,7 @@ export default function SearchScreen({ route, navigation }: Props) {
           ]}
         >
           <Button mode="contained-tonal" onPress={() => void handleAskPress()}>
-            {`Ask about these ${askCount} notes`}
+            {askCount === 1 ? "Ask about this 1 note" : `Ask about these ${askCount} notes`}
           </Button>
         </View>
       )}
