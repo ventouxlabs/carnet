@@ -23,7 +23,7 @@ Capture (Idea / Journal / Contact / Photo / Audio / Share / notification inline-
        vision: enrichSharedImage + ocrCardViaVision on visionModel; stream:false always)
   → sanitize LLM output           lib/enrichSanitize.ts  (B3, at the executeChat chokepoint)
   → render Markdown               lib/writer.ts
-  → write local folder            {captureFolderPath}/{Ideas,Journal,People,Photos,Attachments}
+  → write local folder            {captureFolderPath}/{Ideas,Journal,Notes,People,Photos,Attachments}
         │  (offline → lib/queue.ts buffers in AsyncStorage, drains when online)
         │  (Idea/Journal default SAVE-FIRST: file lands instantly, enrichment patches after — B4)
         ▼  Syncthing p2p

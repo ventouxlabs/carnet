@@ -77,6 +77,7 @@ vi.mock("expo-file-system/legacy", () => {
 
 import {
   writeIdea,
+  writeSynthesis,
   writeBinary,
   writeTextFile,
   appendJournal,
@@ -160,6 +161,30 @@ describe("writeIdea", () => {
 
     const { filepath: fp3 } = await writeIdea(slug, "# Third\n");
     expect(fp3).toMatch(/test-slug-3\.md$/);
+  });
+});
+
+// ── writeSynthesis ────────────────────────────────────────────────────────────
+
+describe("writeSynthesis", () => {
+  beforeEach(clearFiles);
+
+  it("writes a synthesis note under Notes/", async () => {
+    const { filepath } = await writeSynthesis("what-about-coffee", "---\ntags: [synthesis]\n---\n# Q");
+    expect(filepath).toContain("/Notes/");
+    expect(filepath).toContain("what-about-coffee.md");
+  });
+
+  it("suffixes on slug collision rather than overwriting", async () => {
+    await writeSynthesis("dup", "a");
+    const { filepath } = await writeSynthesis("dup", "b");
+    expect(filepath).toContain("dup-2.md");
+  });
+
+  it("includes Notes in the scanned subdirs", async () => {
+    await writeSynthesis("scanned", "x");
+    const files = await listNoteFiles();
+    expect(files.some((f) => f.subdir === "Notes")).toBe(true);
   });
 });
 

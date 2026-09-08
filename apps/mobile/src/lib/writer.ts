@@ -173,6 +173,28 @@ export async function writeIdea(
 }
 
 /**
+ * Write a synthesis note (a saved retrospective-query answer) under Notes/.
+ *
+ * Notes/ holds computed artifacts that cite other notes, as distinct from
+ * Ideas/ which holds things the user jotted. Create-only with collision
+ * suffixing, exactly like writeIdea — a re-asked question saves a second file
+ * rather than overwriting the first answer.
+ *
+ * Does NOT touch the note index; the caller pairs this with
+ * upsertNoteInIndex, matching every other write site.
+ */
+export async function writeSynthesis(
+  slug: string,
+  markdown: string,
+): Promise<{ filepath: string }> {
+  const root = await resolveRoot();
+  const notesUri = await root.fs.findOrCreateSubdir(root.uri, "Notes");
+  const filename = await findCollisionFreeName(notesUri, slug, ".md", root.fs);
+  const filepath = await writeNewFile(notesUri, filename, markdown, root.fs);
+  return { filepath };
+}
+
+/**
  * Append a journal entry to today's file. If the file already exists, the new
  * entry's body (frontmatter stripped) is appended under a `## HH:MM` heading.
  *
@@ -451,7 +473,7 @@ export async function updateNoteIfUnchanged(
 
 /** Vault subdirs that hold markdown notes. Photos/Audio/Files hold binaries
  * and are deliberately excluded from note enumeration. */
-const NOTE_SUBDIRS = ["Ideas", "Journal", "People"] as const;
+const NOTE_SUBDIRS = ["Ideas", "Journal", "Notes", "People"] as const;
 export type NoteSubdir = (typeof NOTE_SUBDIRS)[number];
 
 export interface NoteFileRef {
@@ -482,7 +504,7 @@ async function listNoteDirMarkdown(): Promise<NoteFileRef[]> {
 
 /**
  * Enumerate every CANONICAL markdown note across the vault's note subdirs
- * (Ideas, Journal, People). Binaries (Photos/Audio/Files) are excluded, and so
+ * (Ideas, Journal, Notes, People). Binaries (Photos/Audio/Files) are excluded, and so
  * are Syncthing `*.sync-conflict-*` copies — before that filter they were
  * indexed as regular notes, appearing in Search and inflating tag counts.
  * This is the source the tag index scans — Recents (AsyncStorage, max 20) is a
@@ -500,7 +522,7 @@ export async function listNoteFiles(): Promise<NoteFileRef[]> {
  *
  * Deliberately does NOT reuse listNoteDirMarkdown's `findOrCreateSubdir` —
  * that CREATES the subdir on read, which would fabricate empty
- * Ideas/Journal/People folders inside a never-used internal root on a fresh
+ * Ideas/Journal/Notes/People folders inside a never-used internal root on a fresh
  * install (and make an "empty root → no migration" test lie). This uses the
  * read-only `findSubdir`, which returns null for an absent subdir instead.
  * Syncthing conflict copies are excluded, matching listNoteFiles' scope.

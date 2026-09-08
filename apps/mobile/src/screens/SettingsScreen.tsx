@@ -317,9 +317,9 @@ export default function SettingsScreen() {
         grants Carnet access to the folder, and is the reliable way to use
         shared storage (e.g. a Syncthing folder). A typed path only works
         where the app can already read, which on current Android it usually
-        can&apos;t. Carnet creates Ideas/, Journal/, People/, Photos/ directly
-        inside the chosen folder — pick the folder you want those to live in,
-        not the parent.
+        can&apos;t. Carnet creates Ideas/, Journal/, Notes/, People/, Photos/
+        directly inside the chosen folder — pick the folder you want those to
+        live in, not the parent.
       </HelperText>
       <View style={styles.folderRow}>
         <Button

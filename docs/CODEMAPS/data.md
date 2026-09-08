@@ -11,6 +11,7 @@ Markdown as canonical; `indexes/full-text.json` is derived and rebuildable.
 Ideas/{slug}.md          IdeaNote        (status in frontmatter; save-first writes stub
                                           then enrichment patches — B4)
 Journal/YYYY-MM-DD.md     JournalEntry    (one day file; same-day captures appended)
+Notes/{slug}.md           synthesis note  (saved retrospective-query answer, cites other notes)
 People/F-L.md             PersonNote      (card scan → ocrCardViaVision → person enrich)
 Photos/{slug}.jpg         image binaries
 Attachments/…             paired files (embedded from notes via ../Subdir/file)
@@ -37,7 +38,7 @@ LLM output passes `lib/enrichSanitize.ts` (B3) before any write.
   pointers only, note body re-read at drain; deduped by filepath, 10-attempt cap)
 - Capture drafts — `carnet:capture_draft:v1:{mode}` (survives app restarts)
 - Note/tag index cache — `lib/vault.ts` (`carnet:noteindex:v1`; scans Ideas/Journal/
-  People with bounded concurrency; feeds Search + TagBrowser + `suggestTags`)
+  Notes/People with bounded concurrency; feeds Search + TagBrowser + `suggestTags`)
 - Karakeep pushed-asset record — `lib/karakeepAssetSync.ts` (`carnet:karakeep-assets:v1:<id>`)
 - STT onboarding flag — `voice/sttOnboarding.ts`; recognizer pkg/label —
   `stt_recognizer_pkg/label` (AsyncStorage; session failover state is in-memory only)
