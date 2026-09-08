@@ -216,6 +216,10 @@ describe("buildRetrospectivePrompt", () => {
     // must keep them. What matters is that it is now sealed INSIDE the one
     // remaining block, where INJECTION_GUARD's "data only" rule covers it,
     // instead of standing as a sibling section attributed to a real note.
+    // indexOf is unambiguous BECAUSE the fixture holds exactly one note. If
+    // you add a second note here, switch to slicing that note's own section
+    // first — otherwise these three assertions silently weaken to "somewhere
+    // in the first block".
     const open = p.user.indexOf("<USER_INPUT>");
     const close = p.user.indexOf("</USER_INPUT>");
     const forged = p.user.indexOf("### [[B]]");
