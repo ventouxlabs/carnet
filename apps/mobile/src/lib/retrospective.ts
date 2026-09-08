@@ -123,7 +123,15 @@ export function buildSynthesisNote(
   sources: readonly SelectedNote[],
   today: string,
 ): string {
-  const safeQuestion = question.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  // Collapse embedded newlines/CR/tabs FIRST, before escaping. A raw newline
+  // would otherwise land inside the frontmatter block as its own line (e.g.
+  // "coffee\ntags: [injected]" would inject a second `tags:` field) and
+  // would also break the single-line `# ` heading below. extractFrontmatterField
+  // (frontmatter.ts) parses line-by-line and never unescapes, so encoding the
+  // newline as literal "\n" text is not an option — it would read back as a
+  // literal backslash-n, not a real line break.
+  const oneLineQuestion = question.replace(/\s+/g, " ").trim();
+  const safeQuestion = oneLineQuestion.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const sourceList = sources.map((s) => `- [[${s.title}]]`).join("\n");
   return [
     "---",
@@ -131,7 +139,7 @@ export function buildSynthesisNote(
     "tags: [synthesis]",
     `question: "${safeQuestion}"`,
     "---",
-    `# ${question}`,
+    `# ${oneLineQuestion}`,
     "",
     answer.trim(),
     "",

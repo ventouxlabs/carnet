@@ -92,4 +92,27 @@ describe("buildSynthesisNote", () => {
     const md = buildSynthesisNote('say "hi"', "a", [], "2026-09-07");
     expect(md).toContain('question: "say \\"hi\\""');
   });
+
+  it("collapses a newline in the question so the frontmatter question value stays on one line", () => {
+    const md = buildSynthesisNote("coffee\nmore", "a", [], "2026-09-07");
+    const frontmatter = md.split("---")[1] ?? "";
+    const questionLines = frontmatter.split("\n").filter((l) => l.trim().startsWith("question:"));
+    expect(questionLines).toHaveLength(1);
+    expect(questionLines[0]).toContain("coffee more");
+  });
+
+  it("does not let a question inject an extra tags: line into frontmatter", () => {
+    const md = buildSynthesisNote("coffee\ntags: [injected]", "a", [], "2026-09-07");
+    const frontmatter = md.split("---")[1] ?? "";
+    const tagsLines = frontmatter.split("\n").filter((l) => l.trim().startsWith("tags:"));
+    expect(tagsLines).toHaveLength(1);
+    expect(tagsLines[0].trim()).toBe("tags: [synthesis]");
+  });
+
+  it("collapses a newline in the question so the heading is a single line", () => {
+    const md = buildSynthesisNote("coffee\nmore", "a", [], "2026-09-07");
+    const headingLines = md.split("\n").filter((l) => l.startsWith("# "));
+    expect(headingLines).toHaveLength(1);
+    expect(headingLines[0]).toBe("# coffee more");
+  });
 });
