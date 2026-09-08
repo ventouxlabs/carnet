@@ -10,7 +10,7 @@
 // vault AND the index in one action (without the second half the note is on
 // disk but invisible to Search, which reads as "it vanished").
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PaperProvider } from "react-native-paper";
 
 import { carnetLight } from "../lib/theme";
@@ -169,6 +169,81 @@ describe("AskScreen", () => {
     askVault.mockRejectedValue(new Error("timed out after 30s"));
     renderScreen();
     await waitFor(() => expect(screen.getByText("timed out after 30s")).toBeTruthy());
+  });
+
+  it("offers a retry after a failure instead of dead-ending", async () => {
+    // The failure message used to live only in a Snackbar that self-clears
+    // after 7s, and the run-once ref blocked any second attempt — leaving the
+    // question on screen with no answer, no error and no way forward.
+    askVault.mockRejectedValueOnce(new Error("timed out after 30s"));
+    renderScreen();
+
+    const retry = await screen.findByLabelText("Retry");
+    expect(screen.getByText("timed out after 30s")).toBeTruthy();
+
+    fireEvent.click(retry);
+    await waitFor(() => expect(askVault).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText(/You wrote about/)).toBeTruthy());
+  });
+
+  it("treats an empty model answer as a failure, not a blank note", async () => {
+    // Plan: "An LLM answer that comes back empty or unparseable surfaces as a
+    // failure, not as a blank note." An armed Save here would write an empty
+    // synthesis note into the vault.
+    askVault.mockResolvedValue({
+      result: { markdown: "   \n  \n", model: "m" },
+      usedFallback: false,
+      fallbackProviderId: null,
+      providerLabel: "Test",
+    });
+    renderScreen();
+
+    await waitFor(() =>
+      expect(screen.getByText("The model returned nothing.")).toBeTruthy(),
+    );
+    expect(screen.queryByLabelText("Save answer to vault")).toBeNull();
+    expect(await screen.findByLabelText("Retry")).toBeTruthy();
+  });
+
+  it("keeps Save latched after the confirmation toast auto-dismisses", async () => {
+    // `saved` used to be both the toast's visibility flag and the button's
+    // latch, so Paper's 2.5s auto-dismiss re-armed the button. writeSynthesis
+    // collision-resolves rather than overwrites, so a second tap writes a
+    // DUPLICATE note (q-2.md) — savingRef only guards concurrent taps.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderScreen();
+      await waitFor(() => screen.getByText(/You wrote about/));
+      fireEvent.click(screen.getByLabelText("Save answer to vault"));
+      await waitFor(() => expect(writeSynthesis).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        vi.advanceTimersByTime(6000);
+      });
+
+      expect(screen.getByText("Saved")).toBeTruthy();
+      expect(screen.queryByText("Save to vault")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("admits the note is missing from Search when indexing fails after a good write", async () => {
+    // The note IS on disk, so this is not a save failure — but claiming a
+    // plain success would reproduce exactly the "I saved it and it vanished"
+    // outcome acceptance criterion 4 exists to prevent.
+    upsertNoteInIndex.mockRejectedValue(new Error("index write failed"));
+    renderScreen();
+    await waitFor(() => screen.getByText(/You wrote about/));
+    fireEvent.click(screen.getByLabelText("Save answer to vault"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Saved to Notes, but Search needs a refresh to show it."),
+      ).toBeTruthy(),
+    );
+    // Still latched: the write succeeded, so re-saving would duplicate it.
+    expect(screen.getByText("Saved")).toBeTruthy();
   });
 
   it("does not call the model when no candidate body could be read", async () => {

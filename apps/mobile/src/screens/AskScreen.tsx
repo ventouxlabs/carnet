@@ -6,8 +6,8 @@
  * resolution are pure (lib/retrospective.ts), the read is bounded by the vault
  * module (readNoteBodies), the model call goes through the provider seam
  * (dispatcher.askVault), and the save is the vault's own writer. What lives
- * here is the pipeline order, the three states it can be in, and the two
- * honesty properties the feature depends on:
+ * here is the pipeline order, the four states it can be in (loading, answered,
+ * empty, failed), and the honesty properties the feature depends on:
  *
  *  - The answer is sanitized ONCE, before it reaches either surface. The
  *    renderer is the first place model output lands, so gating only the save
@@ -16,9 +16,15 @@
  *    partial answer that reads as complete is the failure mode here: "your
  *    notes don't say much about this" and "the notes holding the answer were
  *    never read" are indistinguishable to the user otherwise.
+ *  - An empty answer is a failure, never a blank note offered for saving.
+ *  - A save reports what actually happened: a write that lands on disk but
+ *    fails to index says so, rather than claiming a plain success.
+ *
+ * Every failure state is recoverable — each one renders a Retry rather than
+ * leaving the question on screen with nothing under it.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Snackbar, Text } from "react-native-paper";
 
 import {
@@ -61,6 +67,12 @@ export interface AskScreenProps {
 
 type Phase = "loading" | "answered" | "empty" | "failed";
 
+/** Trimmed from enhanceProse's "The model returned nothing — the note was left
+ * unchanged." The second clause doesn't apply here: there is no note yet. */
+const EMPTY_ANSWER = "The model returned nothing.";
+const SAVED_OK = "Saved to Notes.";
+const SAVED_NOT_INDEXED = "Saved to Notes, but Search needs a refresh to show it.";
+
 export default function AskScreen({ route, navigation }: AskScreenProps) {
   const theme = useCarnetTheme();
   const { question, candidates } = route.params;
@@ -68,19 +80,27 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [segments, setSegments] = useState<AnswerSegment[]>([]);
   const [disclosure, setDisclosure] = useState<string | null>(null);
+  /** Why the ask failed. Rendered in the body (with Retry), NOT in a Snackbar:
+   * a self-clearing toast would leave the screen showing the question and
+   * nothing else, with no way to try again. Distinct from `error` below, which
+   * is transient feedback about an action the user just took. */
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The sanitized answer + the notes it was actually built from, held for the
    * save path so it writes the same bytes that were rendered. */
   const answerRef = useRef<{ markdown: string; sources: SelectedNote[] } | null>(null);
 
-  // Plain useEffect with a run-once ref, NOT useFocusEffect: re-running on
-  // focus would re-ask the model (a paid, slow call) every time the user
+  // Plain useEffect keyed to an attempt counter, NOT useFocusEffect: re-running
+  // on focus would re-ask the model (a paid, slow call) every time the user
   // returns from tapping a citation. `candidates` is a fresh array identity on
-  // every render, so a dependency list alone cannot hold this to one run.
-  const askedRef = useRef(false);
+  // every render, so a dependency list alone cannot hold this to one run — the
+  // ref does. Retry bumps `attempt`, which is the only thing that lets the
+  // effect body run a second time.
+  const [attempt, setAttempt] = useState(0);
+  const ranForAttemptRef = useRef(-1);
   useEffect(() => {
-    if (askedRef.current) return;
-    askedRef.current = true;
+    if (ranForAttemptRef.current === attempt) return;
+    ranForAttemptRef.current = attempt;
 
     const controller = new AbortController();
     let active = true;
@@ -115,13 +135,24 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
         // Sanitize once, here — both the renderer below and the save path read
         // this string, so no route exists for raw model output to reach either.
         const sanitized = sanitizeMarkdown(outcome.result.markdown);
+
+        // An empty answer is a failure, not an answer. Arming Save on it would
+        // offer to write a blank synthesis note into the vault. Note this is
+        // checked AFTER sanitizing: an answer consisting only of neutralized
+        // content is empty too.
+        if (sanitized.trim() === "") {
+          setLoadError(EMPTY_ANSWER);
+          setPhase("failed");
+          return;
+        }
+
         answerRef.current = { markdown: sanitized, sources: selected };
         setSegments(resolveCitations(sanitized, selected));
         setDisclosure(disclosureLine(selected.length, ordered.length));
         setPhase("answered");
       } catch (e: unknown) {
         if (!active) return;
-        setError(askErrorMessage(e));
+        setLoadError(askErrorMessage(e));
         setPhase("failed");
       }
     };
@@ -131,34 +162,59 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
       active = false;
       controller.abort();
     };
-  }, [question, candidates]);
+  }, [attempt, question, candidates]);
+
+  const handleRetry = useCallback(() => {
+    setLoadError(null);
+    setDisclosure(null);
+    setPhase("loading");
+    setAttempt((a) => a + 1);
+  }, []);
 
   // Ref guard matches every other async action in this app (#114 pattern): a
   // double-tap must not write two synthesis notes into the vault.
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
+  /** PERMANENT latch — the answer has been written, so Save must never re-arm.
+   * Deliberately separate from `toast` below: when these were one flag, Paper's
+   * auto-dismiss re-enabled the button 2.5s after a save, and writeSynthesis
+   * collision-resolves rather than overwrites, so the next tap wrote a
+   * duplicate note. savingRef only guards CONCURRENT taps, not sequential ones. */
   const [saved, setSaved] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const handleSave = useCallback(async () => {
     const answer = answerRef.current;
-    if (savingRef.current || !answer) return;
+    if (savingRef.current || saved || !answer) return;
     savingRef.current = true;
     setSaving(true);
     try {
       const md = buildSynthesisNote(question, answer.markdown, answer.sources, todayLocal());
       const { filepath } = await writeSynthesis(slugify(question), md);
-      // No writer in writer.ts self-indexes; every call site pairs the two.
-      // Without this the note is on disk but missing from Search and
-      // TagBrowser until a manual pull-to-refresh, which reads as "I saved it
-      // and it vanished."
-      void upsertNoteInIndex(filepath, md).catch(() => undefined);
+      // The file is on disk from here on, so latch Save closed no matter how
+      // indexing goes — re-saving would duplicate the note, not repair it.
       setSaved(true);
+      // No writer in writer.ts self-indexes; every call site pairs the two.
+      // DELIBERATE DEVIATION: the other call sites fire-and-forget this
+      // (`void upsertNoteInIndex(...).catch(() => undefined)`, CaptureScreen.tsx)
+      // because there the index is a nicety. Here index visibility IS the
+      // acceptance criterion — a swallowed failure leaves the note on disk and
+      // absent from Search, which is precisely the "I saved it and it vanished"
+      // outcome this pairing exists to prevent. So: await it, and if it fails,
+      // still confirm the write but say the note needs a refresh to appear.
+      // Please don't "fix" this back to fire-and-forget.
+      try {
+        await upsertNoteInIndex(filepath, md);
+        setToast(SAVED_OK);
+      } catch {
+        setToast(SAVED_NOT_INDEXED);
+      }
     } catch (e: unknown) {
       setError(askErrorMessage(e));
     } finally {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [question]);
+  }, [question, saved]);
 
   // Ref guard for the same reason as save: a double-tap must not stack the
   // detail screen twice. Mirrors RecentDetailScreen's openRelated.
@@ -201,29 +257,40 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
           </Text>
         )}
 
+        {phase === "failed" && loadError !== null && (
+          <View style={styles.failed}>
+            <Text variant="bodyMedium">{loadError}</Text>
+            <Button mode="outlined" accessibilityLabel="Retry" onPress={handleRetry}>
+              Try again
+            </Button>
+          </View>
+        )}
+
         {phase === "answered" && (
           // Segments render as sibling Text runs inside one paragraph so a
           // citation stays inline with the prose around it. Block-level
           // markdown rendering is deliberately not used: it cannot survive
           // being split across segment boundaries without losing the
-          // pressable citations, which are the point of the screen.
+          // tappable citations, which are the point of the screen.
+          //
+          // A citation is a Text with onPress, NOT a Pressable: an inline view
+          // nested in RN Text needs measurable dimensions on Android, and
+          // hitSlop on such a child isn't reliably honored. Nothing in this
+          // repo has proven the nested-Pressable pattern on-device, and jsdom
+          // cannot catch the difference — so use the form that is known to work.
           <Text variant="bodyLarge" style={styles.answer}>
             {segments.map((seg, i) =>
               seg.linkUri ? (
-                <Pressable
+                <Text
                   key={i}
+                  variant="bodyLarge"
                   accessibilityRole="link"
                   accessibilityLabel={`Open note ${seg.text}`}
-                  hitSlop={{ top: spacing.sm, bottom: spacing.sm }}
                   onPress={() => void openCitation(seg.linkUri!)}
+                  style={{ color: theme.colors.primary, textDecorationLine: "underline" }}
                 >
-                  <Text
-                    variant="bodyLarge"
-                    style={{ color: theme.colors.primary, textDecorationLine: "underline" }}
-                  >
-                    {seg.text}
-                  </Text>
-                </Pressable>
+                  {seg.text}
+                </Text>
               ) : (
                 <Text key={i} variant="bodyLarge">
                   {seg.text}
@@ -260,8 +327,14 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
       <Snackbar visible={error !== null} onDismiss={() => setError(null)} duration={7000}>
         {error ?? ""}
       </Snackbar>
-      <Snackbar visible={saved} onDismiss={() => setSaved(false)} duration={2500}>
-        Saved to Notes.
+      <Snackbar
+        visible={toast !== null}
+        onDismiss={() => setToast(null)}
+        // The not-indexed variant asks the user to do something — give it time
+        // to be read, per RecentDetailSnackbars' precedent.
+        duration={toast === SAVED_NOT_INDEXED ? 7000 : 2500}
+      >
+        {toast ?? ""}
       </Snackbar>
     </View>
   );
@@ -273,6 +346,7 @@ const styles = StyleSheet.create({
   question: { fontStyle: "italic" },
   centered: { alignItems: "center", gap: spacing.md, paddingVertical: spacing.xxl },
   answer: { lineHeight: 24 },
+  failed: { gap: spacing.lg, alignItems: "flex-start" },
   disclosure: { fontStyle: "italic" },
   actions: { padding: spacing.lg, minHeight: MIN_TAP_TARGET },
 });
