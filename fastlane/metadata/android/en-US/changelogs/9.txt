@@ -1,0 +1,5 @@
+- New: ask a question about the notes on your Search screen and Carnet writes back an answer drawn from them — every claim links to the note it came from, so you can check it
+- The answer is yours to keep or discard: nothing is written until you tap Save, and then it lands in a new Notes/ folder in your vault with its sources listed
+- A link only appears when it points at a note that was actually used; if the model invents a source, you see plain text instead of a link that goes nowhere
+- Works fully offline against a local model, and tells you before sending your notes to a provider that isn't on your own machine
+- Fixed: the Storage settings no longer suggest typing a vault path by hand, which silently fails on newer Android — use "Pick folder"
