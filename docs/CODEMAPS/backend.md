@@ -1,5 +1,5 @@
 # Device Pipeline & Integrations
-<!-- Generated: 2026-07-17 | Files scanned: ~152 (87 src + tests) | Token estimate: ~880 -->
+<!-- Generated: 2026-09-08 | Files scanned: 308 (171 src + 137 tests) | Token estimate: ~1600 -->
 
 The mobile app has no required HTTP server. Its "backend" is the **on-device enrichment +
 persistence pipeline**, plus an opt-in **Karakeep export** REST client. `apps/mdcrm` is an
@@ -15,8 +15,8 @@ It has no LLM or mobile-runtime dependency. See `docs/mdcrm/architecture.md`.
 
 ## Capture → vault  (mode → enrich → write)
 ```
-Idea     CaptureScreen   → omniroute.enrichIdea     → writer.writeIdea      → Ideas/{slug}.md
-Journal  CaptureScreen   → omniroute.enrichJournal  → writer.appendJournal  → Journal/YYYY-MM-DD.md
+Idea     CaptureScreen   → dispatcher.enrichIdea    → writer.writeIdea      → Ideas/{slug}.md
+Journal  CaptureScreen   → dispatcher.enrichJournal → writer.appendJournal  → Journal/YYYY-MM-DD.md
 Person   PhotoCapture    → ocr → enrichPerson        → writer.writePerson    → People/F-L.md
 Photo    PhotoCapture    → enrich (vision)           → writer.writeBinary    → Photos/{slug}.jpg
 Audio    AudioCapture    → transcribe → enrichJournal → appendJournal
@@ -26,10 +26,15 @@ Share    ShareReceive    → enrichSharedImage / Link / raw file → writeIdea /
                            scoped-storage-unreadable)
 ```
 
-## LLM client — `lib/omniroute.ts` (HTTPS, 674 ln)
+## LLM client — `lib/llmClient.ts` (701 ln)
+The single OpenAI-compatible client behind the dispatcher. `lib/omniroute.ts` and
+`lib/localLlm.ts` were consolidated into it and **no longer exist**; older docs and
+archived plans naming them are history, not drift.
 `enrichIdea` `enrichJournal` `enrichPerson` `enrichSharedImage` `enrichSharedLink`
-`transcribeAudio` `autoTranscribeIfEnabled` `promoteIdea` `listModels`
-errors: `isNotConfiguredError` `isPermanentError`; `withSystemOverride` `assertBase`.
+`transcribeAudio` `autoTranscribeIfEnabled` `promoteIdea` `listModels` `enhanceProse`
+`askRetrospective` `ocrCardViaVision`
+errors: `isNotConfiguredError` `isPermanentError` `isInsecureTransportError`;
+`withSystemOverride` `assertModelConfigured` `assertUrlConfigured`.
 
 ## Shared HTTP core — `lib/httpClient.ts` (118 ln)
 The security surface BOTH network clients share (was hand-duplicated):
@@ -74,7 +79,7 @@ Shared queue scaffolding (createLock/localId/sanitizeError) lives in
 Opt-in REST client to a self-hosted Karakeep (`{url}/api/v1`, Bearer key, HTTPS-or-LAN).
 `createTextBookmark` · `updateTextBookmark` (PATCH — re-export in place, 404→create) · `attachTags` ·
 `uploadAsset` (multipart) · `attachAssetToBookmark`. Shared `karakeepFetch` core (hard timeout,
-HTTPS enforce, Bearer redaction — mirrors omniroute hardening).
+HTTPS enforce, Bearer redaction — mirrors the LLM client's hardening).
 `karakeepExport.pushNoteAttachments` = incremental asset sync; `karakeepAssetSync.ts` keeps a
 per-bookmark pushed-key record in AsyncStorage (skip already-synced, retry failed, no dups).
 Driven from RecentDetailScreen "Send to Karakeep" via `lib/karakeepNoteExport.ts` (228 —
@@ -87,7 +92,8 @@ informational skip, not an error.
 ALL backend-divergent calls cross it now: the 6 enrich fns + predicates PLUS
 `transcribeAudio` / `autoTranscribeIfEnabled` / `ocrCardViaVision` /
 `listModels` / `askVault`. Screens/components import from dispatcher only;
-payload caps (`assertBase64UnderLimit`, `MAX_*`) stay omniroute imports by design.
+payload caps (`assertBase64UnderLimit`, `MAX_*`) are re-exported from `llmClient`
+via `llmGuards.ts` by design.
 `askVault` (retrospective query) mirrors `enhanceProse` exactly — same
 `resolveEnhanceProvider`, same `withFallbackChain`, same primary-attempt-only
 model override — so it works against OmniRoute and a local Relais unbranched.
@@ -142,8 +148,8 @@ twice with different members (`storage.ts` vs `queue.ts`).
 ## On-device extras
 STT `voice/VoiceButton.tsx` + `voice/recognizerSelect.ts`; STT onboarding `voice/sttReadiness.ts`
 (en-model probe, code-12 dead-end) + `voice/sttOnboarding.ts` (proactive prompt logic);
-card OCR `ocrCardViaVision()` in `lib/omniroute.ts` (chat-vision call; the standalone `/ocr`
-client was retired in Stage 2 B2); on-device transcribe `lib/audioTranscribeOnDevice.ts`;
+card OCR `ocrCardViaVision()` via `lib/dispatcher.ts` (impl in `lib/llmClient.ts`;
+chat-vision call, the standalone `/ocr` client was retired in Stage 2 B2); on-device transcribe `lib/audioTranscribeOnDevice.ts`;
 notifications `lib/captureNotification.ts`.
 
 (`apps/desktop`, the Tauri placeholder stub, was deprecated and removed 2026-07-25 — see

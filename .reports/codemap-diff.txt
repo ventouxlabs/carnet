@@ -1,23 +1,52 @@
-Codemap refresh 2026-07-16 (previous: 2026-07-12) — in-place update, diff ~12% (<30%, no approval gate)
+Codemap refresh 2026-09-08 (previous: 2026-07-16) — in-place update, diff ~22% (<30%, no approval gate)
 
-Files added since last scan:
-  apps/mobile/src/lib/pendingSync.ts (+test)        — pending Karakeep-export queue (carnet:pendingsync:v1)
-  apps/mobile/src/lib/pendingSyncRunner.ts (+test)  — real drain bindings
-  apps/mobile/src/lib/hostReachability.ts (+test)   — VPN/Tailscale-aware 4s HEAD probe
+Scanned: 308 files (171 src + 137 test) across apps/mobile/src, packages/shared/src, apps/mdcrm.
+Elapsed since previous refresh: 54 days, spanning v0.7.0 → v0.11.0.
 
-Modified:
-  lib/karakeepNoteExport.ts   — failed outcome carries `unreachable`
-  lib/shareHelpers.ts         — shareFileReadUri (content:// grant preferred over raw path)
-  lib/writer.ts               — moveToArchive decodes SAF document ids (1074→1190 ln)
-  screens/ShareReceiveScreen  — three read sites via shareFileReadUri
-  screens/HomeScreen          — pending-Karakeep banner + Retry (445→493 ln)
-  screens/RecentDetailScreen  — unreachable→queue + queued snackbar (1416→1469 ln)
-  App.tsx                     — pending-sync drain trigger (AppState, 30s throttle)
-  patches/expo-share-intent+5.1.1.patch — grew JS hunks (contentUri through parser)
+CORRECTIONS — codemaps pointed at modules that no longer exist:
+  lib/omniroute.ts  — GONE (consolidated into lib/llmClient.ts, 701 ln)
+  lib/localLlm.ts   — GONE (same consolidation)
+  Both were still named as live code in backend.md ("## LLM client — lib/omniroute.ts"),
+  dependencies.md ("ALL AI calls ... lib/omniroute.ts") and architecture.md's data flow,
+  plus method-call refs (omniroute.enrichIdea/enrichJournal) in backend.md's capture table.
+  This is the worst codemap failure mode: an agent following the map opens a missing file.
+  Verified by grep before rewriting — zero non-test importers of omniroute remain.
 
-New dependencies: none (patch extended, no new packages)
-Architecture changes: second AsyncStorage queue (pending-sync) alongside lib/queue.ts;
-  Karakeep export path now VPN-aware with auto-retry on foreground.
-External-service facts: user's Karakeep refuses non-image/PDF attachments (.txt/.docx confirmed).
-Staleness: none >90 days (repo is ~2 months old; all five maps refreshed today).
-Codemaps updated: architecture.md backend.md frontend.md data.md dependencies.md
+STALE COUNTS corrected in architecture.md (roughly doubled since last scan):
+  screens     9  -> 11   (AskScreen, TodosScreen added)
+  components 14  -> 40
+  lib        53  -> 100
+  workspace version  v0.2.0 -> v0.11.0
+
+ARCHITECTURE CHANGES since 2026-07-16:
+  - The LLM backend is now a user-chosen PROVIDER, not a fixed service. lib/llmProviders.ts
+    ships 5 presets (Relais (local) / OmniRoute / OpenAI / Groq / OpenRouter) plus custom
+    entries; lib/dispatcher.ts resolves one and applies a fallback chain. Every codemap that
+    described "OmniRoute = all AI calls" was materially wrong.
+  - Retrospective query (v0.11.0, PR #207): new data-flow branch documented in
+    architecture.md — orderCandidates -> pickForRead -> readNoteBodies -> packBodies ->
+    askVault -> sanitize -> resolveCitations -> ephemeral, explicit Save -> Notes/{slug}.md
+    paired with upsertNoteInIndex.
+  - New vault subdir Notes/ (4th member of NOTE_SUBDIRS).
+  - New pure modules: lib/retrospective.ts (209 ln), lib/noteSubdirs.ts (45 ln, zero imports
+    by design so test mocks import the real subdirForUri), lib/askExplainer.ts (61 ln).
+  - Vault-subdir derivation moved from mode-based to uri-based (subdirForUri) wherever a
+    decision turns on folder identity; documented in backend.md.
+
+NEW DEPENDENCIES: none. Verified — no package.json under apps/ or packages/ has changed
+since 2026-07-25 except version-bump commits. The dependency LIST in dependencies.md was
+accurate; its architecture DESCRIPTION was not.
+
+TOKEN BUDGETS (command guideline: <1000/map):
+  architecture.md   ~900   ok
+  data.md           ~560   ok
+  dependencies.md   ~760   ok
+  frontend.md      ~1000   at limit
+  backend.md       ~1600   OVER — flagged, not trimmed. It carries the injection-guard and
+                           uri-authoritative invariants added this cycle; cutting them to hit
+                           a token target would remove the reasoning most likely to be undone
+                           by a future edit. Split candidate if it grows further:
+                           "Retrospective query" + "Vault subdir derivation" -> retrieval.md.
+
+STALENESS WARNINGS: none >90 days. dependencies.md was the oldest at 54 days and carried the
+most drift — worth checking first on the next pass, since nothing routinely edits it.
