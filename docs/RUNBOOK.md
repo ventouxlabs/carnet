@@ -14,15 +14,26 @@ cd apps/mobile && ANDROID_HOME="$HOME/Android/Sdk" npm run android:release
 - After adding a **new native module**, run `npx expo prebuild -p android --no-install` first to autolink.
 
 ## First-run device configuration
-1. **OmniRoute (LLM gateway)** — enter base URL + API key + chat/vision models in
-   **Settings**. No `.env`; creds live on the device. A blank URL or vision model surfaces
-   a "not configured" error (vision model has no fallback by design — B1).
-2. **Syncthing** — pair the device folder `/Documents/carnet/` with the workstation vault
+1. **Choose an LLM provider** — in **Settings → LLM provider**, pick a preset
+   (Relais (local) · OmniRoute · OpenAI · Groq · OpenRouter) or add a custom
+   OpenAI-compatible entry, then set its base URL, API key and model. No `.env`; each
+   provider's key lives on the device in SecureStore. A blank URL or model surfaces a
+   "not configured" error (the vision model has no fallback by design — B1).
+   **A local provider keeps note text on the handset** — Relais running on the phone
+   serves `http://127.0.0.1:8080`, and the whole app (including the retrospective query)
+   works in airplane mode. "Test connection" probes `GET /v1/models` with the key, so it
+   validates the key as well as the host.
+2. **Vault folder** — Settings → Storage → **"Pick folder"**. Use the picker, not the text
+   field: a typed path becomes `file:///…`, which the app cannot read under Android's
+   scoped storage, and the scan then silently finds nothing. A picked folder shows as a
+   friendly label like `primary:carnet`. Saving a folder for the first time also migrates
+   any notes captured before setup into it (non-destructive).
+3. **Syncthing** — pair the device folder `/Documents/carnet/` with the workstation vault
    `~/Obsidian/Carnet/`. Full steps: [sync-setup.md](sync-setup.md).
-3. **Karakeep** *(optional)* — to use per-note "Send to Karakeep" export, enter the instance URL
+4. **Karakeep** *(optional)* — to use per-note "Send to Karakeep" export, enter the instance URL
    + API key (Karakeep UI → User Settings → API Keys) in **Settings**. URL must be `https://`
    (loopback/`10.x` HTTP allowed for dev). Left blank, the export action surfaces "not configured".
-4. **Smoke test** the capture modes once configured: [smoke-test.md](smoke-test.md).
+5. **Smoke test** the capture modes once configured: [smoke-test.md](smoke-test.md).
 
 ## Health & monitoring
 N/A — there is no service to monitor. "Healthy" = captures land in the vault and Syncthing
@@ -39,7 +50,7 @@ foreground once a reachability probe answers.
 | "Speech Services … Microphone permission is turned off" (STT) | The RECOGNIZER app's own mic permission was revoked (Android auto-revokes unused apps). Follow the in-app sheet: Open App info → enable Microphone → tap dictate again (a fresh tap re-tests, no restart needed). Via adb: `pm grant com.google.android.tts android.permission.RECORD_AUDIO`. |
 | "No working speech service" (STT) | Failover exhausted: check a Google RecognitionService is installed (`voice/recognizerSelect.ts` pins Google) and the on-device speech model is downloaded — **Settings → Voice input → Check voice setup** (`voice/sttReadiness.ts`), or the sheet's Retry Detection. Error-decision logic: `voice/sttErrorPolicy.ts`. |
 | Dictation stops by itself after ~20s of silence | By design: two consecutive quiet windows auto-stop and commit (`SILENCE_AUTO_STOP_AFTER` in `voice/sttErrorPolicy.ts`); 3-min hard cap regardless. |
-| "Not configured" on capture | OmniRoute base URL / creds are blank in Settings — re-enter on the device. NB: an app reinstall or `pm clear` wipes ALL settings incl. SecureStore keys and the vault-folder path; captures then land in app-private `files/carnet/` until the folder is re-set. |
+| "Not configured" on capture | The ACTIVE provider's base URL or model is blank in Settings — re-enter on the device (each provider entry holds its own URL/model/key). NB: an app reinstall or `pm clear` wipes ALL settings incl. SecureStore keys and the vault-folder path; captures then land in app-private `files/carnet/` until the folder is re-set. |
 | Karakeep export fails / "not configured" | Karakeep URL or key blank, or URL not `https://` (loopback/`10.x` HTTP excepted). Set both in Settings. Attachments sync incrementally per bookmark; a lost on-device record can re-upload a duplicate asset (harmless). |
 | Karakeep export shows "unreachable — export queued" | Expected when the host doesn't answer (VPN/Tailscale down): the export waits in the pending-sync queue (`lib/pendingSync.ts`) and auto-sends on app foreground once the host is reachable. Home shows an "N exports waiting for Karakeep — Retry" banner; the banner count can lag a background drain until the screen refocuses. |
 | "…is a file type Karakeep doesn't accept — kept in the vault only" | Not an error: the bookmark was created, but the server's asset allowlist (~images + PDF; `.txt`/`.docx` confirmed refused 2026-07-14/16) rejected the attachment. The file stays paired in the vault. Changing this means changing the server's allowlist, not the app. |

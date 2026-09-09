@@ -24,6 +24,9 @@ npm run build:shared   # build shared first — mobile imports @carnet/shared
 |---|---|
 | `npm run build:shared` | Build `@carnet/shared` (run before mobile) |
 | `npm run mobile` | Start the Expo dev server (Metro) |
+| `npm run mdcrm:build` | Build `@carnet/mdcrm` (the optional Markdown processor) |
+| `npm run mdcrm:test` | Vitest for `@carnet/mdcrm` |
+| `npm run mdcrm -- <args>` | Run the mdcrm CLI (note the `--` before its arguments) |
 | `postinstall` (automatic) | `patch-package` — applies `patches/*.patch` (expo-speech-recognition, expo-share-intent); runs on every `npm ci`/`install` |
 
 **apps/mobile**
@@ -36,7 +39,7 @@ npm run build:shared   # build shared first — mobile imports @carnet/shared
 | `npm -w @carnet/mobile run typecheck` | `tsc --noEmit` |
 | `npm -w @carnet/mobile run lint` | ESLint — deliberately minimal 3-rule scope (hooks correctness + typed no-floating-promises); see CLAUDE.md before widening |
 | `npm -w @carnet/mobile test` | Vitest suite |
-| `npm -w @carnet/mobile run verify:capture-flow` | Automated equivalent of `docs/smoke-test.md`'s capture-flow checks (writer/frontmatter/queue/vault/journal-tag-index/WYSIWYG-roundtrip + fixture repro) |
+| `npm -w @carnet/mobile run verify:capture-flow` | Automated equivalent of `docs/smoke-test.md`'s capture-flow checks — 13 suites: writer/writerMarkdown/pairedBinaries/noteNaming/mimeTypes/frontmatter/queue/vault/vaultSearch/journalTagIndex/markdownRoundTrip/retrospective + fixture repro |
 | `npm -w @carnet/mobile run editor:build` | Build the TenTap WYSIWYG editor-web bundle (Vite) |
 | `npm -w @carnet/mobile run editor:post-build` | Inline the editor-web bundle into one HTML (invoked by `editor:build`) |
 
@@ -48,6 +51,14 @@ npm run build:shared   # build shared first — mobile imports @carnet/shared
 | `npm -w @carnet/shared run dev` | `tsc --watch` |
 | `npm -w @carnet/shared test` | Vitest |
 | `npm -w @carnet/shared run test:watch` | Vitest in watch mode |
+
+**apps/mdcrm** — optional standalone Markdown processor; not on the capture path
+| Command | Description |
+|---|---|
+| `npm -w @carnet/mdcrm run build` | `tsc -p tsconfig.json` |
+| `npm -w @carnet/mdcrm run typecheck` | `tsc --noEmit` |
+| `npm -w @carnet/mdcrm test` | Vitest |
+| `npm -w @carnet/mdcrm start` | Run the built CLI (`dist/src/cli/index.js`) |
 <!-- /AUTO-GENERATED:scripts -->
 
 ## Running locally
@@ -55,9 +66,13 @@ npm run build:shared   # build shared first — mobile imports @carnet/shared
 - **Mobile (release APK):** `npm -w @carnet/mobile run android:release`
 
 ## Configuration
-There are **no `.env` files**. All runtime config is entered **in-app** on the device via the
-Settings screen (API keys in SecureStore, the rest in AsyncStorage) — see [RUNBOOK.md](RUNBOOK.md):
-- **OmniRoute** (LLM gateway) — base URL + API key + chat/vision models. Required to enrich captures.
+There are **no `.env` files** — this is a hard constraint, not an omission (see CLAUDE.md).
+All runtime config is entered **in-app** on the device via the Settings screen (one API key
+per provider in SecureStore, the rest in AsyncStorage) — see [RUNBOOK.md](RUNBOOK.md):
+- **An LLM provider** — required to enrich captures. Pick one of the presets (Relais (local) ·
+  OmniRoute · OpenAI · Groq · OpenRouter) or add a custom OpenAI-compatible entry, then set its
+  base URL, key and model. Choosing a **local** provider (e.g. Relais running on the handset)
+  means note text never leaves the device and the app works with no network at all.
 - **Karakeep** (optional) — instance URL + API key, for the opt-in per-note "Send to Karakeep" export.
 
 ## Testing
