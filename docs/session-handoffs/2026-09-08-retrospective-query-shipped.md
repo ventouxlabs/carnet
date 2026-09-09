@@ -5,7 +5,7 @@ we build next?" to merged, plus the two defect fixes it exposed along the way.
 
 ## State at handoff
 
-`main` at **`9e8c3eb`** (#212), CI green. Mobile suite **2216/2216** across 137
+`main` at **`1b110c6`** (#213), CI green. Mobile suite **2216/2216** across 137
 files (was 2123), capture-flow gate 347/347.
 
 **v0.11.0 is RELEASED** (versionCode 9), published 2026-09-09 01:49 UTC from
@@ -209,6 +209,43 @@ button**, which no test had covered on device.
   test; verify with `Active default network: none` before believing it.
 - Pixel Fold `screencap -p` prefixes a multi-display warning to the PNG — strip
   to the `\x89PNG` magic before reading.
+
+## Documentation reconciliation (#210, #212, #213) — read this before trusting a doc
+
+Three PRs of the session were pure documentation, and they found more real
+defects than the feature review did. **In this repo, doc drift has repeatedly
+been the actual bug.**
+
+- **`TODO.md` listed Browse/search Phase 3 as deferred hours after #207 shipped
+  it** — the exact failure its own header warns about ("a stale 'deferred' entry
+  is worse than no entry"). Reconciled, and the date was only bumped after
+  verifying the other seven open items still have zero matching commits.
+- **The codemaps pointed at source files that do not exist.**
+  `lib/omniroute.ts` and `lib/localLlm.ts` were consolidated into
+  `lib/llmClient.ts` some releases ago, yet `backend.md`'s section header was
+  literally `## LLM client — lib/omniroute.ts`, and `dependencies.md` said
+  "OmniRoute … ALL AI calls". An agent following the map opens a missing file.
+  A plain `omniroute.ts` grep also misses the method-call form
+  (`omniroute.enrichIdea`) — check both.
+- **Every map, and both user-facing docs, described OmniRoute as *the*
+  backend.** It has been one of five presets behind `lib/dispatcher.ts` since
+  the provider-list work, and a *local* provider is the whole reason the offline
+  path verified above works at all.
+- `architecture.md` counts had roughly doubled unnoticed: screens 9→11,
+  components 14→40, lib 53→100, and it still said "v0.2.0".
+- `CONTRIBUTING.md` was missing the entire `apps/mdcrm` workspace;
+  `RUNBOOK.md` gained the "Pick folder" vault step that #205 shipped copy for.
+
+**Deliberately not done:** no ENV documentation — there is no `.env.example`
+because CLAUDE.md forbids `.env` outright, so generating one would document a
+rejected mechanism. And `backend.md` is left ~1600 tokens against a 1000-token
+guideline: the excess is the injection-guard and uri-authoritative invariants,
+i.e. the reasoning most likely to be silently undone. A split candidate
+(`retrieval.md`) is noted in `.reports/codemap-diff.txt` if it grows further.
+
+A scripted check now confirms every module path named across the five codemaps
+resolves on disk. Worth re-running on future passes — it is what would have
+caught this months earlier.
 
 ## Standing items
 
