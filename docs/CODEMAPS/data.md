@@ -1,5 +1,5 @@
 # Data Model — vault & local stores
-<!-- Generated: 2026-07-16 | Files scanned: ~140 (81 src + tests) | Token estimate: ~720 -->
+<!-- Generated: 2026-09-08 | Files scanned: 308 (171 src + 137 tests) | Token estimate: ~560 -->
 
 **No canonical SQL database.** Data = Markdown files + binaries in the Syncthing-synced
 vault, plus AsyncStorage/SecureStore keys on the device. (`expo-sqlite` is ABI-broken on

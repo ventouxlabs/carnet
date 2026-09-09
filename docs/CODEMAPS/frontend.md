@@ -1,5 +1,5 @@
 # Frontend — screens & components
-<!-- Generated: 2026-07-17 | Files scanned: ~152 (87 src + tests) | Token estimate: ~800 -->
+<!-- Generated: 2026-09-08 | Files scanned: 308 (171 src + 137 tests) | Token estimate: ~1000 -->
 
 ## Navigation — `apps/mobile/App.tsx` (native-stack)
 ```
