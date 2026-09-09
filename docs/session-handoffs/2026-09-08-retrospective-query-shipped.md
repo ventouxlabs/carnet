@@ -5,11 +5,18 @@ we build next?" to merged, plus the two defect fixes it exposed along the way.
 
 ## State at handoff
 
-`main` at **`d2b3c8b`** (#208), CI green. Mobile suite **2216/2216** across 137
-files (was 2123), capture-flow gate 347/347. Version still **v0.10.0** — this
-work is **unreleased**, and so is #205's vault-path copy fix from the last
-cycle. Only open issue: **#182** (F-Droid), unchanged. No open PRs, tree clean,
-no active worktrees.
+`main` at **`9e8c3eb`** (#212), CI green. Mobile suite **2216/2216** across 137
+files (was 2123), capture-flow gate 347/347.
+
+**v0.11.0 is RELEASED** (versionCode 9), published 2026-09-09 01:49 UTC from
+`ab17620` by `release.yml`, cert-verified, and installed on both the Pixel 9 Pro
+Fold and Pixel 10 Pro Fold. It carries this feature **and** #205's vault-path
+copy fix, which had been stranded on `main` through three cycles. IzzyOnDroid
+pulls it automatically; `changelogs/9.txt` shipped in the tagged tree so the
+listing has release notes.
+
+Only open issue: **#182** (F-Droid), unchanged. No open PRs, tree clean, no
+active worktrees.
 
 ## The feature — retrospective query (#207)
 
@@ -148,28 +155,95 @@ right output); the run-once ref is StrictMode-hostile (latent — no root
 test that may assert early; `handleSave`'s post-await state updates lack a
 mounted guard (dev warning only).
 
+## On-device verification — Pixel 9 Pro Fold, Android 17 (2026-09-08)
+
+**All seven acceptance criteria pass**, against a *real* Syncthing vault
+(`/storage/emulated/0/Documents/carnet`, 7 notes, live `.stfolder`) with an
+on-device model (Relais serving `http://127.0.0.1:8080`, Gemma-4-E4B-it).
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Answer cites only retrieval-set notes | ✅ all 4 resolved to the queried notes |
+| 2 | Out-of-set citation renders inert | ✅ **fired naturally — see below** |
+| 3 | One file under `Notes/`, frontmatter parses | ✅ `travel.md`, `tags: [synthesis]` |
+| 4 | Appears in Search **without** a refresh | ✅ `#synthesis` visible immediately |
+| 5 | No Re-enrich on a synthesis note | ✅ actions sheet has none |
+| 6 | Not-configured surfaces the real error | ✅ "your LLM provider URL not configured — set it in Settings." |
+| 7 | Local backend, **no network** | ✅ answered in ~20s with `Active default network: none`, `ping 8.8.8.8` unreachable |
+| — | Citation taps (jsdom-impossible) | ✅ tapping a citation opened that exact note |
+
+**The best result was unplanned.** On the offline run the local model
+hallucinated a citation to `[[18:44]]` — a journal timestamp heading, not a note
+in the retrieval set. It rendered as **plain bracketed text while every real
+citation rendered green and underlined**. The containment guard caught a genuine
+hallucination in production, with no adversarial input crafted for it.
+
+Also confirmed on hardware: the Save latch holds past the 2.5s toast dismissal
+(a second tap produced no `travel-2.md` — the duplicate-write bug review finding
+#1 caught); a failed ask renders a working Retry instead of dead-ending
+(finding #2); the exposure explainer appears for a **remote** provider and never
+for the local one; the saved file keeps **real `[[wikilinks]]`**, so the
+display-only normalisation boundary holds; and the "Idea" mode label on a
+`Notes/` note is present exactly as knowingly deferred.
+
+Pixel 10 Pro Fold got the published APK too — install, launch, Ask entry point
+and count verified. It has no Relais and no Syncthing, so its pass is
+necessarily shallower; a query with no matches correctly showed **no Ask
+button**, which no test had covered on device.
+
+### Device-QA lessons worth not rediscovering
+
+- **The on-screen keyboard silently swallows taps.** Three taps on the Ask
+  button did nothing until `dumpsys input_method` showed `mInputShown=true`.
+  Dismiss the IME before tapping anything low on the screen. Same class as the
+  historical STT first-tap bug.
+- **The Ask button's centre point sits inside the gesture-nav inset** (button
+  spans y 2292–2395 on a 2424-tall screen). Tap ~20px below its top edge, not
+  its centre.
+- **Relais' ready state reads `LIVE`, not `ONLINE`** — a poll waiting for
+  "ONLINE" times out against a server that is already up. It exposes both a LAN
+  https endpoint and `127.0.0.1:8080`; only the loopback one survives airplane
+  mode.
+- **Airplane mode alone does not kill Wi-Fi** on this device (Android remembers
+  it). `svc wifi disable` + `svc data disable` were needed for a true offline
+  test; verify with `Active default network: none` before believing it.
+- Pixel Fold `screencap -p` prefixes a multi-display warning to the PNG — strip
+  to the `\x89PNG` magic before reading.
+
 ## Standing items
 
-- **Device verification is the whole outstanding gap.** Acceptance criteria 6
-  (not-configured error) and 7 (local backend, no network) are unverified, and
-  `<Text onPress>` citation taps are **structurally unverifiable in jsdom** —
-  `accessibilityRole="link"` appears in exactly one file repo-wide, this one, so
-  nothing here has proven the pattern on-device.
-- **The Syncthing round-trip for Todos** is still open from the v0.10.0 cycle.
-  One device session could close it alongside the above.
-- **A release is due.** #205's vault-path copy fix has been on `main` unreleased
-  since before this work, and this feature now stacks behind it. Cutting a tag
-  before the device pass would ship a device-unverified screen.
+- **The Syncthing round-trip for Todos** is still open from the v0.10.0 cycle —
+  it needs a second machine, which neither test device is.
+- **One real UX finding from the device run, not a blocker:** citations render as
+  the **full note title**, and journal titles here are whole sentences. The prose
+  becomes "…continuing to Colmar *My family traveled to France via Strasbourg
+  after arriving from the US, while I completed another day of reserve duty.*."
+  — correct, but hard to read, with a doubled period where the title's own full
+  stop meets the sentence's. Truncating long citation labels is the obvious fix.
+  Logged in `TODO.md`.
 - Google Play: three human checkboxes, then a manual AAB upload. GitHub Sponsors
   enrollment still unblocks `FUNDING.yml`. #182 Phase 2 is user-side.
 
 ## Next session
 
-1. Device pass: criteria 6 and 7, citation taps, and the Todos Syncthing
-   round-trip. That is the shortest path to a releasable state.
-2. Then a release tag — it would carry #205's copy fix plus this feature.
-3. If more feature work is wanted before that, the remaining board is thin by
-   design: vault tag awareness (v0.4 S3, never shipped, ~half the cost already
-   paid by `getTagIndex`) is the best-specified unbuilt item. "On this day"
-   resurfacing and Todos date parsing were both floated and neither has
-   validated demand.
+The board is genuinely clear — feature shipped, released, verified, docs
+reconciled. Options, roughly in order of value:
+
+1. **Citation-label truncation** (see Standing items). Small, self-contained,
+   and it improves the one screen whose value proposition is readability.
+2. **Vault tag awareness** (v0.4 S3, never shipped) — the best-specified unbuilt
+   item on the board, with roughly half the cost already paid by `getTagIndex`.
+   Auto-tagging currently invents tags freely, so a curated vault accumulates
+   `dev` / `development` / `engineering`.
+3. **Todos Syncthing round-trip** — needs a workstation, not a phone.
+4. "On this day" resurfacing and Todos date parsing were both floated in the
+   2026-09-07 planning pass; neither has validated demand. Don't build either
+   without asking first.
+
+**A caution learned twice this session:** documentation drift was the real
+defect more often than code was. `TODO.md` listed a shipped feature as deferred,
+and the codemaps named two source modules (`lib/omniroute.ts`,
+`lib/localLlm.ts`) that no longer exist — `backend.md`'s LLM section header
+pointed straight at a deleted file. Both were found only because something
+forced a re-read. When a claim in these docs looks load-bearing, grep it before
+trusting it.

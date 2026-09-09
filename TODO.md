@@ -99,9 +99,21 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   `.claude/PRPs/prds/retrospective-query.prd.md`. **Not** the same as
   `enhance-source-citations.plan.md`, which is still blocked on an OmniRoute gateway
   change and concerns external URL annotations, not internal wikilinks.
-  **Outstanding: acceptance criteria 6 and 7 are device-unverified** (not-configured error
-  path; local backend with no network), as are the `<Text onPress>` citation taps — jsdom
-  cannot cover them. See `docs/session-handoffs/2026-09-08-retrospective-query-shipped.md`.
+  **Device-verified 2026-09-08** on a Pixel 9 Pro Fold (Android 17) against a real Syncthing
+  vault with an on-device model: **all seven acceptance criteria pass**, including 6
+  (not-configured error), 7 (local backend with `Active default network: none`) and the
+  `<Text onPress>` citation taps that jsdom structurally cannot cover. Shipped in
+  **v0.11.0**. Evidence and device-QA lessons:
+  `docs/session-handoffs/2026-09-08-retrospective-query-shipped.md`.
+- [ ] **Truncate long citation labels in a retrospective answer** — found on-device
+  2026-09-08, after #207 shipped. `resolveCitations` renders a citation using the note's
+  full title, which is correct but unreadable when titles are whole sentences (journal
+  notes derive theirs from the first line). The prose becomes "…continuing to Colmar *My
+  family traveled to France via Strasbourg after arriving from the US, while I completed
+  another day of reserve duty.*." — plus a doubled period where the title's own full stop
+  meets the sentence's. Truncate the link label (keep the full title as the resolution
+  key, and keep `## Sources` unabbreviated). Small; touches `lib/retrospective.ts` +
+  `AskScreen`. Not a correctness bug — the links resolve and the guard holds.
 - [ ] **Bidirectional sync awareness** — Mostly works via Syncthing. A mobile file watcher to detect workstation edits is a v0.3 enhancement.
 - [ ] **Card auto-detection** — Current button-press OCR flow works. Auto-detect when camera sees a business card is polish.
 - [ ] **Cross-capture linking — largely superseded, narrow remainder.** The "you've thought
