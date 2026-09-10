@@ -3,12 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./vault", () => ({ loadCachedTagIndex: vi.fn() }));
 
 import { loadCachedTagIndex } from "./vault";
-import {
-  getVaultTagStrings,
-  withTagHint,
-  MAX_HINT_TAGS,
-  MAX_TAG_LENGTH,
-} from "./vaultTagHint";
+import { getVaultTagStrings, MAX_HINT_TAGS, MAX_TAG_LENGTH } from "./vaultTagHint";
+// withTagHint lives in prompts.ts (pure, no native imports) so that
+// llmClient.ts can use it without pulling ./vault -> expo-modules-core in.
+import { withTagHint } from "./prompts";
 
 function mockIndex(tags: { tag: string; count: number }[]) {
   return { builtAt: 0, tags: tags.map((t) => ({ ...t, files: [] })) };

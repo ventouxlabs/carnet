@@ -11,10 +11,12 @@
  *    capture. The hint is best-effort: a cold cache yields no hint, not a slow
  *    capture. HomeScreen already warms the index in the background on launch.
  *
- * 2. The hint is appended to the FINAL system string, after any user prompt
- *    override has been applied — `withSystemOverride` replaces the whole
- *    system message, so a hint baked into prompts.ts would vanish for anyone
- *    using PromptOverridesSection.
+ * 2. The hint text itself is built by `withTagHint` in prompts.ts, NOT here.
+ *    llmClient.ts must stay free of native/vault imports (see its header:
+ *    "reads no settings"); importing this module there pulls in ./vault ->
+ *    expo-modules-core and breaks every llmClient test with "__DEV__ is not
+ *    defined". So the vault READ lives here and the pure string build lives
+ *    with the other prompt construction.
  *
  * Tag strings reach the prompt from vault files (i.e. from Syncthing, i.e.
  * from anywhere), but every tag in the index has passed `normalizeTag`
@@ -54,25 +56,4 @@ export async function getVaultTagStrings(limit: number = MAX_HINT_TAGS): Promise
     .map((entry) => entry.tag)
     .filter((tag) => tag.length > 0 && tag.length <= MAX_TAG_LENGTH)
     .slice(0, limit);
-}
-
-/**
- * Append the vault-vocabulary hint to a system prompt. Returns `system`
- * unchanged when there is nothing to suggest, so a cold cache, an empty
- * vault, and a disabled setting all collapse to today's exact behavior.
- *
- * The hint supplies vocabulary ONLY — it must never restate how many tags to
- * emit, because the five capture prompts ask for different counts (2-3 for
- * idea/journal/person, 3-5 for shared image/link).
- */
-export function withTagHint(system: string, availableTags: string[]): string {
-  if (availableTags.length === 0) return system;
-  return `${system}
-
-This vault already uses these tags (most-used first):
-${availableTags.join(", ")}
-When one of them fits the content, reuse it EXACTLY rather than inventing a
-near-duplicate (e.g. reuse "dev" instead of adding "development"). Create a
-new tag only when nothing above fits. This list is a vocabulary, not a
-restriction on how many tags to emit — follow the tag count asked for above.`;
 }

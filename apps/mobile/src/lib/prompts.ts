@@ -430,3 +430,24 @@ ${INJECTION_GUARD}`;
   const user = `Question: ${question}\n\nNotes:\n\n${rendered}`;
   return { system, user };
 }
+
+/**
+ * Append the vault-vocabulary hint (v0.4 S3) to a system prompt. Returns `system`
+ * unchanged when there is nothing to suggest, so a cold cache, an empty
+ * vault, and a disabled setting all collapse to today's exact behavior.
+ *
+ * The hint supplies vocabulary ONLY — it must never restate how many tags to
+ * emit, because the five capture prompts ask for different counts (2-3 for
+ * idea/journal/person, 3-5 for shared image/link).
+ */
+export function withTagHint(system: string, availableTags: string[]): string {
+  if (availableTags.length === 0) return system;
+  return `${system}
+
+This vault already uses these tags (most-used first):
+${availableTags.join(", ")}
+When one of them fits the content, reuse it EXACTLY rather than inventing a
+near-duplicate (e.g. reuse "dev" instead of adding "development"). Create a
+new tag only when nothing above fits. This list is a vocabulary, not a
+restriction on how many tags to emit — follow the tag count asked for above.`;
+}

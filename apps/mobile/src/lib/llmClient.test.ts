@@ -775,3 +775,94 @@ describe("enrich entry points honor prompt overrides", () => {
     expect(Array.isArray(body.messages[1].content)).toBe(true);
   });
 });
+
+// ── vault tag awareness (v0.4 S3) ────────────────────────────────────────────
+//
+// The hint must land on the FINAL system string, i.e. AFTER withSystemOverride
+// has replaced it. Baking it into prompts.ts would silently drop the hint for
+// anyone using PromptOverridesSection, which is the whole reason this lives at
+// the entry points rather than in the builders.
+
+describe("vault tag hint", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  function systemOf(call: number = 0): string {
+    const [, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as RequestBody;
+    return body.messages[0].content;
+  }
+
+  it("appends the vault tag vocabulary to the system prompt", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("# Note"));
+    await enrichIdea("some idea", CONFIG, undefined, ["dev", "journal"]);
+    expect(systemOf()).toContain("dev, journal");
+  });
+
+  it("leaves the system prompt untouched when no tags are supplied", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("# Note"));
+    await enrichIdea("some idea", CONFIG);
+    expect(systemOf()).not.toContain("This vault already uses these tags");
+  });
+
+  it("keeps the tag hint when the user has overridden the system prompt", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("# Note"));
+    await enrichIdea("some idea", CONFIG, "My own instructions.", ["dev"]);
+    const system = systemOf();
+    expect(system).toContain("My own instructions.");
+    expect(system).toContain("dev");
+  });
+
+  it("applies the hint to journal captures", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("# Note"));
+    await enrichJournal({ transcript: "spoke", notes: "" }, CONFIG, undefined, ["dev"]);
+    expect(systemOf()).toContain("dev");
+  });
+
+  it("applies the hint to person captures", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("# Note"));
+    await enrichPerson({ ocrResult: "card", context: "" }, CONFIG, undefined, ["dev"]);
+    expect(systemOf()).toContain("dev");
+  });
+
+  it("applies the hint to shared-link captures", async () => {
+    // A URL-bearing share fetches the page preview FIRST, so the chat call is
+    // the second fetch — mock both and read the last call, not call 0.
+    fetchMock.mockResolvedValue(makeOkResponse("# Note"));
+    await enrichSharedLink(
+      { url: "https://example.com", text: "", context: "" },
+      CONFIG,
+      undefined,
+      ["dev"],
+    );
+    expect(systemOf(fetchMock.mock.calls.length - 1)).toContain("dev");
+  });
+
+  it("appends the hint to the multimodal shared-image system message", async () => {
+    // enrichSharedImage splices the override inline rather than going through
+    // withSystemOverride (its user content is multimodal), so it is the one
+    // path that could regress independently.
+    fetchMock.mockResolvedValueOnce(makeOkResponse("# Note"));
+    await enrichSharedImage(
+      { base64: "AAAA", mimeType: "image/png", context: "" },
+      CONFIG,
+      undefined,
+      ["dev"],
+    );
+    expect(systemOf()).toContain("dev");
+  });
+
+  it("keeps the hint on a shared image whose system prompt is overridden", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("# Note"));
+    await enrichSharedImage(
+      { base64: "AAAA", mimeType: "image/png", context: "" },
+      CONFIG,
+      "Custom image instructions.",
+      ["dev"],
+    );
+    const system = systemOf();
+    expect(system).toContain("Custom image instructions.");
+    expect(system).toContain("dev");
+  });
+});

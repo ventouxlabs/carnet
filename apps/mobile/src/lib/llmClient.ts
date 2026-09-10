@@ -50,6 +50,7 @@ import {
   buildRetrospectivePrompt,
   buildSharedImagePrompt,
   buildSharedLinkPrompt,
+  withTagHint,
   type PromptPair,
 } from "./prompts";
 import type { SelectedNote } from "./retrospective";
@@ -327,9 +328,13 @@ export async function enrichIdea(
   text: string,
   config: ProviderConfig,
   override?: string,
+  availableTags: string[] = [],
 ): Promise<EnrichResult> {
   const model = assertModelConfigured(config.model, config.label);
-  const pair = withSystemOverride(buildIdeaPrompt(text), override);
+  const base = withSystemOverride(buildIdeaPrompt(text), override);
+  // The hint goes on the FINAL system string: withSystemOverride replaces
+  // the whole message, so hinting before the override would lose it.
+  const pair = { ...base, system: withTagHint(base.system, availableTags) };
   return chatCompletion(
     config.baseUrl,
     config.apiKey,
@@ -347,12 +352,16 @@ export async function enrichJournal(
   input: { transcript: string; notes: string },
   config: ProviderConfig,
   override?: string,
+  availableTags: string[] = [],
 ): Promise<EnrichResult> {
   const model = assertModelConfigured(config.model, config.label);
-  const pair = withSystemOverride(
+  const base = withSystemOverride(
     buildJournalPrompt(input.transcript, input.notes),
     override,
   );
+  // The hint goes on the FINAL system string: withSystemOverride replaces
+  // the whole message, so hinting before the override would lose it.
+  const pair = { ...base, system: withTagHint(base.system, availableTags) };
   return chatCompletion(
     config.baseUrl,
     config.apiKey,
@@ -370,12 +379,16 @@ export async function enrichPerson(
   input: { ocrResult: string; context: string },
   config: ProviderConfig,
   override?: string,
+  availableTags: string[] = [],
 ): Promise<EnrichResult> {
   const model = assertModelConfigured(config.model, config.label);
-  const pair = withSystemOverride(
+  const base = withSystemOverride(
     buildPersonPrompt(input.ocrResult, input.context),
     override,
   );
+  // The hint goes on the FINAL system string: withSystemOverride replaces
+  // the whole message, so hinting before the override would lose it.
+  const pair = { ...base, system: withTagHint(base.system, availableTags) };
   return chatCompletion(
     config.baseUrl,
     config.apiKey,
@@ -401,6 +414,7 @@ export async function enrichSharedImage(
   input: { base64: string; mimeType: string; context: string },
   config: ProviderConfig,
   override?: string,
+  availableTags: string[] = [],
 ): Promise<EnrichResult> {
   // Allowlist mime — defends against pathological values being interpolated
   // into a data: URL. Falls back to image/jpeg for the common case where
@@ -414,7 +428,7 @@ export async function enrichSharedImage(
   // PromptPair-shaped), so the splice happens inline. Same null-safe rule:
   // empty/whitespace override → default.
   const systemOverride = override?.trim() ?? "";
-  const system = systemOverride || defaultSystem;
+  const system = withTagHint(systemOverride || defaultSystem, availableTags);
   const dataUrl = `data:${safeMime};base64,${input.base64}`;
   const messages: OpenAIMessage[] = [
     { role: "system", content: system },
@@ -547,6 +561,7 @@ export async function enrichSharedLink(
   },
   config: ProviderConfig,
   override?: string,
+  availableTags: string[] = [],
 ): Promise<EnrichResult> {
   const previewPromise: Promise<UrlPreview | null> = input.url
     ? fetchUrlPreview(input.url)
@@ -574,10 +589,13 @@ export async function enrichSharedLink(
   const model = assertModelConfigured(config.model, config.label);
   assertUrlConfigured(config.baseUrl, config.label);
   const preview = await previewPromise;
-  const pair = withSystemOverride(
+  const base = withSystemOverride(
     buildSharedLinkPrompt(input.url, input.text, input.context, preview),
     override,
   );
+  // The hint goes on the FINAL system string: withSystemOverride replaces
+  // the whole message, so hinting before the override would lose it.
+  const pair = { ...base, system: withTagHint(base.system, availableTags) };
   return chatCompletion(
     config.baseUrl,
     config.apiKey,
