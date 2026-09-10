@@ -68,6 +68,10 @@ vi.mock("./settings", () => ({
 // so this suite doesn't need a native SecureStore shim. Routes the two known
 // ids to BASE_SETTINGS' key fields; anything else gets "" (no custom-provider
 // key tests in this file).
+vi.mock("./vaultTagHint", () => ({
+  getVaultTagStrings: vi.fn(async () => []),
+}));
+
 vi.mock("./providerKeys", () => ({
   getKey: vi.fn(async (id: string) => {
     if (id === "omniroute") return BASE_SETTINGS.omniRouteApiKey;
@@ -109,6 +113,7 @@ import {
 } from "./dispatcher";
 import * as llmClient from "./llmClient";
 import { getSettings, getPromptOverrides } from "./settings";
+import { getVaultTagStrings } from "./vaultTagHint";
 
 function makeOkResponse(markdown: string, model = "test-model"): Response {
   const body = JSON.stringify({
@@ -678,5 +683,76 @@ describe("askVault routing", () => {
     ) as { model: string };
     expect(primary.model).toBe("anthropic/claude-sonnet-5");
     expect(fallback.model).toBe("local-small");
+  });
+});
+
+// ── vault tag awareness (v0.4 S3) ────────────────────────────────────────────
+//
+// Same rationale as the prompt-override block above: llmClient applies the
+// hint, but only the dispatcher decides WHETHER to (the setting) and WHAT
+// vocabulary to pass. A dispatcher that dropped the argument or ignored the
+// toggle would pass every llmClient test.
+
+describe("dispatcher threads the vault tag vocabulary", () => {
+  function systemOf(call = 0): string {
+    const [, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+    return (JSON.parse(init.body as string) as { messages: Array<{ content: string }> })
+      .messages[0].content;
+  }
+
+  it("passes the vocabulary when useExistingTagsForAutoTag is true", async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      ...BASE_SETTINGS,
+      useExistingTagsForAutoTag: true,
+    });
+    vi.mocked(getVaultTagStrings).mockResolvedValueOnce(["dev", "journal"]);
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+
+    await enrichIdea("text");
+
+    expect(systemOf()).toContain("dev, journal");
+  });
+
+  it("passes nothing when useExistingTagsForAutoTag is false", async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      ...BASE_SETTINGS,
+      useExistingTagsForAutoTag: false,
+    });
+    vi.mocked(getVaultTagStrings).mockResolvedValueOnce(["dev", "journal"]);
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+
+    await enrichIdea("text");
+
+    expect(systemOf()).not.toContain("This vault already uses these tags");
+  });
+
+  it("keeps the vocabulary alongside a per-mode prompt override", async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      ...BASE_SETTINGS,
+      useExistingTagsForAutoTag: true,
+    });
+    vi.mocked(getPromptOverrides).mockResolvedValueOnce({
+      idea: "OVERRIDE-IDEA-b21e",
+    });
+    vi.mocked(getVaultTagStrings).mockResolvedValueOnce(["dev"]);
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+
+    await enrichIdea("text");
+
+    const system = systemOf();
+    expect(system).toContain("OVERRIDE-IDEA-b21e");
+    expect(system).toContain("dev");
+  });
+
+  it("still enriches when the tag lookup yields nothing", async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      ...BASE_SETTINGS,
+      useExistingTagsForAutoTag: true,
+    });
+    vi.mocked(getVaultTagStrings).mockResolvedValueOnce([]);
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+
+    await expect(enrichIdea("text")).resolves.toBeTruthy();
+    expect(systemOf()).not.toContain("This vault already uses these tags");
   });
 });
