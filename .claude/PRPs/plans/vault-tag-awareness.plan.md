@@ -6,7 +6,7 @@ Status: draft
 
 **Goal:** Stop auto-tagging from inventing near-duplicate tags (`dev` / `development` / `engineering`) by showing the model the vault's existing tag vocabulary as a soft prompt hint.
 
-**Architecture:** A new `lib/vaultTagHint.ts` module owns two pure-ish concerns: reading the *already-cached* tag index into a capped list of tag strings, and appending a hint block to a system prompt. The dispatcher resolves the tag list (in parallel with settings, so no added capture latency) and threads it into the five tag-emitting enrich entry points. The hint is applied to the **final** system string — after any user prompt override — so an override cannot silently disable it.
+**Architecture:** A new `lib/vaultTagHint.ts` reads the *already-cached* tag index into a capped list of tag strings; `withTagHint` in `prompts.ts` turns that list into a hint appended to a system prompt (the two cannot share a module — see File Structure). The dispatcher resolves the tag list (in parallel with settings, so no added capture latency) and threads it into the five tag-emitting enrich entry points. The hint is applied to the **final** system string — after any user prompt override — so an override cannot silently disable it.
 
 **Tech Stack:** TypeScript, React Native 0.81 / Expo SDK 54, vitest, AsyncStorage.
 
@@ -28,13 +28,16 @@ The PRD's Slate 3 is four months old. These were checked, and the plan below fol
 | PRD says | Reality | Consequence |
 |---|---|---|
 | `buildTagIndex()`/`getTagIndex()` at `lib/vault.ts:65`, cache key `carnet:tagindex:v1` | `getTagIndex()` at `vault.ts:359`; the tag index is *derived* from a single note-index blob keyed `carnet:noteindex:v1` | Read `loadCachedTagIndex()`, which derives from `loadCachedNoteIndex()` |
-| "Thread the tag list into all five enrich entry points as an `availableTags` prompt variable" (implying edits to the five prompt builders) | `withSystemOverride` (`llmClient.ts:123`) **replaces the entire system string** when a user override exists; `PromptOverridesSection.tsx` exposes overrides for all five | Baking the hint into `prompts.ts` builders would silently lose it for any user with an override. Apply the hint to the **final** system string instead. `prompts.ts` is not modified at all, and `prompts.test.ts`'s exact-string assertions do **not** break. |
+| "Thread the tag list into all five enrich entry points as an `availableTags` prompt variable" (implying edits to the five prompt builders) | `withSystemOverride` (`llmClient.ts:123`) **replaces the entire system string** when a user override exists; `PromptOverridesSection.tsx` exposes overrides for all five | Baking the hint into `prompts.ts` builders would silently lose it for any user with an override. Apply the hint to the **final** system string instead. No *builder* text changes and `prompts.test.ts`'s exact-string assertions do **not** break — though `prompts.ts` does gain the pure `withTagHint` helper, for the separate reason in File Structure. |
 | **Risk:** "SAF directory walks are slow… 1000-note vault could take 5-10 seconds… mitigation: aggressive caching + background pre-warm on app launch" | Already retired. The cost is paid by TagBrowser/Search/Todos, and `HomeScreen.tsx:100-122` already implements exactly the pre-warm pattern (cached read, background rebuild on miss, never blocks) | **No new pre-warm task is needed.** Do not add one. |
 | "S3 scan trigger: on every capture (with cache) vs only on app launch? Suggest both" | Satisfied by the above | — |
 
 Three further facts worth not re-litigating (all verified 2026-09-09, don't re-check):
 
-- **Five is the complete set of tag-emitting prompts.** `prompts.ts` exports eight builders, but `tags:` appears only at lines 55, 93, 131, 177 and 239 — the five capture builders. `buildEnhanceProsePrompt` (:287), `buildPromoteIdeaPrompt` (:342) and `buildRetrospectivePrompt` (:396) emit no `tags:` field, so they are correctly out of scope and are not a sprawl path.
+- **Five is the complete set of tag-emitting prompts.** `prompts.ts` exports eight builders, but `tags:` appears only at lines 55, 93, 131, 177 and 239 — the five capture builders. The other three were each read in full, not just grepped:
+  - `buildPromoteIdeaPrompt` (:342) instructs "keep the frontmatter format identical, just change status and optionally expand the body" — it **preserves** the note's existing tags and never proposes new ones, so vocabulary discipline established at capture survives promotion. Not a sprawl path, and not a sixth call site.
+  - `buildEnhanceProsePrompt` (:287) rewrites body prose only.
+  - `buildRetrospectivePrompt` (:396) produces a synthesized answer, not frontmatter.
 - **All five enrich entry points share the signature `(input, config, override?)`** (`llmClient.ts` :326, :346, :369, :400, :541). The trailing-parameter approach in Task 3 is uniform across all five, including `enrichSharedImage`.
 
 - **Prompt injection via vault tag strings is structurally closed.** Tags in the index pass through `normalizeTag` (`frontmatter.ts:472`), which restricts to `[a-z0-9-]` — no newlines, angle brackets, or whitespace can survive into the hint. The residual surface is unbounded **length/count**, which Task 1 clamps.
@@ -48,14 +51,23 @@ Three further facts worth not re-litigating (all verified 2026-09-09, don't re-c
 
 | File | Responsibility |
 |---|---|
-| `apps/mobile/src/lib/vaultTagHint.ts` (create) | Read cached tag index → capped tag-string list; append hint block to a system prompt. Nothing else. |
+| `apps/mobile/src/lib/vaultTagHint.ts` (create) | Read the cached tag index → capped tag-string list. Nothing else. |
+| `apps/mobile/src/lib/prompts.ts` (modify) | Home of `withTagHint` — the pure system-string builder. See the note below; it CANNOT live beside the vault read. Builder text is untouched. |
 | `apps/mobile/src/lib/vaultTagHint.test.ts` (create) | Unit tests for both functions. |
-| `apps/mobile/src/lib/settings.ts` (modify) | Add `useExistingTagsForAutoTag: boolean` to `Settings` + `DEFAULT_PERSISTED`. |
+| `apps/mobile/src/lib/settings.ts` (modify) | Add `useExistingTagsForAutoTag: boolean` to `Settings` + `DEFAULT_PERSISTED` (7 sites). |
+| `apps/mobile/src/lib/settingsForm.ts` (modify) | The form-state mirror of `Settings` (3 sites). Missed by the first enumeration; `tsc` caught it. |
 | `apps/mobile/src/lib/llmClient.ts` (modify) | Accept `availableTags` on the five enrich entry points; apply hint after override. |
 | `apps/mobile/src/lib/dispatcher.ts` (modify) | Resolve the tag list in parallel with settings; gate on the setting; pass down. |
 | `apps/mobile/src/components/LlmProviderSection.tsx` **or** `SettingsScreen.tsx` (modify) | Surface the toggle. Task 5 determines which by inspection. |
 
-`prompts.ts` is deliberately **not** in this list.
+**`withTagHint` must live in `prompts.ts`, not `vaultTagHint.ts`.** `llmClient.ts`
+states in its header that it "reads NO settings" and it imports no native
+modules. Importing `vaultTagHint` there pulls in `./vault` →
+`expo-modules-core`, which fails every one of the four llmClient suites at
+load time with `ReferenceError: __DEV__ is not defined`. So the vault READ
+lives in `vaultTagHint.ts` and the pure string BUILD lives with the other
+prompt construction. What stays true is the original point: no *builder* text
+changes, and `prompts.test.ts` passes unmodified.
 
 ---
 
@@ -68,9 +80,9 @@ Three further facts worth not re-litigating (all verified 2026-09-09, don't re-c
 **Interfaces:**
 - Consumes: `loadCachedTagIndex()` from `./vault` (returns `Promise<TagIndex | null>`; `TagIndex` is `{ builtAt: number; tags: { tag: string; count: number; files: string[] }[] }`, already count-sorted descending).
 - Produces:
-  - `getVaultTagStrings(limit?: number): Promise<string[]>`
-  - `withTagHint(system: string, availableTags: string[]): string`
-  - `MAX_HINT_TAGS: number` (50), `MAX_TAG_LENGTH: number` (40)
+  - `getVaultTagStrings(limit?: number): Promise<string[]>` — in `vaultTagHint.ts`
+  - `MAX_HINT_TAGS: number` (50), `MAX_TAG_LENGTH: number` (40) — in `vaultTagHint.ts`
+  - `withTagHint(system: string, availableTags: string[]): string` — in **`prompts.ts`**, for the native-import reason in File Structure above. Import it from `./prompts`, never from `./vaultTagHint`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -289,13 +301,17 @@ git commit -m "feat(tags): add vault tag vocabulary hint module"
 
 - [ ] **Step 1: Enumerate every site the sibling boolean occupies**
 
-A new settings field is **not** a two-line change here. `autoTranscribeOnSave` — the exact template to copy — occupies 11 sites across two files:
+A new settings field is **not** a two-line change here. `autoTranscribeOnSave` — the exact template to copy — occupies **12 sites across three files** (`settingsForm.ts` does not mention it by the same grep shape and was missed on the first pass; `tsc` caught it):
 
 ```bash
-grep -n 'autoTranscribeOnSave' apps/mobile/src/lib/settings.ts apps/mobile/src/lib/settingsTransfer.ts
+grep -rn 'autoTranscribeOnSave' apps/mobile/src/lib/settings.ts apps/mobile/src/lib/settingsTransfer.ts apps/mobile/src/lib/settingsForm.ts
 ```
 
-As of 2026-09-09 that is `settings.ts` :143 (the `Settings` interface), :179 (the `PersistedSettings` type), :214 (`DEFAULT_PERSISTED`), :405, :430, :478, :516; and `settingsTransfer.ts` :30 (the transfer shape), :57, :113, :196.
+As of 2026-09-09 that is `settings.ts` :143 (the `Settings` interface), :179 (the `PersistedSettings` type), :214 (`DEFAULT_PERSISTED`), :405, :430, :478, :516; `settingsTransfer.ts` :30 (the transfer shape), :57, :113, :196; and `settingsForm.ts` :22 (the FormState shape), :74, :98.
+
+**A second trap at `settingsTransfer.ts:196`:** the transfer format gates on `version !== VERSION` with a hard throw, so adding the field as a *required* boolean there makes every settings file exported by v0.11.0 and earlier fail to import. Bumping `VERSION` is worse — it rejects them outright. Declare the field OPTIONAL in the transfer shape, accept `undefined` in the validator, and default it to `true` at the import site.
+
+`settingsForm.test.ts`'s "maps every non-secret, non-LLM-identity Settings field onto FormState" is the test that catches a missed site — expect it to fail until every one is done.
 
 **`settingsTransfer.ts:196` is the trap:** it is a validation guard of the form `typeof value.autoTranscribeOnSave === "boolean" &&`. Omitting the new field there means the setting silently fails to survive a settings export/import, and nothing else in the suite notices. Add the field at every one of the 11 sites.
 
@@ -378,7 +394,7 @@ git commit -m "feat(tags): add useExistingTagsForAutoTag setting, default on"
 - Test: `apps/mobile/src/lib/llmClient.test.ts`
 
 **Interfaces:**
-- Consumes: `withTagHint(system, availableTags)` from `./vaultTagHint` (Task 1).
+- Consumes: `withTagHint(system, availableTags)` from **`./prompts`** (Task 1) — importing it from `./vaultTagHint` drags `./vault` → `expo-modules-core` into llmClient and breaks all four of its suites.
 - Produces: each of the five enrich functions gains a trailing optional parameter `availableTags: string[] = []`, e.g.
   `enrichIdea(text: string, config: ProviderConfig, override?: string, availableTags?: string[]): Promise<EnrichResult>`.
   The default `[]` keeps every existing call site and test compiling unchanged.
@@ -439,7 +455,7 @@ Expected: FAIL — the system message has no hint text (and `tsc` rejects the 4t
 Add the import at the top of `llmClient.ts`:
 
 ```ts
-import { withTagHint } from "./vaultTagHint";
+import { withTagHint } from "./prompts";
 ```
 
 For each of the four `PromptPair` entry points, thread the parameter and wrap. `enrichIdea` becomes:
@@ -689,6 +705,7 @@ gh pr create --base main --title "feat(tags): vault tag awareness (v0.4 S3)"
 2. Toggle the setting off, repeat — confirm the hint is gone (the model tags purely from content).
 3. Cold-start with cleared app storage and capture immediately — confirm the capture is **not** slowed waiting on a vault walk, and simply gets no hint.
 4. Repeat (1) against a **local Relais** provider — the small-model case is where a soft hint is most likely to be ignored, and is the main signal for whether the deferred canonicalizer is needed.
+5. Observe what `getVaultTagStrings()` actually returns on the real vault. `MAX_HINT_TAGS = 50` is untested against real data: under 50 tags and the cap never engages (an unexercised branch), well over 50 and it may be truncating tags worth reusing. Record the real tag count and revisit the constant if warranted.
 
 Record the results in a `docs/session-handoffs/` entry.
 
