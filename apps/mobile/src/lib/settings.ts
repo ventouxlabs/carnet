@@ -141,6 +141,12 @@ export interface Settings {
   /** When true, audio captures auto-run on-device transcription after save.
    * Default false — doubles OmniRoute API spend per capture, so opt-in. */
   autoTranscribeOnSave: boolean;
+  /** When true, capture prompts are given the vault's existing tag vocabulary
+   * so auto-tagging reuses curated tags instead of minting near-duplicates
+   * (`dev` vs `development` vs `engineering`). Default true — the hint is
+   * best-effort and costs nothing when no note index is cached yet. Turn off
+   * to get the pre-v0.12 behavior of tagging purely from content. */
+  useExistingTagsForAutoTag: boolean;
   /** When true, RecentDetail note editing uses the experimental WYSIWYG (TenTap)
    * editor instead of the markdown TextInput + toolbar. Default false — off
    * until on-device round-trip fidelity is signed off. */
@@ -177,6 +183,7 @@ interface PersistedSettings {
   enhanceModel: string;
   persistentNotificationEnabled: boolean;
   autoTranscribeOnSave: boolean;
+  useExistingTagsForAutoTag: boolean;
   richEditorEnabled: boolean;
   previewBeforeSave: boolean;
   captureFolderPath: string;
@@ -212,6 +219,7 @@ const DEFAULT_PERSISTED: PersistedSettings = {
   enhanceModel: "",
   persistentNotificationEnabled: false,
   autoTranscribeOnSave: false,
+  useExistingTagsForAutoTag: true,
   richEditorEnabled: true,
   previewBeforeSave: false,
   captureFolderPath: "",
@@ -403,6 +411,7 @@ async function readPersisted(): Promise<PersistedSettings> {
         enhanceModel: "",
         persistentNotificationEnabled: false,
         autoTranscribeOnSave: false,
+        useExistingTagsForAutoTag: true,
         richEditorEnabled: true,
         previewBeforeSave: false,
         captureFolderPath: legacy.captureFolderPath ?? "",
@@ -428,6 +437,7 @@ async function writePersisted(settings: PersistedSettings): Promise<void> {
     enhanceModel: settings.enhanceModel,
     persistentNotificationEnabled: settings.persistentNotificationEnabled,
     autoTranscribeOnSave: settings.autoTranscribeOnSave,
+    useExistingTagsForAutoTag: settings.useExistingTagsForAutoTag,
     richEditorEnabled: settings.richEditorEnabled,
     previewBeforeSave: settings.previewBeforeSave,
     captureFolderPath: settings.captureFolderPath,
@@ -476,6 +486,7 @@ export async function getSettings(): Promise<Settings> {
     localLlmApiKey,
     persistentNotificationEnabled: persisted.persistentNotificationEnabled,
     autoTranscribeOnSave: persisted.autoTranscribeOnSave,
+    useExistingTagsForAutoTag: persisted.useExistingTagsForAutoTag,
     richEditorEnabled: persisted.richEditorEnabled,
     previewBeforeSave: persisted.previewBeforeSave,
     captureFolderPath: persisted.captureFolderPath,
@@ -514,6 +525,7 @@ export async function savePersistedOnly(settings: Settings): Promise<void> {
     enhanceModel: settings.enhanceModel,
     persistentNotificationEnabled: settings.persistentNotificationEnabled,
     autoTranscribeOnSave: settings.autoTranscribeOnSave,
+    useExistingTagsForAutoTag: settings.useExistingTagsForAutoTag,
     richEditorEnabled: settings.richEditorEnabled,
     previewBeforeSave: settings.previewBeforeSave,
     captureFolderPath: settings.captureFolderPath,

@@ -28,6 +28,12 @@ export interface SettingsTransfer {
     visionProviderId: string | null;
     persistentNotificationEnabled: boolean;
     autoTranscribeOnSave: boolean;
+    /** Optional ON PURPOSE: v0.11.0 and earlier exported no such field, and
+     * the format VERSION is gated with a hard equality check — requiring it
+     * would make every older export unimportable rather than defaulting it.
+     * Always WRITTEN by this version; only ever absent when READING an old
+     * file, where parseSettingsTransfer defaults it to true. */
+    useExistingTagsForAutoTag?: boolean;
     richEditorEnabled: boolean;
     previewBeforeSave: boolean;
     captureFolderPath: string;
@@ -55,6 +61,7 @@ export function serializeSettingsTransfer(
       visionProviderId: settings.visionProviderId,
       persistentNotificationEnabled: settings.persistentNotificationEnabled,
       autoTranscribeOnSave: settings.autoTranscribeOnSave,
+      useExistingTagsForAutoTag: settings.useExistingTagsForAutoTag,
       richEditorEnabled: settings.richEditorEnabled,
       previewBeforeSave: settings.previewBeforeSave,
       captureFolderPath: settings.captureFolderPath,
@@ -111,6 +118,7 @@ export function parseSettingsTransfer(raw: string): ImportedSettings {
     // The native service and its preference live under the source app id.
     persistentNotificationEnabled: false,
     autoTranscribeOnSave: settings.autoTranscribeOnSave,
+    useExistingTagsForAutoTag: settings.useExistingTagsForAutoTag ?? true,
     richEditorEnabled: settings.richEditorEnabled,
     previewBeforeSave: settings.previewBeforeSave,
     // SAF grants are package-scoped and therefore invalid in a new app.
@@ -194,6 +202,8 @@ function isValidSettingsShape(value: Record<string, unknown>): value is Imported
     isNullableString(value.visionProviderId) &&
     typeof value.persistentNotificationEnabled === "boolean" &&
     typeof value.autoTranscribeOnSave === "boolean" &&
+    (value.useExistingTagsForAutoTag === undefined ||
+      typeof value.useExistingTagsForAutoTag === "boolean") &&
     typeof value.richEditorEnabled === "boolean" &&
     typeof value.previewBeforeSave === "boolean" &&
     typeof value.captureFolderPath === "string" &&

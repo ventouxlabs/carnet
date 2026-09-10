@@ -34,6 +34,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     localLlmApiKey: "local-secret",
     persistentNotificationEnabled: true,
     autoTranscribeOnSave: true,
+    useExistingTagsForAutoTag: true,
     richEditorEnabled: true,
     previewBeforeSave: true,
     captureFolderPath: "/storage/emulated/0/carnet",

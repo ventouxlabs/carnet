@@ -32,6 +32,7 @@ import {
 const baseForm: FormState = {
   persistentNotificationEnabled: true,
   autoTranscribeOnSave: false,
+  useExistingTagsForAutoTag: true,
   richEditorEnabled: true,
   previewBeforeSave: false,
   captureFolderPath: "",
@@ -51,6 +52,7 @@ const storedSettings: Settings = {
   localLlmApiKey: "local-existing",
   persistentNotificationEnabled: true,
   autoTranscribeOnSave: false,
+  useExistingTagsForAutoTag: true,
   richEditorEnabled: true,
   previewBeforeSave: false,
   captureFolderPath: "",

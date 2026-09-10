@@ -33,6 +33,7 @@ import { buildDefaultProviders } from "./llmProviders";
 const baseForm: FormState = {
   persistentNotificationEnabled: true,
   autoTranscribeOnSave: false,
+  useExistingTagsForAutoTag: true,
   richEditorEnabled: true,
   previewBeforeSave: false,
   captureFolderPath: "content://tree/primary%3AObsidian",
@@ -59,6 +60,7 @@ function baseSettings(overrides: Partial<Settings> = {}): Settings {
     localLlmApiKey: "",
     persistentNotificationEnabled: false,
     autoTranscribeOnSave: false,
+    useExistingTagsForAutoTag: true,
     richEditorEnabled: true,
     previewBeforeSave: false,
     captureFolderPath: "",
@@ -249,6 +251,7 @@ describe("formStateFromSettings", () => {
   const settings: Settings = baseSettings({
     activeProviderId: "relais",
     autoTranscribeOnSave: true,
+    useExistingTagsForAutoTag: true,
     previewBeforeSave: true,
     captureFolderPath: "/storage/emulated/0/carnet",
     promptOverrides: { idea: "custom" },
@@ -259,6 +262,7 @@ describe("formStateFromSettings", () => {
     expect(formStateFromSettings(settings, false)).toEqual({
       persistentNotificationEnabled: false,
       autoTranscribeOnSave: true,
+      useExistingTagsForAutoTag: true,
       richEditorEnabled: true,
       previewBeforeSave: true,
       captureFolderPath: "/storage/emulated/0/carnet",

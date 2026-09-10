@@ -62,6 +62,42 @@ beforeEach(() => {
   _secure.clear();
 });
 
+describe("useExistingTagsForAutoTag default merge", () => {
+  it("defaults to true when no settings blob exists", async () => {
+    const s = await getSettings();
+    expect(s.useExistingTagsForAutoTag).toBe(true);
+  });
+
+  it("defaults an older blob missing the key to true without crashing", async () => {
+    _async.set(
+      SETTINGS_KEY,
+      JSON.stringify({
+        omniRouteUrl: "https://example.com",
+        omniRouteModel: "some-model",
+        persistentNotificationEnabled: false,
+        autoTranscribeOnSave: false,
+        richEditorEnabled: true,
+        previewBeforeSave: false,
+        captureFolderPath: "",
+        promptOverrides: {},
+        karakeepUrl: "",
+        // note: no useExistingTagsForAutoTag key
+      }),
+    );
+    const s = await getSettings();
+    expect(s.useExistingTagsForAutoTag).toBe(true);
+    expect(findProvider(s.llmProviders, "omniroute").baseUrl).toBe(
+      "https://example.com",
+    );
+  });
+
+  it("round-trips a useExistingTagsForAutoTag=false opt-out through save + load", async () => {
+    const base = await getSettings();
+    await saveSettings({ ...base, useExistingTagsForAutoTag: false });
+    expect((await getSettings()).useExistingTagsForAutoTag).toBe(false);
+  });
+});
+
 // ── Required test 6: old blob without previewBeforeSave defaults to save-first ─
 
 describe("previewBeforeSave default merge", () => {

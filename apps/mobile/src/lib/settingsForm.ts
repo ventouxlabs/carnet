@@ -20,6 +20,7 @@ import type { PromptOverrides, Settings } from "./settings";
 export interface FormState {
   persistentNotificationEnabled: boolean;
   autoTranscribeOnSave: boolean;
+  useExistingTagsForAutoTag: boolean;
   richEditorEnabled: boolean;
   previewBeforeSave: boolean;
   captureFolderPath: string;
@@ -72,6 +73,7 @@ export function composeSettingsForSave(
     localLlmApiKey: existing.localLlmApiKey,
     persistentNotificationEnabled: form.persistentNotificationEnabled,
     autoTranscribeOnSave: form.autoTranscribeOnSave,
+    useExistingTagsForAutoTag: form.useExistingTagsForAutoTag,
     richEditorEnabled: form.richEditorEnabled,
     previewBeforeSave: form.previewBeforeSave,
     omniRouteApiKey: existing.omniRouteApiKey,
@@ -96,6 +98,7 @@ export function formStateFromSettings(
   return {
     persistentNotificationEnabled,
     autoTranscribeOnSave: s.autoTranscribeOnSave,
+    useExistingTagsForAutoTag: s.useExistingTagsForAutoTag,
     richEditorEnabled: s.richEditorEnabled,
     previewBeforeSave: s.previewBeforeSave,
     captureFolderPath: s.captureFolderPath,

@@ -38,6 +38,7 @@ const { BASE_SETTINGS } = vi.hoisted(() => ({
     localLlmApiKey: "",
     persistentNotificationEnabled: false,
     autoTranscribeOnSave: false,
+    useExistingTagsForAutoTag: true,
     richEditorEnabled: false,
     previewBeforeSave: false,
     captureFolderPath: "",

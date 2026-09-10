@@ -58,6 +58,7 @@ function baseSettings(overrides: Partial<Settings> = {}): Settings {
     localLlmApiKey: "",
     persistentNotificationEnabled: false,
     autoTranscribeOnSave: false,
+    useExistingTagsForAutoTag: true,
     richEditorEnabled: true,
     previewBeforeSave: false,
     captureFolderPath: "",
