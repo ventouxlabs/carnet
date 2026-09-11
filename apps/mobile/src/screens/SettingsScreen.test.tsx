@@ -200,12 +200,13 @@ describe("SettingsScreen", () => {
 
     await waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
 
-    // Switches render in JSX order: AI-behavior's two switches
-    // (autoTranscribeOnSave, previewBeforeSave), then Capture surfaces'
-    // persistent-notification switch — index 2 is the one under test.
+    // Switches render in JSX order: AI-behavior's three switches
+    // (autoTranscribeOnSave, previewBeforeSave, useExistingTagsForAutoTag),
+    // then Capture surfaces' persistent-notification switch — index 3 is the
+    // one under test.
     const switches = screen.getAllByRole("switch") as HTMLInputElement[];
-    expect(switches).toHaveLength(3);
-    expect(switches[2].checked).toBe(false);
+    expect(switches).toHaveLength(4);
+    expect(switches[3].checked).toBe(false);
   });
 
   it("keeps the JS-side hint (does NOT adopt reconciled OFF) when the force-stop itself rejects", async () => {
@@ -230,7 +231,46 @@ describe("SettingsScreen", () => {
     await waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
 
     const switches = screen.getAllByRole("switch") as HTMLInputElement[];
-    expect(switches[2].checked).toBe(true);
+    expect(switches[3].checked).toBe(true);
+  });
+
+  describe("vault tag reuse toggle", () => {
+    it("renders on by default and reflects the persisted value", async () => {
+      renderScreen();
+
+      expect(await screen.findByText("Reuse existing vault tags")).toBeTruthy();
+      const switches = screen.getAllByRole("switch") as HTMLInputElement[];
+      expect(switches[2].checked).toBe(true);
+    });
+
+    it("reflects an opted-out persisted value", async () => {
+      getSettings.mockResolvedValue(
+        baseSettings({ useExistingTagsForAutoTag: false }),
+      );
+
+      renderScreen();
+
+      await screen.findByText("Reuse existing vault tags");
+      const switches = screen.getAllByRole("switch") as HTMLInputElement[];
+      expect(switches[2].checked).toBe(false);
+    });
+
+    it("persists an opt-out when toggled off and saved", async () => {
+      // The switch only mutates local form state — this screen persists on an
+      // explicit Save press, same as the two switches above it.
+      renderScreen();
+
+      await screen.findByText("Reuse existing vault tags");
+      const switches = screen.getAllByRole("switch") as HTMLInputElement[];
+      fireEvent.click(switches[2]);
+      fireEvent.click(screen.getByText("Save"));
+
+      await waitFor(() =>
+        expect(saveSettings).toHaveBeenCalledWith(
+          expect.objectContaining({ useExistingTagsForAutoTag: false }),
+        ),
+      );
+    });
   });
 
   describe("LLM provider section", () => {

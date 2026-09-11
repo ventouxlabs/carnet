@@ -446,6 +446,29 @@ export default function SettingsScreen() {
           and the AI structures it afterwards. Turn on to vet the AI's version
           before it lands. Contacts always preview regardless of this setting.
         </HelperText>
+        <List.Item
+          title="Reuse existing vault tags"
+          description={
+            form.useExistingTagsForAutoTag
+              ? "Auto-tagging prefers tags your vault already uses"
+              : "Off — tags are suggested from the content alone"
+          }
+          left={(p) => <List.Icon {...p} icon="tag-multiple" />}
+          right={() => (
+            <Switch
+              value={form.useExistingTagsForAutoTag}
+              onValueChange={(next) =>
+                update({ useExistingTagsForAutoTag: next })
+              }
+            />
+          )}
+          style={styles.notificationRow}
+        />
+        <HelperText type="info" visible>
+          Shows the AI the tags already in your vault so it reuses "dev" instead
+          of adding "development" alongside it. It can still create a new tag
+          when nothing fits.
+        </HelperText>
       </View>
 
       <View style={styles.notificationSection}>
