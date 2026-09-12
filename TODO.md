@@ -81,6 +81,44 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   `.claude/PRPs/plans/completed/self-hosted-sentry.plan.md` for why hosted crash reporting
   was rejected.
 
+## Landed, pending on-device verification
+
+Code merged and green in CI, but NOT yet confirmed against a real vault on hardware.
+Do not write these up as shipped until the device evidence exists — filing the
+paperwork early is this repo's most-repeated documentation defect.
+
+- [ ] **Vault tag awareness (v0.4 S3)** — auto-tagging is shown the vault's existing
+  tag vocabulary so it reuses `dev` instead of minting `development` alongside it.
+  `lib/vaultTagHint.ts` reads the **cached** tag index (`loadCachedTagIndex`, never
+  `getTagIndex` — the latter falls through to a full SAF vault walk on a cache miss,
+  which would put seconds of I/O in front of a capture); `withTagHint` in `prompts.ts`
+  appends the vocabulary to the **final** system string, after any user prompt
+  override, so an override can't silently disable it. Gated by
+  `Settings.useExistingTagsForAutoTag` (default **on**, toggle in Settings → AI
+  behavior). Offline-queued captures get it too — `queue.ts` drains through the
+  dispatcher. Plan: `.claude/PRPs/plans/vault-tag-awareness.plan.md`.
+
+  Three things a future reader should **not** re-litigate:
+  1. **The canonicalizer is deliberately deferred**, not forgotten. Post-hoc rewriting
+     of model output (`development` → `dev`) is more reliable than a soft hint,
+     especially for a small local model, but it silently edits model output into the
+     vault and the fuzzy-match threshold is guesswork without real sprawl data.
+     `getVaultTagStrings` is the seam it would slot into. Decide after observing
+     whether the hint alone stops sprawl.
+  2. **The PRD's headline SAF-scan risk is already retired** — TagBrowser/Search/Todos
+     paid that cost, and `HomeScreen.tsx` already implements the background pre-warm
+     the PRD proposes as new work. No pre-warm task is needed.
+  3. **Only five prompts emit tags** (the capture builders). `buildPromoteIdeaPrompt`
+     preserves existing frontmatter rather than proposing tags, so capture-time
+     vocabulary survives promotion; `buildEnhanceProsePrompt` and
+     `buildRetrospectivePrompt` don't touch frontmatter at all.
+
+  Device checks still outstanding: reuse against a real warm index; the toggle
+  actually suppressing the hint; a cold start not being slowed; the same run against
+  a local Relais model (the small-model case is the real test of a soft hint); and
+  what `getVaultTagStrings()` returns on a real vault — `MAX_HINT_TAGS = 50` has never
+  met real data, so the cap may be an unexercised branch or may be truncating.
+
 ## Deferred to v0.3
 
 - [ ] **Auto-capture surfaces** — Android Quick Settings tile dropped from the roadmap
