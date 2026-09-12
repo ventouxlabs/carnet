@@ -754,9 +754,19 @@ defects in the test, each enough on its own:
 state is: plumbing verified, benefit not yet measured.
 
 **Preconditions for attempt 3** (not tidiness — the test is invalid without them):
-- **Delete the poisoning notes first:**
-  `Ideas/my-home-mesh-access-points-hand-off-badly-…{,-2,-3,-4}.md`. While they exist
-  the index still holds `mesh`/`wi-fi`/`troubleshooting` and the next run repeats this.
+- ~~Delete the poisoning notes~~ **done 2026-09-12**: the four
+  `Ideas/my-home-mesh-access-points-hand-off-badly-…{,-2,-3,-4}.md` notes are removed.
+  On-disk vocabulary is back to the six pre-existing tags: `qa`, `testing`,
+  `offline-model`, `offline`, `local-model`, `final`.
+- **But the cached index is still stale, and that is the trap.** Deleting the files
+  does NOT invalidate `carnet:noteindex:v1`. `HomeScreen.refresh()` reads
+  `loadCachedNoteIndex()` and rebuilds only on a **miss**, so the cache still carries
+  `mesh`/`wi-fi`/`networking`/`troubleshooting` from the deleted notes — and
+  `getVaultTagStrings()` reads exactly that cache. **Pull-to-refresh on Home (or
+  Search/Todos refresh) before scoring anything**, and confirm the vocabulary is the
+  six tags above — the diagnostic's `vaultTags=` count is the cheapest confirmation.
+  This is the same "deleted notes linger until an explicit refresh" behaviour earlier
+  device QA recorded for Todos; it is by design, not a regression.
 - Pick the discriminator **from what the app actually sends** — read `vaultTags` via
   the diagnostic, or enumerate tags under the four indexed subdirs. Never from a
   hand-written list, and never from `Archive/`.
