@@ -709,6 +709,83 @@ gh pr create --base main --title "feat(tags): vault tag awareness (v0.4 S3)"
 
 Record the results in a `docs/session-handoffs/` entry.
 
+#### Attempt 1 — 2026-09-11, Pixel 10 Pro Fold (rango), Android 17 — **INCOMPLETE**
+
+Build: release-signed APK from `feat/vault-tag-awareness`, versionCode 9, installed
+over the existing release install (no uninstall, no data loss). Provider: **Relais
+(local)**, `http://127.0.0.1:8080`, model `litert-community/gemma-4-E2B-it-litert-lm`
+on the Tensor G5 — i.e. the small on-device model, the hardest case for a soft hint.
+
+| Check | Result |
+|---|---|
+| 1. Reuse against a warm index | **INCONCLUSIVE — see below** |
+| 2. Toggle suppresses the hint | **NOT RUN** (blocked by 1) |
+| 3. Cold start not slowed | **NOT RUN** (destructive; deferred) |
+| 4. Local Relais small model | **PARTIAL** — everything ran on Relais/Gemma |
+| 5. What `getVaultTagStrings()` returns | **DONE** |
+| Task 5 toggle renders | **PASS** — on by default, correct copy/icon |
+
+**Check 5 (done).** The device vault holds 7 notes, ~16 distinct tags after
+normalization. **`MAX_HINT_TAGS = 50` never engages on this vault** — the cap is an
+unexercised branch here, not a verified one. The vault does contain real sprawl
+(`QA`/`testing`, `offline`/`offline-model`/`local-model`, `feature`/`feature
+verification`, and `LLM`/`llm` — the last confirming `normalizeTag` case-folding
+collapses to one index entry on real data).
+
+**Check 1 (inconclusive) — the open question.** Baseline on v0.11.0 (no hint) and two
+captures on the new build produced the **identical** tag set:
+`[networking, mesh, Wi-Fi, troubleshooting]`. Note `Wi-Fi` normalizes to `wi-fi`
+while the vault already carries `wifi` — a near-duplicate being minted, i.e. exactly
+the sprawl this feature exists to stop.
+
+But a direct A/B against the same model (bypassing the app, same system prompt, only
+the hint block differing) showed the model **does** honor the hint:
+
+- no hint  → `tags: [networking, mesh, Wi-Fi, troubleshooting]`
+- with hint → `tags: [idea, networking, mesh, wifi, troubleshooting]`  ← `wifi` reused
+
+So the model complies when the hint is present, yet the in-app capture behaved as if
+it were absent. **Whether Carnet actually sends the hint on-device is UNRESOLVED.**
+Do not read the green unit tests as settling this — they assert the wiring, not that
+`getVaultTagStrings()` returns a non-empty list at capture time on a real device.
+
+Ruled out so far:
+- The setting was on (toggle verified on screen, default true).
+- `CaptureScreen` uses `upsertNoteInIndex`, **not** `invalidateNoteIndex`, so the
+  save-first write does not wipe the cache before enrichment (first hypothesis, wrong).
+- The note index cache is warm — Home renders per-card tags from `loadCachedNoteIndex()`,
+  the cached read, and it rendered them.
+- Sample size is weak: 2 in-app runs, 1 direct sample per arm. Gemma is stochastic.
+
+**What would settle it:** observe the actual request. The intended method — point the
+provider Base URL at a host-side logging proxy via `adb reverse` — failed for two
+environmental reasons, neither of them a product defect: host port 9090 was already
+occupied, and editing the Relais preset's Base URL **would not persist** (it reverts
+to `http://127.0.0.1:8080` after Save). That non-persistence is worth a look on its
+own — it may be a real bug in provider-entry editing, or an artifact of how those
+edits commit versus the screen's Save button. A simpler alternative next time: add a
+temporary diagnostic that logs `getVaultTagStrings().length` to the crash-log ring
+buffer, visible in Settings → Diagnostics without any network instrumentation.
+
+**Why the run stopped:** the device began thermal-shedding (Relais showed
+"thermal · shedding load", then returned HTTP 503). Two queued captures stalled at
+`pending-enrich`. Further model-dependent checks need a cooled device.
+
+**Test artifacts left in the vault** (safe to delete, all the same sentence):
+`Ideas/my-home-mesh-access-points-hand-off-badly-…{,-2,-3,-4}.md`.
+
+**Automation notes for the next run** (cost real time here):
+- Dismiss the keyboard **before** any `input swipe`, or glide-typing injects junk into
+  the focused field — a Base URL silently became
+  `http://127.0.0.1:19099 by by by by …`, which then failed to save and looked like a
+  persistence bug.
+- `screencap` on this fold prepends a `[Warning] Multiple displays…` strip; strip
+  bytes before the PNG magic or the image won't parse.
+- Run `expo prebuild` from `apps/mobile`, never the repo root — from the root it
+  writes a junk `android/`+`app.json` and injects expo deps into the root
+  `package.json`. A stale prebuild also pins the old `versionCode`, which surfaces as
+  `INSTALL_FAILED_VERSION_DOWNGRADE` (8 vs 9), not as anything mentioning prebuild.
+
 - [ ] **Step 6: Only now, close the plan out**
 
 Once Step 5's four checks have actually passed on hardware and the evidence is written up:
