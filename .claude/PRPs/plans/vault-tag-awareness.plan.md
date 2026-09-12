@@ -727,21 +727,49 @@ Reproduced on a second cold launch. So on a real device: the setting is on, the
 wiring works end to end — `loadCachedTagIndex()` is warm at capture time, which was
 the main device-specific risk and the one unit tests cannot cover.
 
-**What this does NOT establish: that the hint changes what a small model emits.**
-Tally on `gemma-4-E2B-it`, same input text throughout:
+**BENEFIT IS UNMEASURED. The experiment was invalid — corrected 2026-09-12.**
 
-| Condition | `wifi` (reuse) | `Wi-Fi` (near-duplicate) |
-|---|---|---|
-| In-app, hint sent (confirmed above) | 0 | 3 |
-| Direct API, hint present | 1 | 0 |
-| Direct API, no hint | 0 | 2 |
+An earlier revision of this section claimed the hint had a weak effect and pointed at
+the canonicalizer as the likely fix. That was wrong, in the expensive direction. Three
+defects in the test, each enough on its own:
 
-Three in-app captures with the vocabulary demonstrably present still minted `Wi-Fi`.
-The one direct-API run with the hint reused `wifi`. Small numbers, one model, so the
-honest reading is: **the mechanism is verified, its effect on this model is weak and
-unproven.** That is precisely the signal the deferred canonicalizer was waiting on —
-if a larger provider does not do better, a deterministic post-hoc mapper is the fix,
-and this table is the argument for building it.
+1. **The discriminator was never in the vocabulary.** `NOTE_SUBDIRS` is
+   `["Ideas","Journal","Notes","People"]` — `Archive/` is **not indexed**. The chosen
+   discriminator `wifi` exists only in `Archive/wifi-disabled-isolation-test-…md`, so
+   the app could never offer it. The vocabulary actually sent contained **`wi-fi`**,
+   and the model emitted `Wi-Fi`, which `normalizeTag` folds to `wi-fi` — **exact
+   reuse**, scored as a failure. The full indexed set, matching `vaultTags=10`:
+   `qa, testing, offline-model, offline, local-model, final, networking, mesh, wi-fi,
+   troubleshooting`.
+2. **The vocabulary was self-poisoned.** The v0.11.0 baseline capture is what created
+   `mesh`/`networking`/`wi-fi`/`troubleshooting` in the index. From capture #2 onward
+   the model was handed its own prior output as "the vault's vocabulary" and
+   reproduced it verbatim — which cannot distinguish reuse from repetition.
+3. **n was overstated.** Only `-2.md` enriched on the hint build. `-3.md` and `-4.md`
+   stalled at `pending-enrich` (Relais frozen) and never completed. One sample, not
+   three. The direct-API arm used a hand-written vocabulary that did not match what
+   the app sends, so it measured a different system.
+
+**Do not cite this attempt as evidence for or against the canonicalizer.** The honest
+state is: plumbing verified, benefit not yet measured.
+
+**Preconditions for attempt 3** (not tidiness — the test is invalid without them):
+- **Delete the poisoning notes first:**
+  `Ideas/my-home-mesh-access-points-hand-off-badly-…{,-2,-3,-4}.md`. While they exist
+  the index still holds `mesh`/`wi-fi`/`troubleshooting` and the next run repeats this.
+- Pick the discriminator **from what the app actually sends** — read `vaultTags` via
+  the diagnostic, or enumerate tags under the four indexed subdirs. Never from a
+  hand-written list, and never from `Archive/`.
+- Choose capture text whose expected tags are **already in the index and were not
+  created by this experiment**, e.g. something about QA of an offline local model
+  (`qa`, `testing`, `offline-model`, `local-model` all predate this work).
+- Enrich every sample to completion before scoring; a `pending-enrich` note is not a
+  data point.
+
+**Separate finding worth its own decision: `Archive/` tags are invisible to the hint.**
+A user who archives notes loses that vocabulary, so auto-tagging can re-mint a tag the
+vault already used before archiving. That follows from `NOTE_SUBDIRS` and is not a bug
+in this feature, but it is a real limit on it and was not considered in the PRD.
 
 Also worth noting for anyone re-running: Android **froze Relais** as a cached app
 (`ActivityManager: freezing com.ventouxlabs.relais.izzy`), which is what actually

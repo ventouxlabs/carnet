@@ -113,20 +113,27 @@ paperwork early is this repo's most-repeated documentation defect.
      vocabulary survives promotion; `buildEnhanceProsePrompt` and
      `buildRetrospectivePrompt` don't touch frontmatter at all.
 
-  **Device status (2026-09-12): the plumbing is verified, the benefit is not.** An
+  **Device status (2026-09-12): plumbing verified, benefit NOT yet measured.** An
   instrumented release build on a Pixel 10 Pro Fold logged
   `setting=true vaultTags=10 sending=10` — the cached index is warm at capture time
-  and all 10 tags reach `llmClient`. What is NOT shown is that it changes anything:
-  three in-app captures with the vocabulary demonstrably present still emitted
-  `Wi-Fi` rather than reusing the vault's `wifi`, while one direct-API call with the
-  hint did reuse it. On `gemma-4-E2B-it` the effect is weak and unproven. **If a
-  larger provider does no better, build the deferred canonicalizer** — that tally is
-  the argument for it. Also settled: `MAX_HINT_TAGS = 50` never engages on this vault
-  (~16 tags), so the cap is an unexercised branch.
+  and all 10 tags reach `llmClient`, which closes the one device-specific risk unit
+  tests cannot cover. Whether it improves tagging is **still unknown**: the first
+  measurement attempt was invalid (the discriminator tag lived in `Archive/`, which
+  `NOTE_SUBDIRS` does not index, so the app never offered it; and the baseline capture
+  itself seeded the vocabulary the later captures were scored against). **Do not cite
+  that attempt for or against the canonicalizer** — see the plan for the corrected
+  write-up and the preconditions for attempt 3 (delete the poisoning test notes
+  first). Also settled: `MAX_HINT_TAGS = 50` never engages on this vault, so the cap
+  is an unexercised branch.
+
+  Separate finding: **`Archive/` tags are invisible to the hint** (`NOTE_SUBDIRS` is
+  `Ideas`/`Journal`/`Notes`/`People`), so archiving a note removes its tags from the
+  vocabulary and auto-tagging can re-mint them. Follows from the existing index
+  design, not a defect in this feature, but unconsidered in the PRD and worth a call.
 
   Still outstanding, all blocked on physical device access (the fold is shut and
-  locked; `adb install` and app launch work, taps do not): the toggle's `false` arm
-  observed on-device, a cold-start latency check, and more model-compliance samples.
+  locked; `adb install` and app launch work, taps do not): a valid benefit
+  measurement, the toggle's `false` arm observed on-device, and a cold-start check.
 
 ## Deferred to v0.3
 
