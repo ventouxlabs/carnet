@@ -372,6 +372,10 @@ describe("drainQueue", () => {
       { transcript: "today I did things", notes: "" },
       expect.any(Object),
       undefined,
+      // v0.4 S3: the offline drain goes through dispatcher.enrich*, so a
+      // queued capture carries the vault tag vocabulary too (empty here —
+      // no note index is cached in this suite).
+      expect.any(Array),
     );
     expect(vi.mocked(appendJournal)).toHaveBeenCalled();
     expect(rows().length).toBe(0);
@@ -388,6 +392,10 @@ describe("drainQueue", () => {
       { ocrResult: "Jane Doe CEO", context: "conference" },
       expect.any(Object),
       undefined,
+      // v0.4 S3: the offline drain goes through dispatcher.enrich*, so a
+      // queued capture carries the vault tag vocabulary too (empty here —
+      // no note index is cached in this suite).
+      expect.any(Array),
     );
     expect(vi.mocked(writePerson)).toHaveBeenCalled();
     expect(rows().length).toBe(0);

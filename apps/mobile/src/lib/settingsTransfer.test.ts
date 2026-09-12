@@ -21,6 +21,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     localLlmApiKey: "local-secret",
     persistentNotificationEnabled: true,
     autoTranscribeOnSave: true,
+    useExistingTagsForAutoTag: true,
     richEditorEnabled: true,
     previewBeforeSave: true,
     captureFolderPath: "/storage/emulated/0/carnet",
@@ -50,6 +51,35 @@ describe("settings transfer", () => {
     expect(imported.persistentNotificationEnabled).toBe(false);
     expect(imported.promptOverrides).toEqual({ idea: "Keep it brief" });
     expect(imported.themePreference).toBe("light");
+  });
+
+  it("round-trips useExistingTagsForAutoTag when disabled", () => {
+    const imported = parseSettingsTransfer(
+      serializeSettingsTransfer(settings({ useExistingTagsForAutoTag: false }), "light"),
+    );
+    expect(imported.useExistingTagsForAutoTag).toBe(false);
+  });
+
+  it("accepts an export written before useExistingTagsForAutoTag existed", () => {
+    // v0.11.0 and earlier exported no such field. The validator must treat it
+    // as optional and default it to true, not refuse the whole import — see
+    // the prompt-override case below for the same bug class biting before.
+    // Bumping VERSION instead would reject every v1 export outright, which is
+    // strictly worse.
+    const raw = serializeSettingsTransfer(settings(), "light");
+    const parsed = JSON.parse(raw) as { settings: Record<string, unknown> };
+    delete parsed.settings.useExistingTagsForAutoTag;
+    const imported = parseSettingsTransfer(JSON.stringify(parsed));
+    expect(imported.useExistingTagsForAutoTag).toBe(true);
+  });
+
+  it("rejects a non-boolean useExistingTagsForAutoTag", () => {
+    const raw = serializeSettingsTransfer(settings(), "light");
+    const parsed = JSON.parse(raw) as { settings: Record<string, unknown> };
+    parsed.settings.useExistingTagsForAutoTag = "yes";
+    expect(() => parseSettingsTransfer(JSON.stringify(parsed))).toThrow(
+      /incomplete or malformed/,
+    );
   });
 
   it("round-trips every prompt override key, including the two non-capture-mode ones", () => {

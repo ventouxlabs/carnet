@@ -46,6 +46,7 @@
  */
 
 import { getSettings, getPromptOverrides, DEFAULT_OMNIROUTE_MODEL, type Settings } from "./settings";
+import { getVaultTagStrings } from "./vaultTagHint";
 import {
   resolveActiveProvider,
   resolveEnhanceProvider,
@@ -287,9 +288,18 @@ function resolveVisionProviderId(settings: Settings): string {
 }
 
 export async function enrichIdea(text: string): Promise<EnrichResult> {
-  const [settings, overrides] = await Promise.all([getSettings(), getPromptOverrides()]);
+  // vaultTags is fetched in the SAME Promise.all rather than after the
+  // settings read: it is a cached AsyncStorage read that never scans the
+  // vault, so resolving it in parallel keeps capture latency flat, and the
+  // toggle is applied afterwards.
+  const [settings, overrides, vaultTags] = await Promise.all([
+    getSettings(),
+    getPromptOverrides(),
+    getVaultTagStrings(),
+  ]);
+  const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
-    llmClient.enrichIdea(text, config, overrides.idea),
+    llmClient.enrichIdea(text, config, overrides.idea, availableTags),
   );
   return withFallbackMarker(outcome);
 }
@@ -298,9 +308,18 @@ export async function enrichJournal(input: {
   transcript: string;
   notes: string;
 }): Promise<EnrichResult> {
-  const [settings, overrides] = await Promise.all([getSettings(), getPromptOverrides()]);
+  // vaultTags is fetched in the SAME Promise.all rather than after the
+  // settings read: it is a cached AsyncStorage read that never scans the
+  // vault, so resolving it in parallel keeps capture latency flat, and the
+  // toggle is applied afterwards.
+  const [settings, overrides, vaultTags] = await Promise.all([
+    getSettings(),
+    getPromptOverrides(),
+    getVaultTagStrings(),
+  ]);
+  const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
-    llmClient.enrichJournal(input, config, overrides.journal),
+    llmClient.enrichJournal(input, config, overrides.journal, availableTags),
   );
   return withFallbackMarker(outcome);
 }
@@ -309,9 +328,18 @@ export async function enrichPerson(input: {
   ocrResult: string;
   context: string;
 }): Promise<EnrichResult> {
-  const [settings, overrides] = await Promise.all([getSettings(), getPromptOverrides()]);
+  // vaultTags is fetched in the SAME Promise.all rather than after the
+  // settings read: it is a cached AsyncStorage read that never scans the
+  // vault, so resolving it in parallel keeps capture latency flat, and the
+  // toggle is applied afterwards.
+  const [settings, overrides, vaultTags] = await Promise.all([
+    getSettings(),
+    getPromptOverrides(),
+    getVaultTagStrings(),
+  ]);
+  const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
-    llmClient.enrichPerson(input, config, overrides.person),
+    llmClient.enrichPerson(input, config, overrides.person, availableTags),
   );
   return withFallbackMarker(outcome);
 }
@@ -321,10 +349,19 @@ export async function enrichSharedImage(input: {
   mimeType: string;
   context: string;
 }): Promise<EnrichResult> {
-  const [settings, overrides] = await Promise.all([getSettings(), getPromptOverrides()]);
+  // vaultTags is fetched in the SAME Promise.all rather than after the
+  // settings read: it is a cached AsyncStorage read that never scans the
+  // vault, so resolving it in parallel keeps capture latency flat, and the
+  // toggle is applied afterwards.
+  const [settings, overrides, vaultTags] = await Promise.all([
+    getSettings(),
+    getPromptOverrides(),
+    getVaultTagStrings(),
+  ]);
+  const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
   const primaryId = resolveVisionProviderId(settings);
   const outcome = await withFallbackChain(settings, primaryId, (config) =>
-    llmClient.enrichSharedImage(input, config, overrides.sharedImage),
+    llmClient.enrichSharedImage(input, config, overrides.sharedImage, availableTags),
   );
   return withFallbackMarker(outcome);
 }
@@ -335,9 +372,18 @@ export async function enrichSharedLink(input: {
   context: string;
   onPreviewSettled?: () => void;
 }): Promise<EnrichResult> {
-  const [settings, overrides] = await Promise.all([getSettings(), getPromptOverrides()]);
+  // vaultTags is fetched in the SAME Promise.all rather than after the
+  // settings read: it is a cached AsyncStorage read that never scans the
+  // vault, so resolving it in parallel keeps capture latency flat, and the
+  // toggle is applied afterwards.
+  const [settings, overrides, vaultTags] = await Promise.all([
+    getSettings(),
+    getPromptOverrides(),
+    getVaultTagStrings(),
+  ]);
+  const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
-    llmClient.enrichSharedLink(input, config, overrides.sharedLink),
+    llmClient.enrichSharedLink(input, config, overrides.sharedLink, availableTags),
   );
   return withFallbackMarker(outcome);
 }
