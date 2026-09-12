@@ -113,11 +113,20 @@ paperwork early is this repo's most-repeated documentation defect.
      vocabulary survives promotion; `buildEnhanceProsePrompt` and
      `buildRetrospectivePrompt` don't touch frontmatter at all.
 
-  Device checks still outstanding: reuse against a real warm index; the toggle
-  actually suppressing the hint; a cold start not being slowed; the same run against
-  a local Relais model (the small-model case is the real test of a soft hint); and
-  what `getVaultTagStrings()` returns on a real vault — `MAX_HINT_TAGS = 50` has never
-  met real data, so the cap may be an unexercised branch or may be truncating.
+  **Device status (2026-09-12): the plumbing is verified, the benefit is not.** An
+  instrumented release build on a Pixel 10 Pro Fold logged
+  `setting=true vaultTags=10 sending=10` — the cached index is warm at capture time
+  and all 10 tags reach `llmClient`. What is NOT shown is that it changes anything:
+  three in-app captures with the vocabulary demonstrably present still emitted
+  `Wi-Fi` rather than reusing the vault's `wifi`, while one direct-API call with the
+  hint did reuse it. On `gemma-4-E2B-it` the effect is weak and unproven. **If a
+  larger provider does no better, build the deferred canonicalizer** — that tally is
+  the argument for it. Also settled: `MAX_HINT_TAGS = 50` never engages on this vault
+  (~16 tags), so the cap is an unexercised branch.
+
+  Still outstanding, all blocked on physical device access (the fold is shut and
+  locked; `adb install` and app launch work, taps do not): the toggle's `false` arm
+  observed on-device, a cold-start latency check, and more model-compliance samples.
 
 ## Deferred to v0.3
 

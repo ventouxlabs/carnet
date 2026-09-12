@@ -709,6 +709,62 @@ gh pr create --base main --title "feat(tags): vault tag awareness (v0.4 S3)"
 
 Record the results in a `docs/session-handoffs/` entry.
 
+#### Attempt 2 — 2026-09-12 — **check 1's plumbing RESOLVED: the hint IS sent**
+
+Attempt 1 could not tell "Carnet never sends the vocabulary" from "the small model
+ignored it". Settled by instrumentation rather than more sampling: a temporary
+`console.warn` in `dispatcher.enrichIdea` (release builds strip no console — there is
+no `transform-remove-console` in this project), logging the setting, what
+`getVaultTagStrings()` returned, and what was actually passed down. Reverted
+immediately after; it is in no commit.
+
+```
+[tagHintDiag] setting=true vaultTags=10 sending=10 sample=qa|final|local-model|mesh|networking|offline
+```
+
+Reproduced on a second cold launch. So on a real device: the setting is on, the
+**cached** tag index yields 10 tags, and all 10 are handed to `llmClient`. The
+wiring works end to end — `loadCachedTagIndex()` is warm at capture time, which was
+the main device-specific risk and the one unit tests cannot cover.
+
+**What this does NOT establish: that the hint changes what a small model emits.**
+Tally on `gemma-4-E2B-it`, same input text throughout:
+
+| Condition | `wifi` (reuse) | `Wi-Fi` (near-duplicate) |
+|---|---|---|
+| In-app, hint sent (confirmed above) | 0 | 3 |
+| Direct API, hint present | 1 | 0 |
+| Direct API, no hint | 0 | 2 |
+
+Three in-app captures with the vocabulary demonstrably present still minted `Wi-Fi`.
+The one direct-API run with the hint reused `wifi`. Small numbers, one model, so the
+honest reading is: **the mechanism is verified, its effect on this model is weak and
+unproven.** That is precisely the signal the deferred canonicalizer was waiting on —
+if a larger provider does not do better, a deterministic post-hoc mapper is the fix,
+and this table is the argument for building it.
+
+Also worth noting for anyone re-running: Android **froze Relais** as a cached app
+(`ActivityManager: freezing com.ventouxlabs.relais.izzy`), which is what actually
+stopped it serving — read alongside the thermal shedding from attempt 1, not instead
+of it.
+
+**Still not run, and why:** the device is **physically folded shut and locked**
+(`dumpsys device_state` → `mCommittedState = CLOSED`, `mDreamingLockscreen=true`).
+`adb install` and `monkey` launches work in that state, but taps and swipes do not,
+so anything needing the UI is blocked on physical access:
+- check 2 (toggle off ⇒ `sending=0`) — needs the toggle tapped. The gate is a
+  one-line ternary with unit coverage, and `setting=true ⇒ sending=10` is confirmed;
+  only the `false` arm is unobserved on-device.
+- check 3 (cold start not slowed) — needs the UI and is destructive.
+- more model-compliance samples — need Relais restarted, which needs the UI.
+
+Dead ends, recorded so they are not retried: `QuickIdeaTaskService` is not exported
+(`Error: Requires permission not exported from uid`), so the headless capture path
+cannot be driven from `adb`; `RemoteInput` results cannot be synthesised via
+`am broadcast`; and the release build is not debuggable with no root, so `run-as`
+and direct AsyncStorage reads are both unavailable. The console-log route was the
+only one that worked, and it was enough.
+
 #### Attempt 1 — 2026-09-11, Pixel 10 Pro Fold (rango), Android 17 — **INCOMPLETE**
 
 Build: release-signed APK from `feat/vault-tag-awareness`, versionCode 9, installed
