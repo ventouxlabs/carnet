@@ -753,6 +753,100 @@ defects in the test, each enough on its own:
 **Do not cite this attempt as evidence for or against the canonicalizer.** The honest
 state is: plumbing verified, benefit not yet measured.
 
+#### Attempt 4 — 2026-09-13 — **one clean on-device reuse sample**
+
+This is the later resumption of Attempt 3's handoff; attempts are recorded
+newest first in this plan.
+
+The Pixel 9 Pro Fold (comet, `4A111FDKD0000C`) was physically replugged and
+reachable under its active Owner profile. Its installed `0.11.0` app was an
+older, pre-S3 build despite sharing the version name: Settings had no "Reuse
+existing vault tags" row. A release-signed APK from the current source was
+therefore built and installed **in place** (no uninstall; settings and vault
+preserved). The new build exposed the switch, which was already enabled.
+
+The local Relais provider initially showed `OFFLINE` / `node not running · press
+START`; tapping its visible START control brought it to `LIVE`, with
+`engine resident · Gemma-4-E4B-it` at `127.0.0.1:8080`. After a Home
+pull-to-refresh, the real `Documents/carnet` vault had seven indexed notes whose
+on-disk tag metadata included `travel` and `Austria`. A neutral Idea capture,
+`Neutral travel test: plan a travel to Austria.`, completed through the normal
+save-first/background-enrichment flow. Its emitted tags were
+`[idea, seedling, travel, austria]`: `travel` was reused exactly and `austria`
+matches the existing tag after the app's case-normalization.
+
+This is a valid positive, local-Relais happy-path sample, but **not a causal
+benefit measurement**: one output cannot establish that the hint changed the
+model's behavior versus content-only tagging. The toggle-off control and
+cold-start check remain outstanding. The exact test artifact
+`Ideas/neutral-travel-test-plan-a-travel-to-austria.md` was removed immediately
+after scoring, then Home was refreshed again; the Ideas directory returned to
+zero notes, so it cannot poison the next vocabulary measurement.
+
+#### Attempt 3 — 2026-09-13 — **BLOCKED before any capture; handed off**
+
+The 2026-09-12 blocker (device folded shut and locked) is resolved — both test
+devices were confirmed open and unlocked. Progress made before hitting two new,
+device-specific blockers unrelated to the app:
+
+**Relais recovery procedure, confirmed and worth keeping.** On the Pixel 10 Pro
+Fold (rango), the Relais process existed (`ps` showed it alive) but was not
+serving: `adb forward tcp:18080 tcp:8080` + `curl http://127.0.0.1:18080/v1/models`
+returned connection-refused (`HTTP 000`), and a `uiautomator dump` of the
+foregrounded app showed literal on-screen text `"node not running · press START"`.
+Foregrounding Relais (`monkey -p com.ventouxlabs.relais.izzy -c
+android.intent.category.LAUNCHER 1`) does **not** restart the model — the START
+button must be tapped (`bounds="[969,1426][1107,1484]"` at the time; re-dump
+rather than trust this coordinate). After tapping START the UI cycled
+`"loading engine…"` → `"model locked while starting"` / `"STARTING"` → (roughly
+1-2 minutes later) `"engine resident · Gemma 4 E2B-it (Tensor G5)"` / `"LIVE"`,
+listing `127.0.0.1:8080`. Confirmed live with the same forwarded curl: `HTTP 401`
+`{"error":{"message":"unauthorized","type":"authentication_error"}}` — a 401 with
+that JSON body means the server is up and enforcing auth (expected, since no
+Bearer key was sent); connection-refused / `HTTP 000` is the "not actually
+running" signal to watch for, not the UI's state label alone. This reconfirms
+Attempt 2's "Android froze Relais as a cached app" finding and adds the concrete
+recovery step.
+
+**Blocker A (Pixel 10 Pro Fold, rango, `57211FDCG0023C`) — Carnet is not
+installed under the device's active Android user.** `cmd user list -v` shows two
+full users: `0: Owner (current)` and `10: Bryn` (a second, independent full
+secondary user — not a work profile). `dumpsys package com.ventouxlabs.carnet`
+shows `User 0: installed=false`, `User 10: installed=true` — the **only** install
+of Carnet on this device is under "Bryn", who is not the active user. Relais is
+installed under both users, which is why it was reachable while Carnet was not.
+`am start --user 10 -n com.ventouxlabs.carnet/.MainActivity` fails with
+`Error: Activity class {com.ventouxlabs.carnet/com.ventouxlabs.carnet.MainActivity}
+does not exist` even though the activity resolver table lists that exact
+component correctly — targeting a background user via `--user` was not enough;
+it may require actually switching the foreground user (`am switch-user 10`, which
+likely needs that profile's own unlock credential — not attempted). **This was
+deliberately not pushed through**: switching into another named user profile on a
+shared device and unlocking it is exactly the kind of action to check with the
+user first rather than assume, and the user, when asked, chose to use the Pixel 9
+instead rather than resolve the Bryn-profile situation. Whoever resumes this
+should either resolve where the two profiles came from and which one this
+project's work should live under, or standardize on the Pixel 9 (verify its
+active-profile install first, don't assume).
+
+**Blocker B (Pixel 9 Pro Fold, comet, `4A111FDKD0000C`) — dropped off `adb`
+entirely mid-session.** `adb devices -l` stopped listing it (no `unauthorized`,
+no `offline` — just absent) partway through switching to it per the user's
+choice above. This matches a previously-documented flaky-USB failure mode for
+this specific device (see the `pixel-9-usb-flaky-on-device-qa` memory): it needs
+a physical replug, which is not something an agent can do. Session paused here;
+the user asked to hand off to Codex rather than wait for a replug.
+
+**Exact resume point, so this isn't re-derived:** neither device reached a
+Carnet screen this attempt — no capture was made, no vocabulary was re-confirmed,
+no diagnostic was re-added. Attempt 2's "Preconditions for attempt 3" below are
+therefore still ALL outstanding. Next session/agent should, in order: (1) get one
+device to a point where Carnet is reachable under its *active* profile — replug
+the Pixel 9 and recheck `adb devices -l`, or resolve the Bryn-profile question on
+the Pixel 10 with the user; (2) redo the Relais START-tap recovery above if it
+shows "node not running" again — do not assume a foregrounded Relais is serving;
+(3) then follow the preconditions below exactly.
+
 **Preconditions for attempt 3** (not tidiness — the test is invalid without them):
 - ~~Delete the poisoning notes~~ **done 2026-09-12**: the four
   `Ideas/my-home-mesh-access-points-hand-off-badly-…{,-2,-3,-4}.md` notes are removed.

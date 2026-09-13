@@ -131,9 +131,19 @@ paperwork early is this repo's most-repeated documentation defect.
   vocabulary and auto-tagging can re-mint them. Follows from the existing index
   design, not a defect in this feature, but unconsidered in the PRD and worth a call.
 
-  Still outstanding, all blocked on physical device access (the fold is shut and
-  locked; `adb install` and app launch work, taps do not): a valid benefit
-  measurement, the toggle's `false` arm observed on-device, and a cold-start check.
+  **2026-09-13 follow-up:** after physically replugging the Pixel 9, a current
+  release-signed S3 build was installed in place (the pre-existing `0.11.0` image
+  predated S3 despite the matching version name). With the setting enabled, a
+  refreshed real vault containing `travel` and `Austria`, and local Relais live, the
+  neutral Idea `Neutral travel test: plan a travel to Austria.` completed with
+  `[idea, seedling, travel, austria]`. That is one clean positive on-device reuse
+  sample on the small local model; the generated test note was deleted immediately
+  and Home refreshed so it cannot pollute the next measurement. It does **not** yet
+  establish causal benefit over content-only tagging: the toggle's `false` arm and a
+  cold-start check remain outstanding. See Attempt 4 in the plan for the exact
+  evidence and Attempt 3 for the earlier, time-bounded device blockers. Device access
+  may still recur as a blocker (the Pixel 9's flaky USB and the Pixel 10's active-user
+  install mismatch); do not assume either device is ready without checking first.
 
 ## Deferred to v0.3
 
