@@ -753,6 +753,33 @@ defects in the test, each enough on its own:
 **Do not cite this attempt as evidence for or against the canonicalizer.** The honest
 state is: plumbing verified, benefit not yet measured.
 
+#### Attempt 4 — 2026-09-13 — **one clean on-device reuse sample**
+
+The Pixel 9 Pro Fold (comet, `4A111FDKD0000C`) was physically replugged and
+reachable under its active Owner profile. Its installed `0.11.0` app was an
+older, pre-S3 build despite sharing the version name: Settings had no "Reuse
+existing vault tags" row. A release-signed APK from the current source was
+therefore built and installed **in place** (no uninstall; settings and vault
+preserved). The new build exposed the switch, which was already enabled.
+
+The local Relais provider initially showed `OFFLINE` / `node not running · press
+START`; tapping its visible START control brought it to `LIVE`, with
+`engine resident · Gemma-4-E4B-it` at `127.0.0.1:8080`. After a Home
+pull-to-refresh, the real `Documents/carnet` vault had seven indexed notes whose
+on-disk tag metadata included `travel` and `Austria`. A neutral Idea capture,
+`Neutral travel test: plan a travel to Austria.`, completed through the normal
+save-first/background-enrichment flow. Its emitted tags were
+`[idea, seedling, travel, austria]`: `travel` was reused exactly and `austria`
+matches the existing tag after the app's case-normalization.
+
+This is a valid positive, local-Relais happy-path sample, but **not a causal
+benefit measurement**: one output cannot establish that the hint changed the
+model's behavior versus content-only tagging. The toggle-off control and
+cold-start check remain outstanding. The exact test artifact
+`Ideas/neutral-travel-test-plan-a-travel-to-austria.md` was removed immediately
+after scoring, then Home was refreshed again; the Ideas directory returned to
+zero notes, so it cannot poison the next vocabulary measurement.
+
 #### Attempt 3 — 2026-09-13 — **BLOCKED before any capture; handed off**
 
 The 2026-09-12 blocker (device folded shut and locked) is resolved — both test
