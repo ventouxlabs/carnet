@@ -755,6 +755,9 @@ state is: plumbing verified, benefit not yet measured.
 
 #### Attempt 4 — 2026-09-13 — **one clean on-device reuse sample**
 
+This is the later resumption of Attempt 3's handoff; attempts are recorded
+newest first in this plan.
+
 The Pixel 9 Pro Fold (comet, `4A111FDKD0000C`) was physically replugged and
 reachable under its active Owner profile. Its installed `0.11.0` app was an
 older, pre-S3 build despite sharing the version name: Settings had no "Reuse

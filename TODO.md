@@ -141,7 +141,9 @@ paperwork early is this repo's most-repeated documentation defect.
   and Home refreshed so it cannot pollute the next measurement. It does **not** yet
   establish causal benefit over content-only tagging: the toggle's `false` arm and a
   cold-start check remain outstanding. See Attempt 4 in the plan for the exact
-  evidence and Attempt 3 for the earlier, time-bounded device blockers.
+  evidence and Attempt 3 for the earlier, time-bounded device blockers. Device access
+  may still recur as a blocker (the Pixel 9's flaky USB and the Pixel 10's active-user
+  install mismatch); do not assume either device is ready without checking first.
 
 ## Deferred to v0.3
 
