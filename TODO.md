@@ -131,9 +131,16 @@ paperwork early is this repo's most-repeated documentation defect.
   vocabulary and auto-tagging can re-mint them. Follows from the existing index
   design, not a defect in this feature, but unconsidered in the PRD and worth a call.
 
-  Still outstanding, all blocked on physical device access (the fold is shut and
-  locked; `adb install` and app launch work, taps do not): a valid benefit
-  measurement, the toggle's `false` arm observed on-device, and a cold-start check.
+  Still outstanding: a valid benefit measurement, the toggle's `false` arm observed
+  on-device, and a cold-start check. The fold/lock blocker from 2026-09-12 is gone
+  (both test devices are open and unlocked as of 2026-09-13), but two new,
+  device-specific blockers replaced it — see "Attempt 3" in the plan for the exact
+  state to resume from: **Carnet is not installed under the Pixel 10's active
+  Android user profile** (a second user, "Bryn", holds the only install — not pushed
+  through without asking the user first), and **the Pixel 9 dropped off `adb`
+  entirely** (its known flaky-USB failure mode; needs a physical replug, not a
+  software fix). Handed off for the next session/Codex to resume once a device is
+  reachable.
 
 ## Deferred to v0.3
 
