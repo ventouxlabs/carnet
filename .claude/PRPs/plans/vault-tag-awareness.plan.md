@@ -1,6 +1,8 @@
 # Vault Tag Awareness (v0.4 S3) Implementation Plan
 
-Status: device verification complete; benefit unmeasured
+Status: shipped
+
+Device verification is complete; the soft hint's causal benefit remains unmeasured.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
