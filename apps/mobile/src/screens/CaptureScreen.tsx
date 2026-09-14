@@ -13,6 +13,8 @@ import {
   CaptureSubmittingView,
 } from "../components/CaptureViews";
 import { getSettings } from "../lib/settings";
+import { captureVaultContext, type VaultContext } from "../lib/vaultContext";
+import { resolveContextRoot } from "../lib/vaultRoot";
 import { recordCapture, type CaptureMode } from "../lib/storage";
 import {
   enrichIdea,
@@ -151,6 +153,10 @@ export default function CaptureScreen({ route, navigation }: Props) {
   // enrichment against the same text/tags/location/attachments after the input
   // fields were cleared.
   const saveFirstCtxRef = useRef<RawIdeaInput | null>(null);
+  // Captured once when an attempt begins. Preview confirmation, a save-first
+  // retry, and offline fallback all reuse this rather than rereading Settings
+  // after enrichment has yielded to the event loop.
+  const attemptVaultContextRef = useRef<VaultContext | null>(null);
   // Monotonic id for the current capture attempt. Every async continuation
   // captures the generation it started under and bails if it no longer matches,
   // so tapping Edit (or simply resubmitting) invalidates every in-flight
@@ -327,8 +333,12 @@ export default function CaptureScreen({ route, navigation }: Props) {
    * rel-path references to embed/queue. Thin closure over the current staged
    * set + the dedup cache; the write/dedup logic lives in
    * lib/attachmentPersistence so it's unit-testable without a renderer. */
-  const persistAttachments = (): Promise<AttachmentRef[]> =>
-    persistAttachmentsToVault(pending, persistedRefs.current);
+  const persistAttachments = (vaultContext = attemptVaultContextRef.current): Promise<AttachmentRef[]> =>
+    persistAttachmentsToVault(
+      pending,
+      persistedRefs.current,
+      vaultContext ? resolveContextRoot(vaultContext) : undefined,
+    );
 
   /** Clear every staged-metadata field once a capture is safely persisted
    * (written to disk, queued, or enqueued) — repeated across the offline
@@ -446,6 +456,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
           filepath,
           baselineMtime: mtime,
           baselineContent,
+          vaultContext: attemptVaultContextRef.current ?? undefined,
         });
         const depth = await getQueueDepth();
         if (superseded()) return;
@@ -596,6 +607,16 @@ export default function CaptureScreen({ route, navigation }: Props) {
     setError(null);
     setDegradedReason(null);
     setEnrichNotice(null);
+    // This is intentionally before any provider or attachment await. Settings
+    // can switch vaults while a slow model request is outstanding; its result
+    // must keep this root, not follow the later active profile.
+    try {
+      attemptVaultContextRef.current = captureVaultContext(await getSettings());
+    } catch {
+      // Preserve ordinary capture availability if settings storage is briefly
+      // unavailable. Writers retain their existing active-root fallback.
+      attemptVaultContextRef.current = null;
+    }
 
     if (mode === "idea") {
       // Blocking-preview (opt-in): enrich → preview → Save, exactly as before.
@@ -621,6 +642,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
               attachments: refs,
               tags,
               location: location ?? undefined,
+              vaultContext: attemptVaultContextRef.current ?? undefined,
             });
           }, superseded);
         }
@@ -668,7 +690,13 @@ export default function CaptureScreen({ route, navigation }: Props) {
         rawCreatedAtRef.current = createdAt;
         const writePromise = resuming
           ? rewriteRawIdea({ ...ctx, filepath: resuming }, createdAt)
-          : writeRawIdea(ctx, createdAt);
+          : writeRawIdea(
+              ctx,
+              createdAt,
+              attemptVaultContextRef.current
+                ? resolveContextRoot(attemptVaultContextRef.current)
+                : undefined,
+            );
         // Published before awaiting, so an Edit tapped mid-write can await the
         // same promise and learn the filepath instead of racing it.
         rawWriteRef.current = writePromise;
@@ -758,6 +786,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
             tags,
             location: location ?? undefined,
             places,
+            vaultContext: attemptVaultContextRef.current ?? undefined,
           });
         }, superseded);
       }
@@ -787,6 +816,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
           context: text.trim(),
           tags,
           location: location ?? undefined,
+          vaultContext: attemptVaultContextRef.current ?? undefined,
         }),
         superseded,
       );
@@ -803,6 +833,9 @@ export default function CaptureScreen({ route, navigation }: Props) {
           refs,
           tags,
           location,
+          root: attemptVaultContextRef.current
+            ? resolveContextRoot(attemptVaultContextRef.current)
+            : undefined,
         });
         clearStagedAttachmentsAndMeta();
         setSavedFilepath(filepath);
@@ -836,6 +869,9 @@ export default function CaptureScreen({ route, navigation }: Props) {
           tags,
           location,
           places,
+          root: attemptVaultContextRef.current
+            ? resolveContextRoot(attemptVaultContextRef.current)
+            : undefined,
         });
         clearStagedAttachmentsAndMeta();
         setSavedFilepath(filepath);
@@ -860,6 +896,9 @@ export default function CaptureScreen({ route, navigation }: Props) {
           markdown: pendingPerson.markdown,
           tags,
           location,
+          root: attemptVaultContextRef.current
+            ? resolveContextRoot(attemptVaultContextRef.current)
+            : undefined,
         });
         clearStagedMeta();
         setSavedFilepath(filepath);

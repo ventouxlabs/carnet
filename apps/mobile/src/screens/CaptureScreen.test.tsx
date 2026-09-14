@@ -222,6 +222,7 @@ describe("CaptureScreen (idea)", () => {
     expect(writeRawIdea).toHaveBeenCalledWith(
       expect.objectContaining({ text: "my idea" }),
       expect.anything(),
+      expect.anything(),
     );
     expect(recordCapture).toHaveBeenCalledWith(
       expect.objectContaining({ filepath: "file:///v/Ideas/my-idea.md" }),
@@ -748,6 +749,7 @@ describe("CaptureScreen — Edit during a multi-await continuation", () => {
     expect(writeRawIdea).toHaveBeenCalledTimes(1);
     expect(writeRawIdea).toHaveBeenCalledWith(
       expect.objectContaining({ text: "my edited idea" }),
+      expect.anything(),
       expect.anything(),
     );
     expect(rewriteRawIdea).not.toHaveBeenCalled();
