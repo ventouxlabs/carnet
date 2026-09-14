@@ -16,6 +16,9 @@ import {
   removeManyFromHistory,
   type CaptureEntry,
 } from "../lib/storage";
+import { getSettings } from "../lib/settings";
+import { captureVaultContext } from "../lib/vaultContext";
+import { DEFAULT_VAULT_PROFILE_ID } from "../lib/vaultProfiles";
 import {
   listNoteFiles,
   listSyncConflictFiles,
@@ -99,7 +102,17 @@ export default function HomeScreen({ navigation }: Props) {
   }, []);
 
   const refresh = useCallback(async () => {
-    const items = await getRecentCaptures();
+    // Resolve this refresh's profile once. The history read is allowed to
+    // await, but it must not follow a settings switch that lands while it is
+    // in flight and paint the prior vault's recents into the new Home view.
+    let profileId = DEFAULT_VAULT_PROFILE_ID;
+    try {
+      profileId = captureVaultContext(await getSettings()).profileId;
+    } catch {
+      // Settings failures should not hide durable captures; default is the
+      // only safe interpretation for pre-profile local state.
+    }
+    const items = await getRecentCaptures(profileId);
     setRecent(items);
     // Join excerpts/tags/pending-status from the cached vault index. On a
     // cache miss (e.g. an offline drain invalidated it), render plain cards

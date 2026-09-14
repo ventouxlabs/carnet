@@ -36,6 +36,10 @@ vi.mock("../lib/storage", () => ({
   removeManyFromHistory: vi.fn(async () => {}),
 }));
 
+vi.mock("../lib/settings", () => ({
+  getSettings: vi.fn(async () => ({ captureFolderPath: "" })),
+}));
+
 // writer.ts imports expo-file-system at module scope — never load the real one.
 vi.mock("../lib/writer", () => ({
   moveToArchive: vi.fn(async () => {}),
@@ -105,6 +109,7 @@ vi.mock("../lib/startupTiming", () => ({ reportColdStart: vi.fn() }));
 
 import HomeScreen from "./HomeScreen";
 import { getRecentCaptures } from "../lib/storage";
+import { getSettings } from "../lib/settings";
 import { getPendingExportCount } from "../lib/pendingSync";
 import { drainPendingKarakeepExports } from "../lib/pendingSyncRunner";
 import { listNoteFiles, listSyncConflictFiles } from "../lib/writer";
@@ -136,6 +141,7 @@ function renderScreen() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
   pendingSyncListeners.clear();
 });
 
@@ -158,6 +164,20 @@ describe("HomeScreen", () => {
     renderScreen();
     expect(await screen.findByText("Nothing captured yet")).toBeTruthy();
     expect(screen.getByText("Tap Capture below to write your first note.")).toBeTruthy();
+  });
+
+  it("reads only the active profile's recents", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    expect(getRecentCaptures).toHaveBeenCalledWith("work");
   });
 
   it("opens a card into RecentDetail with its entry", async () => {
