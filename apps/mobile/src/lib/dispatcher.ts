@@ -567,6 +567,23 @@ export async function ocrCardViaVision(input: {
   return result;
 }
 
+/**
+ * Use the same vision-provider routing and offline fallback policy as OCR,
+ * but return only the fail-closed preflight classification. The caller must
+ * receive `card` before it may persist the image or request OCR.
+ */
+export async function classifyBusinessCardViaVision(input: {
+  base64: string;
+  mimeType: string;
+}): Promise<{ classification: import("./cardClassification").CardClassification }> {
+  const settings = await getSettings();
+  const primaryId = resolveVisionProviderId(settings);
+  const { result } = await withFallbackChain(settings, primaryId, (config) =>
+    llmClient.classifyBusinessCardViaVision(input, config),
+  );
+  return result;
+}
+
 // ── On-device speech recognition (backend-agnostic) ─────────────────────────
 
 /** Hard cap for the audio payload sent to on-device transcription. Pre-check
