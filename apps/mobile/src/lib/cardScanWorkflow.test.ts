@@ -40,7 +40,12 @@ describe("createCardCaptureConfirmation", () => {
     const saveCapture = vi.fn(async () => saved);
     const ocr = vi.fn(async () => ({ text: "Jane Doe" }));
     const saveRawOcr = vi.fn(async () => {});
-    const confirmation = createCardCaptureConfirmation(photo, { saveCapture, ocr, saveRawOcr });
+    const confirmation = createCardCaptureConfirmation(photo, {
+      saveCapture,
+      ocr,
+      saveRawOcr,
+      classifyOcrError: () => ({ kind: "transient", message: "unexpected" }),
+    });
 
     expect(saveCapture).not.toHaveBeenCalled();
     expect(ocr).not.toHaveBeenCalled();
@@ -65,6 +70,10 @@ describe("createCardCaptureConfirmation", () => {
         throw new Error("network down");
       },
       saveRawOcr,
+      classifyOcrError: (error) => ({
+        kind: "transient",
+        message: error instanceof Error ? error.message : String(error),
+      }),
     });
 
     await expect(confirmation.confirm()).resolves.toMatchObject({
@@ -82,6 +91,7 @@ describe("createCardCaptureConfirmation", () => {
       saveCapture,
       ocr: async () => ({ text: "Jane Doe" }),
       saveRawOcr: async () => {},
+      classifyOcrError: () => ({ kind: "transient", message: "unexpected" }),
     });
 
     await Promise.all([confirmation.confirm(), confirmation.confirm()]);
