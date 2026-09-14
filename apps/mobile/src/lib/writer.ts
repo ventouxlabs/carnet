@@ -166,8 +166,9 @@ async function serialize<T>(filepath: string, fn: () => Promise<T>): Promise<T> 
 export async function writeIdea(
   slug: string,
   markdown: string,
+  rootOverride?: Root,
 ): Promise<{ filepath: string }> {
-  const root = await resolveRoot();
+  const root = rootOverride ?? await resolveRoot();
   const ideasUri = await root.fs.findOrCreateSubdir(root.uri, "Ideas");
   const filename = await findCollisionFreeName(ideasUri, slug, ".md", root.fs);
   const filepath = await writeNewFile(ideasUri, filename, markdown, root.fs);
@@ -188,8 +189,9 @@ export async function writeIdea(
 export async function writeSynthesis(
   slug: string,
   markdown: string,
+  rootOverride?: Root,
 ): Promise<{ filepath: string }> {
-  const root = await resolveRoot();
+  const root = rootOverride ?? await resolveRoot();
   const notesUri = await root.fs.findOrCreateSubdir(root.uri, "Notes");
   const filename = await findCollisionFreeName(notesUri, slug, ".md", root.fs);
   const filepath = await writeNewFile(notesUri, filename, markdown, root.fs);
@@ -212,8 +214,9 @@ export async function writeSynthesis(
 export async function appendJournal(
   date: string,
   markdown: string,
+  rootOverride?: Root,
 ): Promise<{ filepath: string; markdown: string }> {
-  const root = await resolveRoot();
+  const root = rootOverride ?? await resolveRoot();
   const journalUri = await root.fs.findOrCreateSubdir(root.uri, "Journal");
   const filename = `${date}.md`;
 
@@ -265,8 +268,9 @@ export async function writePerson(
   firstName: string,
   lastName: string,
   markdown: string,
+  rootOverride?: Root,
 ): Promise<{ filepath: string }> {
-  const root = await resolveRoot();
+  const root = rootOverride ?? await resolveRoot();
   const peopleUri = await root.fs.findOrCreateSubdir(root.uri, "People");
 
   // Use provided names if non-empty; fall back to frontmatter/H1.
@@ -296,8 +300,9 @@ export async function writeTextFile(
   subdir: string,
   filename: string,
   content: string,
+  rootOverride?: Root,
 ): Promise<{ filepath: string; finalName: string }> {
-  const root = await resolveRoot();
+  const root = rootOverride ?? await resolveRoot();
   const dirUri = await root.fs.findOrCreateSubdir(root.uri, subdir);
   const dot = filename.lastIndexOf(".");
   const stem = dot >= 0 ? filename.slice(0, dot) : filename;
@@ -328,8 +333,9 @@ export async function writeBinary(
   filename: string,
   base64: string,
   mimeType: string,
+  rootOverride?: Root,
 ): Promise<{ filepath: string; finalName: string }> {
-  const root = await resolveRoot();
+  const root = rootOverride ?? await resolveRoot();
   const dirUri = await root.fs.findOrCreateSubdir(root.uri, subdir);
 
   const dot = filename.lastIndexOf(".");
