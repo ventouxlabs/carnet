@@ -1,6 +1,8 @@
 # Vault Tag Awareness (v0.4 S3) Implementation Plan
 
-Status: in-progress
+Status: shipped
+
+Device verification is complete; the soft hint's causal benefit remains unmeasured.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -698,7 +700,7 @@ git push -u origin feat/vault-tag-awareness
 gh pr create --base main --title "feat(tags): vault tag awareness (v0.4 S3)"
 ```
 
-- [ ] **Step 5: On-device verification (cannot be done in tests)**
+- [x] **Step 5: On-device verification (cannot be done in tests)**
 
 `docs/smoke-test.md` is the manual checklist. The specific things unit tests structurally cannot cover:
 1. With a real Syncthing vault and a warm index, capture an idea whose content matches an existing tag — confirm the emitted frontmatter reuses the existing tag rather than a near-duplicate.
@@ -752,6 +754,33 @@ defects in the test, each enough on its own:
 
 **Do not cite this attempt as evidence for or against the canonicalizer.** The honest
 state is: plumbing verified, benefit not yet measured.
+
+#### Attempt 5 — 2026-09-13 — **false arm and cold start verified**
+
+The Pixel 9 was reset with `pm clear com.ventouxlabs.carnet` for the cold-start
+check. The fresh app opened to “Nothing captured yet”; an immediate neutral Idea
+capture returned within roughly five seconds with its save-first confirmation. It
+did not wait for a vault walk. Clearing storage also removes the provider key and
+SAF grant, so this check proves the no-wait behavior only — it cannot prove a
+successful enrichment or inspect the no-hint prompt in that reset state. The
+internal cold-start artifact was cleared afterwards; the external vault was not
+changed.
+
+The pre-existing local Relais provider and `Documents/carnet` SAF grant were then
+restored on the device. With the cached vault index warm, a temporary release-only
+dialog at the exact `dispatcher.enrichIdea` handoff displayed
+`enabled=false; cached=4; passed=0`. The counts only exposed the toggle state and
+array sizes: four cached tags existed, and the false arm passed an empty array to
+`llmClient`. This settles the on-device toggle boundary without logging note text,
+tag values, provider configuration, or secrets. The dialog was removed from source,
+the normal signed release was reinstalled, the setting was restored to enabled, and
+both temporary Idea files were deleted.
+
+The happy-path sample from Attempt 4 plus this exact false-arm proof verify the
+feature's device behavior. They still do **not** establish that the soft hint
+causally improves a stochastic local model's tag choices; deciding whether the
+deferred canonicalizer is warranted remains an evidence question, not a released
+bug.
 
 #### Attempt 4 — 2026-09-13 — **one clean on-device reuse sample**
 
