@@ -558,6 +558,26 @@ export async function getSettings(): Promise<Settings> {
   };
 }
 
+/** Apply a validated profile state to Settings without changing credentials or
+ * any unrelated preference. The legacy folder field always mirrors the newly
+ * active registration, so older callers cannot route somewhere different. */
+export function withVaultProfileState(
+  settings: Settings,
+  state: { profiles: VaultProfile[]; activeProfileId: string },
+): Settings {
+  const normalized = normaliseVaultProfileState({
+    profiles: state.profiles,
+    activeProfileId: state.activeProfileId,
+    legacyCaptureFolderPath: settings.captureFolderPath,
+  });
+  return {
+    ...settings,
+    vaultProfiles: normalized.profiles,
+    activeVaultProfileId: normalized.activeProfileId,
+    captureFolderPath: activeVaultProfile(normalized).rootUri,
+  };
+}
+
 /**
  * Persist ONLY the non-secret blob — never touches SecureStore. This is the
  * safe primitive for any caller that does a read-modify-write of a Settings

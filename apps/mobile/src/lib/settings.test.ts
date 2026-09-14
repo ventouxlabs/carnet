@@ -41,6 +41,7 @@ import {
   setLocalLlmApiKey,
   setOmniRouteApiKey,
   type Settings,
+  withVaultProfileState,
 } from "./settings";
 import {
   buildDefaultProviders,
@@ -699,6 +700,20 @@ describe("vault-profile settings migration", () => {
     const persisted = JSON.parse(_async.get(SETTINGS_KEY_V4) ?? "{}") as Record<string, unknown>;
     expect(persisted.activeVaultProfileId).toBe("default");
     expect(persisted.vaultProfiles).toEqual(migrated.vaultProfiles);
+  });
+
+  it("updates only the active vault mirror when switching profiles", async () => {
+    const base = await getSettings();
+    const next = withVaultProfileState(base, {
+      profiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeProfileId: "work",
+    });
+    expect(next.captureFolderPath).toBe("file:///work");
+    expect(next.activeVaultProfileId).toBe("work");
+    expect(next.vaultProfiles).toHaveLength(2);
   });
 });
 

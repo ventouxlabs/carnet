@@ -113,3 +113,29 @@ export function removeVaultProfile(
       state.activeProfileId === profileId ? profiles[0].id : state.activeProfileId,
   };
 }
+
+/** Add a registration without touching the filesystem. Duplicate ids are rejected
+ * rather than silently replacing a root, since replacement could redirect work
+ * already pinned to that id. */
+export function addVaultProfile(
+  state: VaultProfileState,
+  profile: VaultProfile,
+): VaultProfileState {
+  const normalized = normaliseProfile(profile);
+  if (!normalized) throw new Error("Invalid vault profile");
+  if (state.profiles.some((existing) => existing.id === normalized.id)) {
+    throw new Error("A vault profile with this id already exists");
+  }
+  return { ...state, profiles: [...state.profiles, normalized] };
+}
+
+/** Switch only the active registration. Unknown ids leave state unchanged. */
+export function setActiveVaultProfile(
+  state: VaultProfileState,
+  profileId: string,
+): VaultProfileState {
+  if (!state.profiles.some((profile) => profile.id === profileId)) return state;
+  return state.activeProfileId === profileId
+    ? state
+    : { ...state, activeProfileId: profileId };
+}

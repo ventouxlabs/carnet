@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   activeVaultProfile,
+  addVaultProfile,
   defaultVaultProfile,
   normaliseVaultProfileState,
   removeVaultProfile,
+  setActiveVaultProfile,
 } from "./vaultProfiles";
 
 describe("vault profiles", () => {
@@ -63,5 +65,19 @@ describe("vault profiles", () => {
       profiles: [state.profiles[0]],
       activeProfileId: "personal",
     });
+  });
+
+  it("adds and switches registrations without replacing an existing root", () => {
+    const initial = normaliseVaultProfileState({ legacyCaptureFolderPath: "file:///personal" });
+    const withWork = addVaultProfile(initial, {
+      id: "work", name: "Work", rootUri: "file:///work", createdAt: 2,
+    });
+    expect(activeVaultProfile(setActiveVaultProfile(withWork, "work"))).toMatchObject({
+      id: "work", rootUri: "file:///work",
+    });
+    expect(() => addVaultProfile(withWork, {
+      id: "work", name: "Replacement", rootUri: "file:///other", createdAt: 3,
+    })).toThrow("already exists");
+    expect(setActiveVaultProfile(withWork, "missing")).toBe(withWork);
   });
 });
