@@ -159,6 +159,8 @@ function renderScreen(mode: "idea" | "journal" | "person" = "idea") {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getSettings).mockReset();
+  vi.mocked(getSettings).mockResolvedValue({ previewBeforeSave: false } as Awaited<ReturnType<typeof getSettings>>);
 });
 
 afterEach(cleanup);
@@ -196,9 +198,36 @@ describe("CaptureScreen (idea)", () => {
         expect(saveDraft).toHaveBeenCalledWith(
           "idea",
           expect.objectContaining({ text: "typing away" }),
+          "default",
         ),
       { timeout: 2000 },
     );
+  });
+
+  it("keeps a Work form's draft and completed history in Work after profile lookup", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      previewBeforeSave: false,
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    const { navigation } = renderScreen();
+    const input = await screen.findByPlaceholderText("What's on your mind?");
+    fireEvent.change(input, { target: { value: "work-only thought" } });
+    await waitFor(() =>
+      expect(saveDraft).toHaveBeenCalledWith(
+        "idea",
+        expect.objectContaining({ text: "work-only thought" }),
+        "work",
+      ),
+    );
+    fireEvent.click(screen.getByText("Send"));
+    await waitFor(() => expect(navigation.goBack).toHaveBeenCalled());
+    expect(recordCapture).toHaveBeenCalledWith(expect.anything(), "work");
+    expect(clearDraft).toHaveBeenCalledWith("idea", "work");
   });
 
   it("opens the Tags & details sheet from the '+' button", async () => {
@@ -226,10 +255,11 @@ describe("CaptureScreen (idea)", () => {
     );
     expect(recordCapture).toHaveBeenCalledWith(
       expect.objectContaining({ filepath: "file:///v/Ideas/my-idea.md" }),
+      "default",
     );
     // Raw write upsert + enriched upsert.
     expect(upsertNoteInIndex).toHaveBeenCalledTimes(2);
-    expect(clearDraft).toHaveBeenCalledWith("idea");
+    expect(clearDraft).toHaveBeenCalledWith("idea", "default");
   });
 
   it("permanent enrichment failure keeps the note and offers Re-enrich in plain language", async () => {
@@ -832,7 +862,7 @@ describe("CaptureScreen — Edit during a multi-await continuation", () => {
 
     record.resolve();
     await waitFor(() =>
-      expect(removeFromHistoryByFilepath).toHaveBeenCalledWith("file:///v/Ideas/my-idea.md"),
+      expect(removeFromHistoryByFilepath).toHaveBeenCalledWith("file:///v/Ideas/my-idea.md", "default"),
     );
     await waitFor(() => expect(recordCapture).toHaveBeenCalledTimes(2));
   });
