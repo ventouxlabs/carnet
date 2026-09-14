@@ -432,7 +432,11 @@ export default function CaptureScreen({ route, navigation }: Props) {
     if (plan.kind === "close") {
       // Reflect the enriched note (final tags, pending-enrich status gone)
       // in the cached index before landing back on Home.
-      void upsertNoteInIndex(filepath, plan.markdown).catch(() => undefined);
+      void upsertNoteInIndex(
+        filepath,
+        plan.markdown,
+        attemptVaultContextRef.current?.profileId,
+      ).catch(() => undefined);
       setPhase("saved");
       navigation.goBack();
       return;
@@ -731,7 +735,11 @@ export default function CaptureScreen({ route, navigation }: Props) {
         // Upsert (not invalidate) so Home's cards can show this note's tags
         // and pending-enrich stamp immediately — dropping the whole cached
         // index left cards bare until the next full vault scan.
-        void upsertNoteInIndex(filepath, rawMarkdown).catch(() => undefined);
+        void upsertNoteInIndex(
+          filepath,
+          rawMarkdown,
+          attemptVaultContextRef.current?.profileId,
+        ).catch(() => undefined);
         setSavedFilepath(filepath);
         saveFirstCtxRef.current = ctx;
         // The capture is safely persisted — clear the inputs so a back-out
@@ -843,7 +851,11 @@ export default function CaptureScreen({ route, navigation }: Props) {
           { id: localId(), mode, title, filepath, createdAt: Date.now() },
           attemptVaultContextRef.current?.profileId,
         );
-        void upsertNoteInIndex(filepath, markdown).catch(() => undefined);
+        void upsertNoteInIndex(
+          filepath,
+          markdown,
+          attemptVaultContextRef.current?.profileId,
+        ).catch(() => undefined);
         void clearDraft(mode, attemptVaultContextRef.current?.profileId ?? draftProfileId).catch(() => undefined);
         setPhase("saved");
         navigation.goBack();
@@ -882,7 +894,11 @@ export default function CaptureScreen({ route, navigation }: Props) {
           { id: localId(), mode, title, filepath, createdAt: Date.now() },
           attemptVaultContextRef.current?.profileId,
         );
-        void upsertNoteInIndex(filepath, dayFileMarkdown).catch(() => undefined);
+        void upsertNoteInIndex(
+          filepath,
+          dayFileMarkdown,
+          attemptVaultContextRef.current?.profileId,
+        ).catch(() => undefined);
         void clearDraft(mode, attemptVaultContextRef.current?.profileId ?? draftProfileId).catch(() => undefined);
         setPhase("saved");
         navigation.goBack();
@@ -912,7 +928,11 @@ export default function CaptureScreen({ route, navigation }: Props) {
           { id: localId(), mode, title, filepath, createdAt: Date.now() },
           attemptVaultContextRef.current?.profileId,
         );
-        void upsertNoteInIndex(filepath, markdown).catch(() => undefined);
+        void upsertNoteInIndex(
+          filepath,
+          markdown,
+          attemptVaultContextRef.current?.profileId,
+        ).catch(() => undefined);
         void clearDraft(mode, attemptVaultContextRef.current?.profileId ?? draftProfileId).catch(() => undefined);
         setPhase("saved");
         navigation.goBack();

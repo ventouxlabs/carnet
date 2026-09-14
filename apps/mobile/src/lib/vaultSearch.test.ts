@@ -25,6 +25,10 @@ vi.mock("./writer", () => ({
   }),
 }));
 
+vi.mock("./settings", () => ({
+  getSettings: vi.fn(async () => ({ captureFolderPath: "" })),
+}));
+
 const _store: Map<string, string> = new Map();
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
@@ -55,6 +59,7 @@ import {
   type NoteIndexEntry,
 } from "./vault";
 import { listNoteFiles, readNote } from "./writer";
+import { getSettings } from "./settings";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -69,6 +74,7 @@ function reset(): void {
   _unreadable.clear();
   _listRefs = [];
   vi.clearAllMocks();
+  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
 }
 
 beforeEach(reset);

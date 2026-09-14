@@ -444,7 +444,7 @@ async function processRow(payload: QueuePayload): Promise<void> {
   }
   // A drained capture adds tags to the vault — drop the stale index cache so the
   // browser + autocomplete rebuild. Best-effort; never fail the drain on this.
-  void invalidateNoteIndex().catch(() => undefined);
+  void invalidateNoteIndex(vaultContext.profileId).catch(() => undefined);
 }
 
 /**

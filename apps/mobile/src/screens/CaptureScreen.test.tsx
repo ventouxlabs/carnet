@@ -228,6 +228,11 @@ describe("CaptureScreen (idea)", () => {
     await waitFor(() => expect(navigation.goBack).toHaveBeenCalled());
     expect(recordCapture).toHaveBeenCalledWith(expect.anything(), "work");
     expect(clearDraft).toHaveBeenCalledWith("idea", "work");
+    expect(upsertNoteInIndex).toHaveBeenCalledWith(
+      "file:///v/Ideas/my-idea.md",
+      expect.anything(),
+      "work",
+    );
   });
 
   it("opens the Tags & details sheet from the '+' button", async () => {
