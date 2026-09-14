@@ -19,6 +19,7 @@ import {
   normaliseVaultProfileState,
   type VaultProfile,
 } from "./vaultProfiles";
+import type { VaultContext } from "./vaultContext";
 
 export interface Root {
   /** Either a `file://` URI or a `content://...tree/...` SAF tree URI. */
@@ -58,6 +59,11 @@ export function resolveProfileRoot(profile: Pick<VaultProfile, "rootUri">): Root
   // Best-effort: file:// or raw path. Ensure file:// prefix for FileSystem API.
   const uri = trimmed.startsWith("file://") ? trimmed : `file://${trimmed}`;
   return { uri, fs: vaultFsFor(false) };
+}
+
+/** Resolve a root from an operation's immutable profile snapshot. */
+export function resolveContextRoot(context: VaultContext): Root {
+  return resolveProfileRoot(context);
 }
 
 /** Resolve the active profile. Operations that can outlive a profile switch
