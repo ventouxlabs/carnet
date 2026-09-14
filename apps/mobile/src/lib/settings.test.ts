@@ -48,14 +48,15 @@ import {
   type LlmProvider,
 } from "./llmProviders";
 
-// v3 is what THIS code writes/reads as primary; v2 is the pre-provider-list
+// v4 is what THIS code writes/reads as primary; v3 is the pre-vault-profile
 // key `main`/older builds wrote — kept as a read-only migration fallback
 // (see settings.ts's SETTINGS_KEY comment). Tests that SEED a legacy,
 // unmigrated blob write it under v2 (that's genuinely where it would be on
 // a real device); tests that inspect what `saveSettings` itself persisted
-// read back v3 (the only key this code ever writes).
+// read back v4 (the only key this code ever writes).
 const SETTINGS_KEY = "carnet:settings:v2";
 const SETTINGS_KEY_V3 = "carnet:settings:v3";
+const SETTINGS_KEY_V4 = "carnet:settings:v4";
 
 beforeEach(() => {
   _async.clear();
@@ -337,10 +338,10 @@ describe("LLM provider list migration", () => {
     };
     await saveSettings(next);
 
-    // saveSettings only ever WRITES the v3 key (see settings.ts's
-    // SETTINGS_KEY comment) — reading it back at v3 here, not the legacy v2
+    // saveSettings only ever WRITES the v4 key (see settings.ts's
+    // SETTINGS_KEY comment) — reading it back at v4 here, not the legacy v2
     // key this suite seeds unmigrated fixtures under.
-    const persisted = JSON.parse(_async.get(SETTINGS_KEY_V3) ?? "{}") as Record<
+    const persisted = JSON.parse(_async.get(SETTINGS_KEY_V4) ?? "{}") as Record<
       string,
       unknown
     >;
@@ -580,9 +581,10 @@ describe("fallbackProviderId/visionProviderId default via the v3 migration", () 
   });
 });
 
-describe("v2 -> v3 settings-key separation", () => {
+describe("v3 -> v4 settings-key separation", () => {
   const V2_KEY = "carnet:settings:v2";
   const V3_KEY = "carnet:settings:v3";
+  const V4_KEY = "carnet:settings:v4";
 
   it("reads a legacy v2 blob (no v3 blob yet) and migrates it, without ever writing to v2", async () => {
     _async.set(
@@ -646,18 +648,57 @@ describe("v2 -> v3 settings-key separation", () => {
     );
   });
 
-  it("saveSettings only ever writes v3 — a v2 blob (as `main` would have left it) is never touched by a write", async () => {
+  it("saveSettings only ever writes v4 — a v2 blob (as `main` would have left it) is never touched by a write", async () => {
     _async.set(
       V2_KEY,
       JSON.stringify({ omniRouteUrl: "https://v2-original.example.com", llmBackend: "omniroute" }),
     );
     const s = await getSettings(); // migrates from v2 in-memory
-    await saveSettings(s); // persists — must land on v3, not v2
+    await saveSettings(s); // persists — must land on v4, not v2
 
     expect(_async.get(V2_KEY)).toBe(
       JSON.stringify({ omniRouteUrl: "https://v2-original.example.com", llmBackend: "omniroute" }),
     );
-    expect(_async.has(V3_KEY)).toBe(true);
+    expect(_async.has(V4_KEY)).toBe(true);
+  });
+});
+
+describe("vault-profile settings migration", () => {
+  it("migrates a v3 single-root install into the default profile without moving files", async () => {
+    _async.set(
+      SETTINGS_KEY_V3,
+      JSON.stringify({
+        llmProviders: buildDefaultProviders(),
+        activeProviderId: "omniroute",
+        nextCustomSeq: 1,
+        persistentNotificationEnabled: false,
+        autoTranscribeOnSave: false,
+        richEditorEnabled: true,
+        previewBeforeSave: false,
+        captureFolderPath: "content://provider/tree/primary%3ACarnet",
+        promptOverrides: {},
+        karakeepUrl: "",
+      }),
+    );
+
+    const migrated = await getSettings();
+    expect(migrated.activeVaultProfileId).toBe("default");
+    expect(migrated.vaultProfiles).toEqual([
+      {
+        id: "default",
+        name: "Default vault",
+        rootUri: "content://provider/tree/primary%3ACarnet",
+        createdAt: 0,
+      },
+    ]);
+    // The compatibility mirror remains aligned with the active registration.
+    expect(migrated.captureFolderPath).toBe("content://provider/tree/primary%3ACarnet");
+
+    await saveSettings(migrated);
+    expect(_async.get(SETTINGS_KEY_V3)).toBeTruthy();
+    const persisted = JSON.parse(_async.get(SETTINGS_KEY_V4) ?? "{}") as Record<string, unknown>;
+    expect(persisted.activeVaultProfileId).toBe("default");
+    expect(persisted.vaultProfiles).toEqual(migrated.vaultProfiles);
   });
 });
 

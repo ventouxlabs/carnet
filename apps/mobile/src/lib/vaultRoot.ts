@@ -14,6 +14,11 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { getSettings } from "./settings";
 import { vaultFsFor, type VaultFs } from "./vaultFs";
+import {
+  activeVaultProfile,
+  normaliseVaultProfileState,
+  type VaultProfile,
+} from "./vaultProfiles";
 
 export interface Root {
   /** Either a `file://` URI or a `content://...tree/...` SAF tree URI. */
@@ -42,9 +47,8 @@ export function internalVaultRoot(): Root {
  *   - content://...tree/... → SAF tree URI as-is
  *   - anything else → treat as a file:// URI (legacy raw Android path)
  */
-export async function resolveRoot(): Promise<Root> {
-  const { captureFolderPath } = await getSettings();
-  const trimmed = captureFolderPath.trim();
+export function resolveProfileRoot(profile: Pick<VaultProfile, "rootUri">): Root {
+  const trimmed = profile.rootUri.trim();
   if (!trimmed) {
     return internalVaultRoot();
   }
@@ -54,4 +58,18 @@ export async function resolveRoot(): Promise<Root> {
   // Best-effort: file:// or raw path. Ensure file:// prefix for FileSystem API.
   const uri = trimmed.startsWith("file://") ? trimmed : `file://${trimmed}`;
   return { uri, fs: vaultFsFor(false) };
+}
+
+/** Resolve the active profile. Operations that can outlive a profile switch
+ * call resolveProfileRoot on their captured profile instead. */
+export async function resolveRoot(): Promise<Root> {
+  const settings = await getSettings();
+  const profileState = normaliseVaultProfileState({
+    profiles: settings.vaultProfiles,
+    activeProfileId: settings.activeVaultProfileId,
+    legacyCaptureFolderPath: settings.captureFolderPath,
+  });
+  return resolveProfileRoot(
+    activeVaultProfile(profileState),
+  );
 }
