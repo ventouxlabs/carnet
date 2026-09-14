@@ -43,8 +43,7 @@ import { caretProps, useCarnetTheme } from "../lib/theme";
 import { deriveTitle } from "@carnet/shared";
 import { getSettings } from "../lib/settings";
 import { resolveActiveProvider, UNKNOWN_PROVIDER_LABEL } from "../lib/llmProviders";
-import { captureVaultContext, type VaultContext } from "../lib/vaultContext";
-import { resolveContextRoot } from "../lib/vaultRoot";
+import { captureVaultSnapshot } from "../lib/captureVaultSnapshot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "PhotoCapture">;
 
@@ -198,13 +197,8 @@ export default function PhotoCaptureScreen({ navigation }: Props) {
     setError(null);
     setPhase("submitting");
     try {
-      let vaultContext: VaultContext | undefined;
-      try {
-        vaultContext = captureVaultContext(await getSettings());
-      } catch {
-        // Keep the existing writer fallback when settings storage is unavailable.
-      }
-      const root = vaultContext ? resolveContextRoot(vaultContext) : undefined;
+      const vault = await captureVaultSnapshot();
+      const root = vault?.root;
       const slugFallback = timestampSlug();
       const title = deriveTitle(enrichedMd) || `Photo ${slugFallback}`;
       const desiredSlug = slugify(title) || `photo-${slugFallback}`;
@@ -229,7 +223,7 @@ export default function PhotoCaptureScreen({ navigation }: Props) {
       try {
         await recordCapture(
           { id: localId(), mode: "photo", title, filepath, createdAt: Date.now() },
-          vaultContext?.profileId,
+          vault?.context.profileId,
         );
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);

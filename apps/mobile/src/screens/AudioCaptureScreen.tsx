@@ -47,9 +47,7 @@ import {
 } from "../lib/shareHelpers";
 import { isSttModelMissingMessage } from "../voice/sttOnboarding";
 import { triggerVoiceModelDownload } from "../voice/sttReadiness";
-import { getSettings } from "../lib/settings";
-import { captureVaultContext, type VaultContext } from "../lib/vaultContext";
-import { resolveContextRoot } from "../lib/vaultRoot";
+import { captureVaultSnapshot } from "../lib/captureVaultSnapshot";
 
 // The recognizer package Speech Services by Google installs and downloads
 // its voice models through — same target VoiceButton's Play Store fallback
@@ -246,14 +244,8 @@ export default function AudioCaptureScreen({ navigation }: Props) {
       return;
     }
     try {
-      let vaultContext: VaultContext | undefined;
-      try {
-        vaultContext = captureVaultContext(await getSettings());
-      } catch {
-        // Existing writer fallback keeps a recording recoverable if settings
-        // storage is briefly unavailable.
-      }
-      const root = vaultContext ? resolveContextRoot(vaultContext) : undefined;
+      const vault = await captureVaultSnapshot();
+      const root = vault?.root;
       await rec.stopAndUnloadAsync();
       recordingRef.current = null;
       pulseRef.current?.stop();
@@ -333,7 +325,7 @@ export default function AudioCaptureScreen({ navigation }: Props) {
       try {
         await recordCapture(
           { id: localId(), mode: "audio", title, filepath, createdAt: Date.now() },
-          vaultContext?.profileId,
+          vault?.context.profileId,
         );
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
