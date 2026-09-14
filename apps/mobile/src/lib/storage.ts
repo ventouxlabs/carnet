@@ -1,6 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  historyKey,
+  LEGACY_HISTORY_KEY,
+  profileIdOrDefault,
+} from "./vaultStorageKeys";
+import { DEFAULT_VAULT_PROFILE_ID } from "./vaultProfiles";
 
-const HISTORY_KEY = "carnet:history:v1";
 const HISTORY_LIMIT = 20;
 
 export type CaptureMode = "idea" | "journal" | "person" | "photo" | "audio";
@@ -13,8 +18,18 @@ export interface CaptureEntry {
   createdAt: number;
 }
 
-export async function getRecentCaptures(): Promise<CaptureEntry[]> {
-  const raw = await AsyncStorage.getItem(HISTORY_KEY);
+export async function getRecentCaptures(profileId?: string): Promise<CaptureEntry[]> {
+  const resolvedProfileId = profileIdOrDefault(profileId);
+  const key = historyKey(resolvedProfileId);
+  let raw = await AsyncStorage.getItem(key);
+  // v1 belonged to the one pre-profile vault. Read it only for the stable
+  // default profile, then materialize v2 before returning. This makes an
+  // interrupted migration retry-safe and prevents a later Work profile from
+  // inheriting Personal's recents merely because it is currently active.
+  if (!raw && resolvedProfileId === DEFAULT_VAULT_PROFILE_ID) {
+    raw = await AsyncStorage.getItem(LEGACY_HISTORY_KEY);
+    if (raw) await AsyncStorage.setItem(key, raw);
+  }
   if (!raw) {
     return [];
   }
@@ -26,16 +41,16 @@ export async function getRecentCaptures(): Promise<CaptureEntry[]> {
   }
 }
 
-export async function recordCapture(entry: CaptureEntry): Promise<void> {
-  const existing = await getRecentCaptures();
+export async function recordCapture(entry: CaptureEntry, profileId?: string): Promise<void> {
+  const existing = await getRecentCaptures(profileId);
   const next = [entry, ...existing].slice(0, HISTORY_LIMIT);
-  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  await AsyncStorage.setItem(historyKey(profileId), JSON.stringify(next));
 }
 
-export async function removeFromHistory(id: string): Promise<void> {
-  const existing = await getRecentCaptures();
+export async function removeFromHistory(id: string, profileId?: string): Promise<void> {
+  const existing = await getRecentCaptures(profileId);
   const next = existing.filter((e) => e.id !== id);
-  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  await AsyncStorage.setItem(historyKey(profileId), JSON.stringify(next));
 }
 
 /**
@@ -45,11 +60,11 @@ export async function removeFromHistory(id: string): Promise<void> {
  * leave a ghost recents row pointing at a now-archived path. Skips the write
  * when nothing matched.
  */
-export async function removeFromHistoryByFilepath(filepath: string): Promise<void> {
-  const existing = await getRecentCaptures();
+export async function removeFromHistoryByFilepath(filepath: string, profileId?: string): Promise<void> {
+  const existing = await getRecentCaptures(profileId);
   const next = existing.filter((e) => e.filepath !== filepath);
   if (next.length === existing.length) return;
-  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  await AsyncStorage.setItem(historyKey(profileId), JSON.stringify(next));
 }
 
 /**
@@ -61,13 +76,14 @@ export async function removeFromHistoryByFilepath(filepath: string): Promise<voi
  */
 export async function removeManyFromHistory(
   ids: ReadonlyArray<string>,
+  profileId?: string,
 ): Promise<void> {
   if (ids.length === 0) return;
   const toRemove = new Set(ids);
-  const existing = await getRecentCaptures();
+  const existing = await getRecentCaptures(profileId);
   const next = existing.filter((e) => !toRemove.has(e.id));
   if (next.length === existing.length) return;
-  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  await AsyncStorage.setItem(historyKey(profileId), JSON.stringify(next));
 }
 
 /**
@@ -80,14 +96,15 @@ export async function removeManyFromHistory(
 export async function updateCaptureTitle(
   id: string,
   title: string,
+  profileId?: string,
 ): Promise<void> {
-  const existing = await getRecentCaptures();
+  const existing = await getRecentCaptures(profileId);
   const idx = existing.findIndex((e) => e.id === id);
   if (idx === -1) return;
   if (existing[idx].title === title) return;
   const next = [...existing];
   next[idx] = { ...next[idx], title };
-  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  await AsyncStorage.setItem(historyKey(profileId), JSON.stringify(next));
 }
 
 /**
@@ -101,14 +118,15 @@ export async function updateCaptureTitle(
 export async function updateCaptureTitleByFilepath(
   filepath: string,
   title: string,
+  profileId?: string,
 ): Promise<void> {
-  const existing = await getRecentCaptures();
+  const existing = await getRecentCaptures(profileId);
   const idx = existing.findIndex((e) => e.filepath === filepath);
   if (idx === -1) return;
   if (existing[idx].title === title) return;
   const next = [...existing];
   next[idx] = { ...next[idx], title };
-  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  await AsyncStorage.setItem(historyKey(profileId), JSON.stringify(next));
 }
 
 /**
@@ -123,11 +141,12 @@ export async function updateCaptureTitleByFilepath(
 export async function updateCaptureFilepath(
   oldFilepath: string,
   newFilepath: string,
+  profileId?: string,
 ): Promise<void> {
-  const existing = await getRecentCaptures();
+  const existing = await getRecentCaptures(profileId);
   const idx = existing.findIndex((e) => e.filepath === oldFilepath);
   if (idx === -1) return;
   const next = [...existing];
   next[idx] = { ...next[idx], filepath: newFilepath };
-  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  await AsyncStorage.setItem(historyKey(profileId), JSON.stringify(next));
 }

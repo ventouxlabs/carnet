@@ -92,6 +92,15 @@ describe("recents history", () => {
     _store.set("carnet:history:v1", "{ this is not valid JSON");
     expect(await getRecentCaptures()).toEqual([]);
   });
+
+  it("isolates histories by profile and migrates v1 only to default", async () => {
+    _store.set("carnet:history:v1", JSON.stringify([entry("legacy")]));
+    await recordCapture(entry("work"), "work");
+
+    expect((await getRecentCaptures("work")).map((item) => item.id)).toEqual(["work"]);
+    expect((await getRecentCaptures("default")).map((item) => item.id)).toEqual(["legacy"]);
+    expect(_store.has("carnet:history:v2:default")).toBe(true);
+  });
 });
 
 describe("removeManyFromHistory", () => {

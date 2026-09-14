@@ -24,8 +24,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { decryptPayload, encryptPayload, isEncryptedEnvelope } from "./queueCrypto";
 import type { CaptureMode } from "./storage";
-
-const DRAFT_KEY_PREFIX = "carnet:capture_draft:v1:";
+import {
+  draftKey,
+  LEGACY_DRAFT_KEY_PREFIX,
+  profileIdOrDefault,
+} from "./vaultStorageKeys";
+import { DEFAULT_VAULT_PROFILE_ID } from "./vaultProfiles";
 
 export interface CaptureDraft {
   /** Idea text / journal notes / person meeting-context. */
@@ -38,8 +42,8 @@ export interface CaptureDraft {
   savedAt: number;
 }
 
-function keyFor(mode: CaptureMode): string {
-  return `${DRAFT_KEY_PREFIX}${mode}`;
+function legacyKeyFor(mode: CaptureMode): string {
+  return `${LEGACY_DRAFT_KEY_PREFIX}${mode}`;
 }
 
 function isDraft(value: unknown): value is CaptureDraft {
@@ -67,9 +71,19 @@ export function isEmptyDraft(
 /** Read the stored draft for a mode; null when absent, corrupt, or empty. */
 export async function loadDraft(
   mode: CaptureMode,
+  profileId?: string,
 ): Promise<CaptureDraft | null> {
   try {
-    const raw = await AsyncStorage.getItem(keyFor(mode));
+    const resolvedProfileId = profileIdOrDefault(profileId);
+    const key = draftKey(mode, resolvedProfileId);
+    let raw = await AsyncStorage.getItem(key);
+    // The old key belongs exclusively to the default profile. Copying the
+    // sealed value preserves encryption and makes this lazy migration safe to
+    // retry if the process dies between reads and writes.
+    if (!raw && resolvedProfileId === DEFAULT_VAULT_PROFILE_ID) {
+      raw = await AsyncStorage.getItem(legacyKeyFor(mode));
+      if (raw) await AsyncStorage.setItem(key, raw);
+    }
     if (!raw) return null;
     // Legacy drafts written before encryption shipped are plaintext JSON; they
     // stay readable and are re-sealed by the next saveDraft.
@@ -91,19 +105,21 @@ export async function loadDraft(
 export async function saveDraft(
   mode: CaptureMode,
   fields: Pick<CaptureDraft, "text" | "transcript" | "ocrText">,
+  profileId?: string,
 ): Promise<void> {
+  const key = draftKey(mode, profileId);
   if (isEmptyDraft(fields)) {
-    await AsyncStorage.removeItem(keyFor(mode));
+    await AsyncStorage.removeItem(key);
     return;
   }
   const draft: CaptureDraft = { ...fields, savedAt: Date.now() };
   await AsyncStorage.setItem(
-    keyFor(mode),
+    key,
     await encryptPayload(JSON.stringify(draft)),
   );
 }
 
 /** Drop the draft — call once the capture is safely persisted. */
-export async function clearDraft(mode: CaptureMode): Promise<void> {
-  await AsyncStorage.removeItem(keyFor(mode));
+export async function clearDraft(mode: CaptureMode, profileId?: string): Promise<void> {
+  await AsyncStorage.removeItem(draftKey(mode, profileId));
 }
