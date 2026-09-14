@@ -313,7 +313,7 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
                   key={i}
                   variant="bodyLarge"
                   accessibilityRole="link"
-                  accessibilityLabel={`Open note ${seg.text}`}
+                  accessibilityLabel={`Open note ${seg.accessibilityLabel ?? seg.text}`}
                   onPress={() => void openCitation(seg.linkUri!)}
                   style={{ color: theme.colors.primary, textDecorationLine: "underline" }}
                 >
