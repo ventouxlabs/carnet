@@ -1,6 +1,6 @@
 # Android Auto eligibility assessment
 
-**Status:** blocked by platform eligibility — assessed 2026-09-13.
+**Status:** approved pilot — self-messaging capture, re-scoped 2026-09-13.
 
 Carnet is a personal note-capture application. It is not a media, messaging,
 calling, navigation, point-of-interest, IoT, weather, game, browser, or video
@@ -20,24 +20,48 @@ Consequently, adding `com.google.android.gms.car.application`, a template,
 Android Auto app. It would create an unsupported claim and no useful testable
 product behavior.
 
-## Decision
+## Pilot decision
 
-Do not implement Android Auto integration under the current product definition.
-The roadmap item is complete as an eligibility decision, not as a head-unit
-binary. A later proposal may explore a phone-side, driver-safe voice capture
-flow; it must be named and scoped as phone capture rather than Android Auto.
+Carnet must not claim the **media** category: that requires real audio playback,
+a `MediaSession`, and a media-browser/library service. It also must not put its
+ordinary vault browser or editor on a car display.
 
-## Re-open criteria
+The approved pilot is instead a real **self-messaging** experience named *Drive
+Inbox*:
 
-Re-open only if all hold:
+1. Carnet exposes one conversation whose participant is the user themself.
+2. A user dictates a short message through Android Auto's reply action.
+3. Carnet receives the transcript through the notification reply receiver and
+   enqueues a durable capture in the selected vault context.
+4. Mark-as-read updates the local conversation state. Capture enrichment and
+   note writing run asynchronously; neither is a car-screen operation.
 
-1. Carnet gains a legitimate supported use case/category, confirmed against
-   current Android-for-Cars policy.
-2. The design meets distraction requirements and has a product owner for its
-   road-safety behavior.
-3. The implementation is source-owned (Expo config plugin/native source), uses
-   `expo prebuild`, and has Desktop Head Unit plus real-vehicle/trusted-store
-   verification as applicable.
+This aligns the head-unit surface with Android Auto's messaging primitives:
+`MessagingStyle`, reply and mark-as-read actions, and a conversation history.
+It remains a **pilot**, not an assertion of broad Play-store eligibility. The
+templated messaging route has limited distribution, and an eventual Play review
+may decide that self-only messaging is outside its interpretation of user
+communication.
+
+## Pilot acceptance criteria
+
+- No `MEDIA` category, `MediaSession`, media browser, navigation, or misleading
+  app-category declaration.
+- The car path is one self-conversation, with a reply action and a mark-as-read
+  action; it cannot browse, edit, delete, or search vault content while driving.
+- A reply is accepted exactly once, persists the raw text before enrichment,
+  and pins the vault context selected when it was received.
+- Notification permission/disabled notifications, empty transcription, duplicate
+  delivery, and receiver/process restart are recoverable and tested.
+- Android unit/instrumentation coverage and Desktop Head Unit validation precede
+  a trusted-source, real-vehicle check. The user-facing distribution state stays
+  beta/pilot until that evidence exists.
+
+## Release gate
+
+Before any broad distribution claim, verify current Play policy with a real
+submission path and document the outcome. A policy rejection leaves the Android
+Auto component disabled/experimental and does not affect ordinary phone capture.
 
 ## Sources
 

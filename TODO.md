@@ -157,9 +157,9 @@ canonicalizer is needed.
   (2026-07-04 decision): the persistent notification (shipped) + B5's inline-reply cover
   the same latency profile. Android share sheet is shipped. iOS share extension is
   preparation-only until a macOS/Xcode/signing environment is available. Android Auto
-  is ineligible under Carnet's current product category; assessment:
-  `docs/android-auto-eligibility.md`. Do not misclassify a note app to force a
-  head-unit integration. Delivery plan:
+  is an approved **Drive Inbox self-messaging pilot**, never a media claim or general
+  vault browser; implementation/distribution gate:
+  `docs/android-auto-eligibility.md`. Delivery plan:
   `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
 - [x] **Browse/search Phase 3 — SHIPPED 2026-09-08** (PR #207) — the retrospective query
   ("What have I been thinking about regarding X?"). **This closes the browse/search axis:

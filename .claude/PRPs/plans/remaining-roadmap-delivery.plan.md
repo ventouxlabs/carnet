@@ -169,17 +169,19 @@ exact resulting Markdown.
 
 ## Phase 6 — Platform preparation and eligibility
 
-### Android Auto
+### Android Auto — Drive Inbox self-messaging pilot
 
-Publish an eligibility assessment sourced from official Android-for-Cars guidance.
-Do not misclassify the application as navigation, media or messaging. If a valid
-supported category/mechanism is established later, a follow-up native phase must
-use an Expo config plugin/source-owned native code, `expo prebuild`, Desktop Head
-Unit tests and installed-device evidence—never generated `android/` edits alone.
+**Approved re-scope (2026-09-13):** implement one driver-safe self-conversation,
+not ordinary note browsing and not a media claim. A reply creates an immutable
+capture request; mark-as-read updates local conversation state. Enrichment and
+vault writes happen off the car UI.
 
-**Completed decision (2026-09-13):** `docs/android-auto-eligibility.md` records
-that generic personal note capture is not a supported category. No head-unit
-implementation is authorized under the current product definition.
+Use source-owned Android code plus Expo prebuild/config, `MessagingStyle`, reply
+and mark-read actions, and a tested bridge into the capture queue. Add Android
+unit/instrumentation coverage and Desktop Head Unit evidence. No broad
+distribution claim: templated messaging has restricted distribution and Play may
+reject a self-only conversation model. `docs/android-auto-eligibility.md` is the
+product contract and release gate.
 
 ### iOS share extension preparation
 
