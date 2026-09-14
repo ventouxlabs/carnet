@@ -43,6 +43,8 @@ import { caretProps, useCarnetTheme } from "../lib/theme";
 import { deriveTitle } from "@carnet/shared";
 import { getSettings } from "../lib/settings";
 import { resolveActiveProvider, UNKNOWN_PROVIDER_LABEL } from "../lib/llmProviders";
+import { captureVaultContext, type VaultContext } from "../lib/vaultContext";
+import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "PhotoCapture">;
 
@@ -196,6 +198,13 @@ export default function PhotoCaptureScreen({ navigation }: Props) {
     setError(null);
     setPhase("submitting");
     try {
+      let vaultContext: VaultContext | undefined;
+      try {
+        vaultContext = captureVaultContext(await getSettings());
+      } catch {
+        // Keep the existing writer fallback when settings storage is unavailable.
+      }
+      const root = vaultContext ? resolveContextRoot(vaultContext) : undefined;
       const slugFallback = timestampSlug();
       const title = deriveTitle(enrichedMd) || `Photo ${slugFallback}`;
       const desiredSlug = slugify(title) || `photo-${slugFallback}`;
@@ -205,25 +214,23 @@ export default function PhotoCaptureScreen({ navigation }: Props) {
         `${desiredSlug}.jpg`,
         base64,
         "image/jpeg",
+        root,
       );
 
       // Share the collision-bumped stem so .jpg and .md stay paired.
       const sharedStem = finalName.replace(/\.[^.]+$/, "");
       const withImage = injectImageEmbed(enrichedMd, `../Photos/${finalName}`);
-      const { filepath } = await writeIdea(sharedStem, withImage);
+      const { filepath } = await writeIdea(sharedStem, withImage, root);
 
       // Recents history is best-effort. If AsyncStorage fails after the
       // files are already on disk, surface a console warning but still
       // transition to "saved" — retrying would write `slug-2.jpg` +
       // `slug-2.md` as duplicates.
       try {
-        await recordCapture({
-          id: localId(),
-          mode: "photo",
-          title,
-          filepath,
-          createdAt: Date.now(),
-        });
+        await recordCapture(
+          { id: localId(), mode: "photo", title, filepath, createdAt: Date.now() },
+          vaultContext?.profileId,
+        );
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         console.warn("[PhotoCapture] recordCapture failed (files saved):", msg);
