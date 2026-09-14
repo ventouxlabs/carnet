@@ -372,8 +372,8 @@ export async function loadCachedTagIndex(): Promise<TagIndex | null> {
 }
 
 /** Rebuild + persist the note index, returning the derived tag index. */
-export async function refreshTagIndex(): Promise<TagIndex> {
-  return deriveTagIndex(await refreshNoteIndex());
+export async function refreshTagIndex(profileId?: string): Promise<TagIndex> {
+  return deriveTagIndex(await refreshNoteIndex(profileId));
 }
 
 /**
@@ -381,8 +381,8 @@ export async function refreshTagIndex(): Promise<TagIndex> {
  * for existing call sites; delegates to invalidateNoteIndex since the tag index
  * is now derived from the single note-index blob.
  */
-export async function invalidateTagIndex(): Promise<void> {
-  await invalidateNoteIndex();
+export async function invalidateTagIndex(profileId?: string): Promise<void> {
+  await invalidateNoteIndex(profileId);
 }
 
 /**
@@ -390,8 +390,8 @@ export async function invalidateTagIndex(): Promise<void> {
  * miss). For stale-while-revalidate, render this and fire refreshTagIndex() in
  * the background.
  */
-export async function getTagIndex(): Promise<TagIndex> {
-  return deriveTagIndex(await getNoteIndex());
+export async function getTagIndex(profileId?: string): Promise<TagIndex> {
+  return deriveTagIndex(await getNoteIndex(profileId));
 }
 
 /** Just the distinct normalized tags carried by a note's markdown. */

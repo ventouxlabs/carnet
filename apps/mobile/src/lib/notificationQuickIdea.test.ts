@@ -32,11 +32,18 @@ vi.mock("./vault", () => ({
 vi.mock("./queue", () => ({
   enqueue: (...args: unknown[]) => enqueueMock(...args),
 }));
+vi.mock("./settings", () => ({
+  getSettings: vi.fn(async () => ({ captureFolderPath: "" })),
+}));
+vi.mock("./vaultRoot", () => ({
+  resolveContextRoot: vi.fn((context: { rootUri: string }) => ({ uri: context.rootUri })),
+}));
 vi.mock("@carnet/shared", () => ({
   deriveTitle: vi.fn((text: string) => text.split("\n")[0]?.trim() || ""),
 }));
 
 import { handleQuickIdeaCapture } from "./notificationQuickIdea";
+import { getSettings } from "./settings";
 
 /** What writeRawIdea actually returns alongside filepath/mtime. Stubs MUST
  * carry it: it is the content baseline the SAF conflict guard runs on. */
@@ -48,6 +55,8 @@ beforeEach(() => {
   recordCaptureMock.mockReset().mockResolvedValue(undefined);
   invalidateTagIndexMock.mockReset().mockResolvedValue(undefined);
   enqueueMock.mockReset().mockResolvedValue(undefined);
+  vi.mocked(getSettings).mockReset();
+  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
 });
 
 /** Default happy-path stubs: raw write lands, enrichment updates in place. */
@@ -109,14 +118,22 @@ describe("handleQuickIdeaCapture — save-first ordering", () => {
 
     expect(order).toEqual(["write", "enrich"]);
     // The raw text (trimmed) is what gets written — no LLM in the write path.
-    expect(writeRawIdeaMock).toHaveBeenCalledWith({ text: "Build a kite", tags: [] });
+    expect(writeRawIdeaMock).toHaveBeenCalledWith(
+      { text: "Build a kite", tags: [] },
+      undefined,
+      { uri: "" },
+    );
     expect(result).toEqual({ kind: "enriched" });
   });
 
   it("trims the submitted text before writing", async () => {
     happyPath();
     await handleQuickIdeaCapture("  padded idea  ");
-    expect(writeRawIdeaMock).toHaveBeenCalledWith({ text: "padded idea", tags: [] });
+    expect(writeRawIdeaMock).toHaveBeenCalledWith(
+      { text: "padded idea", tags: [] },
+      undefined,
+      { uri: "" },
+    );
   });
 
   it("records a recents entry and invalidates the tag index after the write", async () => {
@@ -131,6 +148,24 @@ describe("handleQuickIdeaCapture — save-first ordering", () => {
     });
     expect(entry.id).toBeTruthy();
     expect(invalidateTagIndexMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("pins all headless bookkeeping to the profile active at task start", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    happyPath();
+
+    await handleQuickIdeaCapture("work reply");
+
+    expect(writeRawIdeaMock).toHaveBeenCalledWith(expect.anything(), undefined, { uri: "file:///work" });
+    expect(recordCaptureMock).toHaveBeenCalledWith(expect.anything(), "work");
+    expect(invalidateTagIndexMock).toHaveBeenCalledWith("work");
   });
 
   it("still reports success if recents bookkeeping throws (note is safe on disk)", async () => {
