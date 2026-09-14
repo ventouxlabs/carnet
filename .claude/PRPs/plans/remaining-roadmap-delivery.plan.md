@@ -177,6 +177,10 @@ supported category/mechanism is established later, a follow-up native phase must
 use an Expo config plugin/source-owned native code, `expo prebuild`, Desktop Head
 Unit tests and installed-device evidence—never generated `android/` edits alone.
 
+**Completed decision (2026-09-13):** `docs/android-auto-eligibility.md` records
+that generic personal note capture is not a supported category. No head-unit
+implementation is authorized under the current product definition.
+
 ### iOS share extension preparation
 
 Create `docs/ios-share-extension.md`, covering App Group inbox ownership,
@@ -186,6 +190,9 @@ duplicate/interrupted delivery, unavailable vaults, entitlements/signing, and th
 macOS/Xcode/Apple-device matrix. A shared pure envelope validator is permitted
 only if an existing Android/share caller uses it. No unsupported Apple signing
 values or Linux-produced iOS binary will be represented as shipped.
+
+**Completed preparation (2026-09-13):** `docs/ios-share-extension.md` contains
+the handoff contract, test matrix, and the explicit environment prerequisites.
 
 ## Verification and completion
 
