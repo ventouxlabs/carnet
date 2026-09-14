@@ -53,6 +53,14 @@ import {
 import { mergeUserTags } from "./tags";
 import { upsertFrontmatterField } from "./frontmatter";
 import { invalidateNoteIndex } from "./vault";
+import { getSettings } from "./settings";
+import { captureVaultContext, isVaultContext, type VaultContext } from "./vaultContext";
+import { resolveContextRoot } from "./vaultRoot";
+import {
+  DEFAULT_VAULT_PROFILE_ID,
+  normaliseVaultProfileState,
+  activeVaultProfile,
+} from "./vaultProfiles";
 import { deriveTitle } from "@carnet/shared";
 
 /** Inject a `location: lat,lon` frontmatter field, or a no-op when unset. */
@@ -116,7 +124,10 @@ export interface PersonPayload {
   location?: string;
 }
 
-export type QueuePayload = IdeaPayload | JournalPayload | PersonPayload;
+/** Every new row records the vault root it belonged to when queued. */
+export type QueuePayload = (IdeaPayload | JournalPayload | PersonPayload) & {
+  vaultContext?: VaultContext;
+};
 
 export interface QueueRow {
   id: string;
@@ -278,12 +289,18 @@ export async function getQueueCounts(): Promise<{
 
 /** Enqueue a failed capture for later retry. */
 export async function enqueue(payload: QueuePayload): Promise<void> {
+  // Capture the routing decision before taking the storage lock. A caller with
+  // a longer-running operation supplies its earlier snapshot; the fallback
+  // protects short paths such as notification capture.
+  const vaultContext =
+    payload.vaultContext ?? captureVaultContext(await getSettings());
+  const queuedPayload: QueuePayload = { ...payload, vaultContext };
   await withLock(async () => {
     const rows = await loadRows();
     rows.push({
       id: localId(),
       mode: payload.mode,
-      payload_json: JSON.stringify(payload),
+      payload_json: JSON.stringify(queuedPayload),
       created_at: Date.now(),
       attempts: 0,
       last_error: null,
@@ -292,6 +309,19 @@ export async function enqueue(payload: QueuePayload): Promise<void> {
   });
   // Light haptic so the user feels the offline queue accept the capture.
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+}
+
+/** Map a pre-profile row to the migrated default vault, never a later switch. */
+function legacyQueueContext(settings: Awaited<ReturnType<typeof getSettings>>): VaultContext {
+  const state = normaliseVaultProfileState({
+    profiles: settings.vaultProfiles,
+    activeProfileId: settings.activeVaultProfileId,
+    legacyCaptureFolderPath: settings.captureFolderPath,
+  });
+  const profile =
+    state.profiles.find((candidate) => candidate.id === DEFAULT_VAULT_PROFILE_ID) ??
+    activeVaultProfile(state);
+  return { profileId: profile.id, rootUri: profile.rootUri };
 }
 
 /**
@@ -352,6 +382,13 @@ export async function drainQueue(): Promise<void> {
 
 /** Process a single queued payload: enrich + write to disk. */
 async function processRow(payload: QueuePayload): Promise<void> {
+  // Legacy rows have no context. Their pre-profile settings root is normalized
+  // to the default registration, not reinterpreted as whichever profile the
+  // user selected after upgrading.
+  const vaultContext = payload.vaultContext && isVaultContext(payload.vaultContext)
+    ? payload.vaultContext
+    : legacyQueueContext(await getSettings());
+  const root = resolveContextRoot(vaultContext);
   if (payload.mode === "idea") {
     const result = await enrichIdea(payload.text);
     // Binaries were already written to disk at enqueue; fold their rel-paths
@@ -375,7 +412,7 @@ async function processRow(payload: QueuePayload): Promise<void> {
     } else {
       const title = deriveTitle(result.markdown);
       const slug = slugify(title) || "untitled";
-      await writeIdea(slug, md);
+      await writeIdea(slug, md, root);
     }
   } else if (payload.mode === "journal") {
     const result = await enrichJournal({
@@ -391,7 +428,7 @@ async function processRow(payload: QueuePayload): Promise<void> {
       ),
       payload.places ?? [],
     );
-    await appendJournal(payload.date, md);
+    await appendJournal(payload.date, md, root);
   } else if (payload.mode === "person") {
     const result = await enrichPerson({
       ocrResult: payload.ocrResult,
@@ -402,6 +439,7 @@ async function processRow(payload: QueuePayload): Promise<void> {
       "",
       "",
       injectLocation(mergeUserTags(result.markdown, payload.tags), payload.location),
+      root,
     );
   }
   // A drained capture adds tags to the vault — drop the stale index cache so the
