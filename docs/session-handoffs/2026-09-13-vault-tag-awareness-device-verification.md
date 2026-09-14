@@ -35,4 +35,4 @@ release APK (with the temporary dialog removed) was reinstalled. The focused
 dispatcher suite passed: 31 tests.
 
 The durable plan and TODO status are updated in
-`.claude/PRPs/plans/vault-tag-awareness.plan.md` and `TODO.md`.
+`.claude/PRPs/plans/completed/vault-tag-awareness.plan.md` and `TODO.md`.

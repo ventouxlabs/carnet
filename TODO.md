@@ -96,7 +96,7 @@ canonicalizer is needed.
   override, so an override can't silently disable it. Gated by
   `Settings.useExistingTagsForAutoTag` (default **on**, toggle in Settings → AI
   behavior). Offline-queued captures get it too — `queue.ts` drains through the
-  dispatcher. Plan: `.claude/PRPs/plans/vault-tag-awareness.plan.md`.
+  dispatcher. Plan: `.claude/PRPs/plans/completed/vault-tag-awareness.plan.md`.
 
   Three things a future reader should **not** re-litigate:
   1. **The canonicalizer is deliberately deferred**, not forgotten. Post-hoc rewriting
