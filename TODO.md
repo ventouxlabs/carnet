@@ -81,13 +81,13 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   `.claude/PRPs/plans/completed/self-hosted-sentry.plan.md` for why hosted crash reporting
   was rejected.
 
-## Landed, pending on-device verification
+## Landed, device verification complete (benefit not yet measured)
 
-Code merged and green in CI, but NOT yet confirmed against a real vault on hardware.
-Do not write these up as shipped until the device evidence exists — filing the
-paperwork early is this repo's most-repeated documentation defect.
+Code merged and green in CI, then verified against a real vault on hardware. The
+soft hint's causal benefit remains unmeasured; do not turn that into a claim that a
+canonicalizer is needed.
 
-- [ ] **Vault tag awareness (v0.4 S3)** — auto-tagging is shown the vault's existing
+- [x] **Vault tag awareness (v0.4 S3)** — auto-tagging is shown the vault's existing
   tag vocabulary so it reuses `dev` instead of minting `development` alongside it.
   `lib/vaultTagHint.ts` reads the **cached** tag index (`loadCachedTagIndex`, never
   `getTagIndex` — the latter falls through to a full SAF vault walk on a cache miss,
@@ -138,12 +138,18 @@ paperwork early is this repo's most-repeated documentation defect.
   neutral Idea `Neutral travel test: plan a travel to Austria.` completed with
   `[idea, seedling, travel, austria]`. That is one clean positive on-device reuse
   sample on the small local model; the generated test note was deleted immediately
-  and Home refreshed so it cannot pollute the next measurement. It does **not** yet
-  establish causal benefit over content-only tagging: the toggle's `false` arm and a
-  cold-start check remain outstanding. See Attempt 4 in the plan for the exact
-  evidence and Attempt 3 for the earlier, time-bounded device blockers. Device access
-  may still recur as a blocker (the Pixel 9's flaky USB and the Pixel 10's active-user
-  install mismatch); do not assume either device is ready without checking first.
+  and Home refreshed so it cannot pollute the next measurement.
+
+  **2026-09-13 completion:** a release-only, redacted device probe at the exact
+  `dispatcher.enrichIdea` handoff showed `enabled=false; cached=4; passed=0` with a
+  warm cached vault index — the false arm passed no tags to `llmClient`. A separate
+  `pm clear` cold start accepted an immediate capture without waiting on a vault walk;
+  because that reset necessarily clears the provider key and SAF grant, it proves
+  no-wait behavior, not successful enrichment or a directly observable empty prompt.
+  The probe was removed, the normal signed release reinstalled, tag reuse restored to
+  enabled, and both test Idea files deleted. See Attempt 5 in the plan. This confirms
+  on-device behavior but **does not establish causal benefit** over content-only
+  tagging; do not infer a canonicalizer need from these samples.
 
 ## Deferred to v0.3
 
