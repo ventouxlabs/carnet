@@ -52,6 +52,7 @@ import { VoiceReadinessBanner } from "../voice/VoiceReadinessBanner";
 import { CaptureFab, type CaptureTarget } from "../components/CaptureFab";
 import { NoteCard } from "../components/NoteCard";
 import { SyncStatusDot } from "../components/SyncStatusDot";
+import { refreshActiveVault } from "../lib/vaultRefreshService";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Home">;
 
@@ -102,6 +103,7 @@ export default function HomeScreen({ navigation }: Props) {
   }, []);
 
   const refresh = useCallback(async () => {
+    void refreshActiveVault().catch(() => undefined);
     // Resolve this refresh's profile once. The history read is allowed to
     // await, but it must not follow a settings switch that lands while it is
     // in flight and paint the prior vault's recents into the new Home view.
