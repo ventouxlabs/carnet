@@ -21,6 +21,7 @@ import {
   type AggregatedTodo,
   type NoteIndex,
 } from "../lib/vault";
+import { refreshActiveVault } from "../lib/vaultRefreshService";
 import { readNote, updateChecklistItem } from "../lib/writer";
 import { MIN_TAP_TARGET, useCarnetTheme } from "../lib/theme";
 
@@ -87,6 +88,7 @@ export default function TodosScreen({ navigation }: Props) {
         .finally(() => {
           if (active) setLoading(false);
         });
+      void refreshActiveVault().catch(() => undefined);
       return () => {
         active = false;
       };

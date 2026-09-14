@@ -27,6 +27,7 @@ import {
   type NoteIndex,
   type NoteIndexEntry,
 } from "../lib/vault";
+import { refreshActiveVault } from "../lib/vaultRefreshService";
 import { MAX_NOTES, orderCandidates, type RetrievalCandidate } from "../lib/retrospective";
 import { markAskExplainerSeen, shouldShowAskExplainer } from "../lib/askExplainer";
 import { MIN_TAP_TARGET, useCarnetTheme } from "../lib/theme";
@@ -162,6 +163,7 @@ export default function SearchScreen({ route, navigation }: Props) {
         .finally(() => {
           if (active) setLoading(false);
         });
+      void refreshActiveVault().catch(() => undefined);
       return () => {
         active = false;
       };

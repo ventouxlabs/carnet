@@ -13,6 +13,9 @@ import { PaperProvider } from "react-native-paper";
 import { carnetLight } from "../lib/theme";
 import type { NoteIndex } from "../lib/vault";
 
+vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
+vi.mock("../lib/settings", () => ({ getSettings: vi.fn(async () => ({ captureFolderPath: "" })) }));
+
 vi.mock("@react-navigation/native", async () => {
   const { useEffect } = await import("react");
   return {
