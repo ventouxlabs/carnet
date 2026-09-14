@@ -66,6 +66,7 @@ vi.mock("../lib/vault", () => ({
   refreshNoteIndex: vi.fn(async () => ({ builtAt: 2, notes: [] })),
   resolveNoteEntry: vi.fn(async () => null),
 }));
+vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
 
 vi.mock("../lib/syncStatus", () => ({
   getSyncStatus: vi.fn(async () => ({
@@ -114,6 +115,7 @@ import { getPendingExportCount } from "../lib/pendingSync";
 import { drainPendingKarakeepExports } from "../lib/pendingSyncRunner";
 import { listNoteFiles, listSyncConflictFiles } from "../lib/writer";
 import { reportColdStart } from "../lib/startupTiming";
+import { refreshActiveVault } from "../lib/vaultRefreshService";
 
 type ScreenProps = Parameters<typeof HomeScreen>[0];
 
@@ -157,6 +159,12 @@ describe("HomeScreen", () => {
     expect(screen.getByText("pending")).toBeTruthy();
     // The second note has no index row — card still renders, just plainer.
     expect(screen.getByText("Journal")).toBeTruthy();
+  });
+
+  it("schedules a background vault reconciliation on Home focus", async () => {
+    renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    expect(refreshActiveVault).toHaveBeenCalledTimes(1);
   });
 
   it("shows the empty state pointing at the FAB when nothing is captured", async () => {
