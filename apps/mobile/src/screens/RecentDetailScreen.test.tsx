@@ -186,7 +186,7 @@ vi.mock("expo-sharing", () => ({
 }));
 
 import RecentDetailScreen from "./RecentDetailScreen";
-import { readNote, updateNote } from "../lib/writer";
+import { readNote, updateNoteIfUnchanged } from "../lib/writer";
 import { finishPendingEnrichment, reEnrichNoteInPlace } from "../lib/finishEnrichment";
 import { removeFromHistory, updateCaptureTitleByFilepath } from "../lib/storage";
 import { attachPhotoToNote } from "../lib/attachPhotoToNote";
@@ -322,10 +322,16 @@ describe("RecentDetailScreen", () => {
       screen.getByLabelText("Link Other QA note into this note"),
     );
 
-    await waitFor(() => expect(updateNote).toHaveBeenCalledTimes(1));
-    const written = vi.mocked(updateNote).mock.calls[0][1];
+    await waitFor(() => expect(updateNoteIfUnchanged).toHaveBeenCalledTimes(1));
+    const written = vi.mocked(updateNoteIfUnchanged).mock.calls[0][1];
     expect(written).toContain("## Related");
     expect(written).toContain("- [[Other QA note]]");
+    expect(vi.mocked(updateNoteIfUnchanged).mock.calls[0]).toEqual([
+      ENTRY.filepath,
+      written,
+      null,
+      NOTE_MD,
+    ]);
     expect(
       await screen.findByText("Linked [[Other QA note]] under Related"),
     ).toBeTruthy();
@@ -355,10 +361,37 @@ describe("RecentDetailScreen", () => {
     expect(await screen.findByText("Journal mentions")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Link journal 2026-09-14 into this person"));
 
-    await waitFor(() => expect(updateNote).toHaveBeenCalledWith(
+    await waitFor(() => expect(updateNoteIfUnchanged).toHaveBeenCalledWith(
       person.filepath,
-      expect.stringContaining("[[2026-09-14]]"),
+      expect.stringContaining("[[Journal/2026-09-14]]"),
+      null,
+      expect.stringContaining("# Ada Lovelace"),
     ));
+  });
+
+  it("refuses a related-link write when the displayed note is stale", async () => {
+    const relatedEntry = {
+      uri: "file:///v/Ideas/other-qa-note.md",
+      subdir: "Ideas" as const,
+      title: "Other QA note",
+      createdOrDate: 5,
+      tags: ["qa-test"],
+      mode: "idea" as const,
+      excerpt: "",
+    };
+    vi.mocked(loadCachedNoteIndex).mockResolvedValue({
+      builtAt: 1,
+      notes: [relatedEntry],
+    } as Awaited<ReturnType<typeof loadCachedNoteIndex>>);
+    vi.mocked(updateNoteIfUnchanged).mockResolvedValueOnce({ ok: false, reason: "conflict" });
+
+    renderScreen();
+    await screen.findByText("Related");
+    fireEvent.click(screen.getByLabelText("Link Other QA note into this note"));
+
+    await waitFor(() => expect(updateNoteIfUnchanged).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Save failed: The note changed before the link could be saved/)).toBeTruthy();
+    expect(screen.queryByText("Linked [[Other QA note]] under Related")).toBeNull();
   });
 
   it("tag stamp opens pre-filtered Search", async () => {

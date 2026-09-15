@@ -32,14 +32,38 @@ describe("findPersonJournalMatches", () => {
       {
         uri: "file:///vault/Journal/2026-09-12.md",
         linkTitle: "2026-09-12",
+        linkTarget: "Journal/2026-09-12",
         excerpt: "Met José Núñez after lunch.",
       },
       {
         uri: "file:///vault/Journal/2026-09-11.md",
         linkTitle: "2026-09-11",
+        linkTarget: "Journal/2026-09-11",
         excerpt: "JOSÉ NÚÑEZ called from the train.",
       },
     ]);
+  });
+
+  it("keeps distinct vault-relative targets when journal dates collide", async () => {
+    const matches = await findPersonJournalMatches("Ada Lovelace", [
+      journal("file:///vault/Journal/2026-09-14.md", 2),
+      journal("file:///vault/Journal/Archive/2026-09-14.md", 1),
+    ], async () => "Ada Lovelace arrived.");
+
+    expect(matches.map((match) => match.linkTarget)).toEqual([
+      "Journal/2026-09-14",
+      "Journal/Archive/2026-09-14",
+    ]);
+  });
+
+  it("derives a canonical target from an encoded SAF document URI", async () => {
+    const [match] = await findPersonJournalMatches("Ada Lovelace", [
+      journal(
+        "content://com.android.externalstorage.documents/document/primary%3ADocuments%2Fcarnet%2FJournal%2F2026-09-14.md",
+      ),
+    ], async () => "Ada Lovelace arrived.");
+
+    expect(match.linkTarget).toBe("Journal/2026-09-14");
   });
 
   it("rejects first-name and substring hits, malformed dates, and bounds body reads", async () => {
@@ -65,6 +89,7 @@ describe("findPersonJournalMatches", () => {
       {
         uri: "file:///vault/Journal/2026-09-14.md",
         linkTitle: "2026-09-14",
+        linkTarget: "Journal/2026-09-14",
         excerpt: "Ada Lovelace arrived.",
       },
     ]);

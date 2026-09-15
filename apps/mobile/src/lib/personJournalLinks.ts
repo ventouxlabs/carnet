@@ -2,8 +2,10 @@ import type { NoteIndexEntry } from "./vault";
 
 export interface PersonJournalMatch {
   uri: string;
-  /** Date-derived title avoids ambiguous journal H1s and is a stable wikilink. */
+  /** Date-derived label for the card; the target carries the unambiguous path. */
   linkTitle: string;
+  /** Vault-relative, unambiguous Obsidian target for the matched journal file. */
+  linkTarget: string;
   excerpt: string;
 }
 
@@ -53,9 +55,34 @@ export async function findPersonJournalMatches(
     }
     if (options.signal?.aborted) return [];
     if (!containsWholeName(body, nameTokens)) continue;
-    matches.push({ uri: entry.uri, linkTitle: date, excerpt: excerpt(body) });
+    matches.push({
+      uri: entry.uri,
+      linkTitle: date,
+      linkTarget: journalLinkTarget(entry.uri, date),
+      excerpt: excerpt(body),
+    });
   }
   return matches;
+}
+
+/**
+ * Turn the matched file URI into the vault-relative target Obsidian resolves.
+ * The date alone is not sufficient: a vault can contain another journal
+ * archive (or a manually filed journal) with the same filename. Both file://
+ * and SAF content:// URIs retain the path below `Journal` after decoding.
+ */
+function journalLinkTarget(uri: string, date: string): string {
+  let decoded = uri;
+  try {
+    decoded = decodeURIComponent(uri);
+  } catch {
+    // The standard Journal/date fallback below still names the conventional
+    // vault location when a malformed URI cannot be decoded.
+  }
+  const parts = decoded.split(/[?#]/, 1)[0].split("/").filter(Boolean);
+  const journalAt = parts.lastIndexOf("Journal");
+  if (journalAt === -1) return `Journal/${date}`;
+  return [...parts.slice(journalAt, -1), date].join("/");
 }
 
 function journalDateFromUri(uri: string): string | null {

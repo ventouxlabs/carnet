@@ -5,7 +5,7 @@ import type { PersonJournalMatch } from "../lib/personJournalLinks";
 
 interface Props {
   matches: readonly PersonJournalMatch[];
-  onLink: (linkTitle: string) => void;
+  onLink: (match: PersonJournalMatch) => void;
 }
 
 /** Explicit, one-way Person → journal links. Obsidian backlinks provide the
@@ -25,7 +25,7 @@ export function PersonJournalLinksCard({ matches, onLink }: Props) {
             <IconButton
               icon="link-plus"
               size={20}
-              onPress={() => onLink(match.linkTitle)}
+              onPress={() => onLink(match)}
               accessibilityLabel={`Link journal ${match.linkTitle} into this person`}
             />
           </View>

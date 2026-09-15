@@ -34,7 +34,7 @@ import {
   readNote,
   stripFrontmatter,
   stripPairedBinaryLinks,
-  updateNote,
+  updateNoteIfUnchanged,
 } from "../lib/writer";
 import { ArchiveNoteDialog } from "../components/ArchiveNoteDialog";
 import { DiscardEditsDialog } from "../components/DiscardEditsDialog";
@@ -497,7 +497,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       active = false;
       controller.abort();
     };
-  }, [body, missing, entry.mode, entry.title]);
+  }, [body, missing, entry.mode, entry.title, entry.filepath]);
 
   // Link a related note INTO this one as a persisted [[wikilink]] under a
   // "## Related" section. The insert is pure + deduped (insertRelatedLink); the
@@ -507,18 +507,27 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
   const linkingRelatedRef = useRef(false);
   const { setEditError } = edit;
   const linkRelated = useCallback(
-    async (title: string) => {
+    async (linkTarget: string, displayTitle = linkTarget) => {
       if (linkingRelatedRef.current) return;
       linkingRelatedRef.current = true;
       try {
-        const { next, changed } = insertRelatedLink(body, title);
+        const { next, changed } = insertRelatedLink(body, linkTarget);
         if (changed) {
-          await updateNote(entry.filepath, next);
+          // `body` is the exact file snapshot this screen rendered. Supplying
+          // it as the SAF-capable content baseline prevents a Syncthing or
+          // workstation write made since load from being silently clobbered.
+          const written = await updateNoteIfUnchanged(entry.filepath, next, null, body);
+          if (!written.ok) {
+            if (mountedRef.current) {
+              setEditError("The note changed before the link could be saved — reload and try again.");
+            }
+            return;
+          }
           if (mountedRef.current) setBody(next);
         }
         if (mountedRef.current) {
           setRelatedLinked(
-            changed ? `Linked [[${title}]] under Related` : "Already linked",
+            changed ? `Linked [[${displayTitle}]] under Related` : "Already linked",
           );
         }
       } catch (e: unknown) {
@@ -730,7 +739,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
 
             <PersonJournalLinksCard
               matches={personJournalMatches}
-              onLink={(title) => void linkRelated(title)}
+              onLink={(match) => void linkRelated(match.linkTarget, match.linkTitle)}
             />
           </>
         ) : null}
