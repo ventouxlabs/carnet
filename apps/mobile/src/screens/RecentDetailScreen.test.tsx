@@ -248,6 +248,7 @@ function openActionsSheet(navigation: ReturnType<typeof makeNavigation>): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(readNote).mockResolvedValue(NOTE_MD);
 });
 
 afterEach(cleanup);
@@ -328,6 +329,36 @@ describe("RecentDetailScreen", () => {
     expect(
       await screen.findByText("Linked [[Other QA note]] under Related"),
     ).toBeTruthy();
+  });
+
+  it("shows full-name journal mentions for a Person and links a selected date into that one note", async () => {
+    const person = { ...ENTRY, mode: "person" as const, title: "Ada Lovelace", filepath: "file:///v/People/ada-lovelace.md" };
+    vi.mocked(readNote).mockImplementation(async (uri: string) =>
+      uri.includes("Journal/2026-09-14")
+        ? "# Journal\n\nMet Ada Lovelace after lunch."
+        : "---\nname: Ada Lovelace\n---\n# Ada Lovelace\n",
+    );
+    vi.mocked(loadCachedNoteIndex).mockResolvedValue({
+      builtAt: 1,
+      notes: [{
+        uri: "file:///v/Journal/2026-09-14.md",
+        subdir: "Journal",
+        title: "Journal",
+        createdOrDate: 1,
+        tags: [],
+        mode: "journal",
+        excerpt: "",
+      }],
+    } as Awaited<ReturnType<typeof loadCachedNoteIndex>>);
+
+    renderScreen(person);
+    expect(await screen.findByText("Journal mentions")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Link journal 2026-09-14 into this person"));
+
+    await waitFor(() => expect(updateNote).toHaveBeenCalledWith(
+      person.filepath,
+      expect.stringContaining("[[2026-09-14]]"),
+    ));
   });
 
   it("tag stamp opens pre-filtered Search", async () => {
