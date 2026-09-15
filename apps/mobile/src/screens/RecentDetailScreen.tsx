@@ -472,6 +472,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
   const [personJournalMatches, setPersonJournalMatches] = useState<PersonJournalMatch[]>([]);
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     if (missing || !body || entry.mode !== "person") {
       setPersonJournalMatches([]);
       return;
@@ -483,6 +484,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
           deriveTitle(body) || entry.title,
           index.notes,
           readNote,
+          { signal: controller.signal },
         );
       })
       .then((matches) => {
@@ -493,6 +495,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       });
     return () => {
       active = false;
+      controller.abort();
     };
   }, [body, missing, entry.mode, entry.title]);
 

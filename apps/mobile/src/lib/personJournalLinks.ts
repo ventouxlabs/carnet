@@ -10,6 +10,8 @@ export interface PersonJournalMatch {
 interface Options {
   /** Bound foreground I/O; old journals remain discoverable through recency. */
   maxReads?: number;
+  /** Stops between reads when the detail/profile that requested them changes. */
+  signal?: AbortSignal;
 }
 
 const DEFAULT_MAX_READS = 20;
@@ -31,6 +33,7 @@ export async function findPersonJournalMatches(
   if (nameTokens.length < 2) return [];
 
   const maxReads = options.maxReads ?? DEFAULT_MAX_READS;
+  if (options.signal?.aborted) return [];
   const candidates = indexEntries
     .filter((entry) => entry.mode === "journal")
     .map((entry) => ({ entry, date: journalDateFromUri(entry.uri) }))
@@ -40,6 +43,7 @@ export async function findPersonJournalMatches(
 
   const matches: PersonJournalMatch[] = [];
   for (const { entry, date } of candidates) {
+    if (options.signal?.aborted) return [];
     let body: string;
     try {
       body = await readBody(entry.uri);
@@ -47,6 +51,7 @@ export async function findPersonJournalMatches(
       // A Syncthing/SAF race must not make the entire card disappear.
       continue;
     }
+    if (options.signal?.aborted) return [];
     if (!containsWholeName(body, nameTokens)) continue;
     matches.push({ uri: entry.uri, linkTitle: date, excerpt: excerpt(body) });
   }
