@@ -7,11 +7,15 @@ vi.mock("expo-crypto", () => ({
 const writeBinary = vi.fn();
 const writeTextFile = vi.fn();
 const updateNote = vi.fn();
+const root = { uri: "file:///vault", fs: {} };
 vi.mock("./writer", () => ({
   extFromMime: (mime: string) => mime === "image/jpeg" ? "jpg" : "bin",
   writeBinary: (...args: unknown[]) => writeBinary(...args),
   writeTextFile: (...args: unknown[]) => writeTextFile(...args),
   updateNote: (...args: unknown[]) => updateNote(...args),
+}));
+vi.mock("./vaultRoot", () => ({
+  resolveRoot: async () => root,
 }));
 
 import {
@@ -44,8 +48,9 @@ describe("mdcrm capture package", () => {
     const capture = await saveBusinessCardCapture({
       imageBase64: "YWJj", mimeType: "image/jpeg", rawOcrText: "JANE SMlTH\n", capturedAt: new Date("2026-08-03T11:22:00.000Z"),
     });
-    expect(writeBinary).toHaveBeenCalledWith("attachments/originals", expect.stringMatching(/^att_.*\.jpg$/), "YWJj", "image/jpeg");
-    expect(writeTextFile).toHaveBeenNthCalledWith(1, "processing/results", expect.stringMatching(/^cap_.*\.ocr\.txt$/), "JANE SMlTH\n");
+    expect(writeBinary).toHaveBeenCalledWith("attachments/originals", expect.stringMatching(/^att_.*\.jpg$/), "YWJj", "image/jpeg", root);
+    expect(writeTextFile).toHaveBeenNthCalledWith(1, "processing/results", expect.stringMatching(/^cap_.*\.ocr\.txt$/), "JANE SMlTH\n", root);
+    expect(writeTextFile).toHaveBeenNthCalledWith(2, "captures", expect.stringMatching(/^cap_.*\.md$/), expect.any(String), root);
     const markdown = writeTextFile.mock.calls[1]?.[2] as string;
     expect(markdown).toContain("type: capture");
     expect(markdown).toContain("path: ../attachments/originals/card.jpg");

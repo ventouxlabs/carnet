@@ -13,7 +13,10 @@ import {
   CaptureSubmittingView,
 } from "../components/CaptureViews";
 import { getSettings } from "../lib/settings";
+import { captureVaultContext, type VaultContext } from "../lib/vaultContext";
+import { resolveContextRoot } from "../lib/vaultRoot";
 import { recordCapture, type CaptureMode } from "../lib/storage";
+import { DEFAULT_VAULT_PROFILE_ID } from "../lib/vaultProfiles";
 import {
   enrichIdea,
   enrichJournal,
@@ -151,6 +154,10 @@ export default function CaptureScreen({ route, navigation }: Props) {
   // enrichment against the same text/tags/location/attachments after the input
   // fields were cleared.
   const saveFirstCtxRef = useRef<RawIdeaInput | null>(null);
+  // Captured once when an attempt begins. Preview confirmation, a save-first
+  // retry, and offline fallback all reuse this rather than rereading Settings
+  // after enrichment has yielded to the event loop.
+  const attemptVaultContextRef = useRef<VaultContext | null>(null);
   // Monotonic id for the current capture attempt. Every async continuation
   // captures the generation it started under and bails if it no longer matches,
   // so tapping Edit (or simply resubmitting) invalidates every in-flight
@@ -203,9 +210,25 @@ export default function CaptureScreen({ route, navigation }: Props) {
   // the next keystroke. The guard also stops the empty first render from
   // wiping a stored draft before it loads.
   const [draftLoaded, setDraftLoaded] = useState(false);
+  const [draftProfileId, setDraftProfileId] = useState(DEFAULT_VAULT_PROFILE_ID);
   useEffect(() => {
     let cancelled = false;
-    loadDraft(mode)
+    // A draft belongs to the vault that was active when this capture form was
+    // opened. Read Settings before touching its storage key so switching to
+    // Work never restores a half-written Personal note.
+    getSettings()
+      .then((settings) => {
+        const profileId = captureVaultContext(settings).profileId;
+        if (!cancelled) setDraftProfileId(profileId);
+        setPreviewBeforeSave(settings.previewBeforeSave);
+        setLlmBackend(settings.activeProviderId === "relais" ? "local" : "omniroute");
+        if (Array.isArray(settings.llmProviders) && settings.llmProviders.length > 0) {
+          setProviderLabel(
+            resolveActiveProvider(settings.llmProviders, settings.activeProviderId).label,
+          );
+        }
+        return loadDraft(mode, profileId);
+      })
       .then((draft) => {
         if (cancelled || !draft) return;
         // Only fill fields the user hasn't already typed into (e.g. a fast
@@ -228,12 +251,12 @@ export default function CaptureScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (!draftLoaded || phase !== "input") return;
     const timer = setTimeout(() => {
-      saveDraft(mode, { text, transcript, ocrText }).catch(() => {
+      saveDraft(mode, { text, transcript, ocrText }, draftProfileId).catch(() => {
         // Best-effort: a failed autosave must never surface mid-typing.
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [draftLoaded, mode, phase, text, transcript, ocrText]);
+  }, [draftLoaded, draftProfileId, mode, phase, text, transcript, ocrText]);
 
   useEffect(() => {
     void getQueueDepth().then(setQueueDepth);
@@ -242,24 +265,6 @@ export default function CaptureScreen({ route, navigation }: Props) {
     // Load the vault tag index for autocomplete (cache-first; never blocks UI).
     void getTagIndex()
       .then((index) => setKnownTags(index.tags.map((entry) => entry.tag)))
-      .catch(() => {});
-    // Load the save-first preference (default false = save-first).
-    void getSettings()
-      .then((s) => {
-        setPreviewBeforeSave(s.previewBeforeSave);
-        setLlmBackend(s.activeProviderId === "relais" ? "local" : "omniroute");
-        // Defensive on two counts: some test doubles for getSettings() return
-        // a partial Settings without llmProviders, AND a genuinely empty list
-        // is a real (if unexpected) state. Either way there's nothing to
-        // resolve a label from, so providerLabel just keeps its
-        // UNKNOWN_PROVIDER_LABEL default rather than calling
-        // resolveActiveProvider on an empty array.
-        if (Array.isArray(s.llmProviders) && s.llmProviders.length > 0) {
-          setProviderLabel(
-            resolveActiveProvider(s.llmProviders, s.activeProviderId).label,
-          );
-        }
-      })
       .catch(() => {});
   }, []);
 
@@ -327,8 +332,12 @@ export default function CaptureScreen({ route, navigation }: Props) {
    * rel-path references to embed/queue. Thin closure over the current staged
    * set + the dedup cache; the write/dedup logic lives in
    * lib/attachmentPersistence so it's unit-testable without a renderer. */
-  const persistAttachments = (): Promise<AttachmentRef[]> =>
-    persistAttachmentsToVault(pending, persistedRefs.current);
+  const persistAttachments = (vaultContext = attemptVaultContextRef.current): Promise<AttachmentRef[]> =>
+    persistAttachmentsToVault(
+      pending,
+      persistedRefs.current,
+      vaultContext ? resolveContextRoot(vaultContext) : undefined,
+    );
 
   /** Clear every staged-metadata field once a capture is safely persisted
    * (written to disk, queued, or enqueued) — repeated across the offline
@@ -390,7 +399,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
       setTranscript("");
       setOcrText("");
       clearStagedAttachmentsAndMeta();
-      void clearDraft(mode).catch(() => undefined);
+      void clearDraft(mode, attemptVaultContextRef.current?.profileId ?? draftProfileId).catch(() => undefined);
     } catch (qe: unknown) {
       if (superseded()) return;
       const qmsg = qe instanceof Error ? qe.message : String(qe);
@@ -423,7 +432,11 @@ export default function CaptureScreen({ route, navigation }: Props) {
     if (plan.kind === "close") {
       // Reflect the enriched note (final tags, pending-enrich status gone)
       // in the cached index before landing back on Home.
-      void upsertNoteInIndex(filepath, plan.markdown).catch(() => undefined);
+      void upsertNoteInIndex(
+        filepath,
+        plan.markdown,
+        attemptVaultContextRef.current?.profileId,
+      ).catch(() => undefined);
       setPhase("saved");
       navigation.goBack();
       return;
@@ -446,6 +459,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
           filepath,
           baselineMtime: mtime,
           baselineContent,
+          vaultContext: attemptVaultContextRef.current ?? undefined,
         });
         const depth = await getQueueDepth();
         if (superseded()) return;
@@ -596,6 +610,16 @@ export default function CaptureScreen({ route, navigation }: Props) {
     setError(null);
     setDegradedReason(null);
     setEnrichNotice(null);
+    // This is intentionally before any provider or attachment await. Settings
+    // can switch vaults while a slow model request is outstanding; its result
+    // must keep this root, not follow the later active profile.
+    try {
+      attemptVaultContextRef.current = captureVaultContext(await getSettings());
+    } catch {
+      // Preserve ordinary capture availability if settings storage is briefly
+      // unavailable. Writers retain their existing active-root fallback.
+      attemptVaultContextRef.current = null;
+    }
 
     if (mode === "idea") {
       // Blocking-preview (opt-in): enrich → preview → Save, exactly as before.
@@ -621,6 +645,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
               attachments: refs,
               tags,
               location: location ?? undefined,
+              vaultContext: attemptVaultContextRef.current ?? undefined,
             });
           }, superseded);
         }
@@ -668,7 +693,13 @@ export default function CaptureScreen({ route, navigation }: Props) {
         rawCreatedAtRef.current = createdAt;
         const writePromise = resuming
           ? rewriteRawIdea({ ...ctx, filepath: resuming }, createdAt)
-          : writeRawIdea(ctx, createdAt);
+          : writeRawIdea(
+              ctx,
+              createdAt,
+              attemptVaultContextRef.current
+                ? resolveContextRoot(attemptVaultContextRef.current)
+                : undefined,
+            );
         // Published before awaiting, so an Edit tapped mid-write can await the
         // same promise and learn the filepath instead of racing it.
         rawWriteRef.current = writePromise;
@@ -686,6 +717,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
           title,
           id: localId(),
           createdAt: Date.now(),
+          profileId: attemptVaultContextRef.current?.profileId,
         });
         // Published BEFORE it is awaited — the same rule rawWriteRef follows. A
         // resume arriving mid-chain then awaits THIS chain rather than whatever
@@ -703,14 +735,18 @@ export default function CaptureScreen({ route, navigation }: Props) {
         // Upsert (not invalidate) so Home's cards can show this note's tags
         // and pending-enrich stamp immediately — dropping the whole cached
         // index left cards bare until the next full vault scan.
-        void upsertNoteInIndex(filepath, rawMarkdown).catch(() => undefined);
+        void upsertNoteInIndex(
+          filepath,
+          rawMarkdown,
+          attemptVaultContextRef.current?.profileId,
+        ).catch(() => undefined);
         setSavedFilepath(filepath);
         saveFirstCtxRef.current = ctx;
         // The capture is safely persisted — clear the inputs so a back-out
         // leaves nothing staged and the next capture starts fresh.
         clearStagedAttachmentsAndMeta();
         setText("");
-        void clearDraft(mode).catch(() => undefined);
+        void clearDraft(mode, attemptVaultContextRef.current?.profileId ?? draftProfileId).catch(() => undefined);
         const outcome = await enrichIdeaInPlace({
           filepath,
           expectedMtime: mtime,
@@ -758,6 +794,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
             tags,
             location: location ?? undefined,
             places,
+            vaultContext: attemptVaultContextRef.current ?? undefined,
           });
         }, superseded);
       }
@@ -787,6 +824,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
           context: text.trim(),
           tags,
           location: location ?? undefined,
+          vaultContext: attemptVaultContextRef.current ?? undefined,
         }),
         superseded,
       );
@@ -803,12 +841,22 @@ export default function CaptureScreen({ route, navigation }: Props) {
           refs,
           tags,
           location,
+          root: attemptVaultContextRef.current
+            ? resolveContextRoot(attemptVaultContextRef.current)
+            : undefined,
         });
         clearStagedAttachmentsAndMeta();
         setSavedFilepath(filepath);
-        await recordCapture({ id: localId(), mode, title, filepath, createdAt: Date.now() });
-        void upsertNoteInIndex(filepath, markdown).catch(() => undefined);
-        void clearDraft(mode).catch(() => undefined);
+        await recordCapture(
+          { id: localId(), mode, title, filepath, createdAt: Date.now() },
+          attemptVaultContextRef.current?.profileId,
+        );
+        void upsertNoteInIndex(
+          filepath,
+          markdown,
+          attemptVaultContextRef.current?.profileId,
+        ).catch(() => undefined);
+        void clearDraft(mode, attemptVaultContextRef.current?.profileId ?? draftProfileId).catch(() => undefined);
         setPhase("saved");
         navigation.goBack();
       } catch (e: unknown) {
@@ -836,12 +884,22 @@ export default function CaptureScreen({ route, navigation }: Props) {
           tags,
           location,
           places,
+          root: attemptVaultContextRef.current
+            ? resolveContextRoot(attemptVaultContextRef.current)
+            : undefined,
         });
         clearStagedAttachmentsAndMeta();
         setSavedFilepath(filepath);
-        await recordCapture({ id: localId(), mode, title, filepath, createdAt: Date.now() });
-        void upsertNoteInIndex(filepath, dayFileMarkdown).catch(() => undefined);
-        void clearDraft(mode).catch(() => undefined);
+        await recordCapture(
+          { id: localId(), mode, title, filepath, createdAt: Date.now() },
+          attemptVaultContextRef.current?.profileId,
+        );
+        void upsertNoteInIndex(
+          filepath,
+          dayFileMarkdown,
+          attemptVaultContextRef.current?.profileId,
+        ).catch(() => undefined);
+        void clearDraft(mode, attemptVaultContextRef.current?.profileId ?? draftProfileId).catch(() => undefined);
         setPhase("saved");
         navigation.goBack();
       } catch (e: unknown) {
@@ -860,12 +918,22 @@ export default function CaptureScreen({ route, navigation }: Props) {
           markdown: pendingPerson.markdown,
           tags,
           location,
+          root: attemptVaultContextRef.current
+            ? resolveContextRoot(attemptVaultContextRef.current)
+            : undefined,
         });
         clearStagedMeta();
         setSavedFilepath(filepath);
-        await recordCapture({ id: localId(), mode, title, filepath, createdAt: Date.now() });
-        void upsertNoteInIndex(filepath, markdown).catch(() => undefined);
-        void clearDraft(mode).catch(() => undefined);
+        await recordCapture(
+          { id: localId(), mode, title, filepath, createdAt: Date.now() },
+          attemptVaultContextRef.current?.profileId,
+        );
+        void upsertNoteInIndex(
+          filepath,
+          markdown,
+          attemptVaultContextRef.current?.profileId,
+        ).catch(() => undefined);
+        void clearDraft(mode, attemptVaultContextRef.current?.profileId ?? draftProfileId).catch(() => undefined);
         setPhase("saved");
         navigation.goBack();
       } catch (e: unknown) {

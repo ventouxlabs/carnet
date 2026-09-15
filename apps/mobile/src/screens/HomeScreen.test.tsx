@@ -36,6 +36,10 @@ vi.mock("../lib/storage", () => ({
   removeManyFromHistory: vi.fn(async () => {}),
 }));
 
+vi.mock("../lib/settings", () => ({
+  getSettings: vi.fn(async () => ({ captureFolderPath: "" })),
+}));
+
 // writer.ts imports expo-file-system at module scope — never load the real one.
 vi.mock("../lib/writer", () => ({
   moveToArchive: vi.fn(async () => {}),
@@ -62,6 +66,7 @@ vi.mock("../lib/vault", () => ({
   refreshNoteIndex: vi.fn(async () => ({ builtAt: 2, notes: [] })),
   resolveNoteEntry: vi.fn(async () => null),
 }));
+vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
 
 vi.mock("../lib/syncStatus", () => ({
   getSyncStatus: vi.fn(async () => ({
@@ -105,10 +110,12 @@ vi.mock("../lib/startupTiming", () => ({ reportColdStart: vi.fn() }));
 
 import HomeScreen from "./HomeScreen";
 import { getRecentCaptures } from "../lib/storage";
+import { getSettings } from "../lib/settings";
 import { getPendingExportCount } from "../lib/pendingSync";
 import { drainPendingKarakeepExports } from "../lib/pendingSyncRunner";
 import { listNoteFiles, listSyncConflictFiles } from "../lib/writer";
 import { reportColdStart } from "../lib/startupTiming";
+import { refreshActiveVault } from "../lib/vaultRefreshService";
 
 type ScreenProps = Parameters<typeof HomeScreen>[0];
 
@@ -136,6 +143,7 @@ function renderScreen() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
   pendingSyncListeners.clear();
 });
 
@@ -153,11 +161,31 @@ describe("HomeScreen", () => {
     expect(screen.getByText("Journal")).toBeTruthy();
   });
 
+  it("schedules a background vault reconciliation on Home focus", async () => {
+    renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    expect(refreshActiveVault).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the empty state pointing at the FAB when nothing is captured", async () => {
     vi.mocked(getRecentCaptures).mockResolvedValueOnce([]);
     renderScreen();
     expect(await screen.findByText("Nothing captured yet")).toBeTruthy();
     expect(screen.getByText("Tap Capture below to write your first note.")).toBeTruthy();
+  });
+
+  it("reads only the active profile's recents", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    expect(getRecentCaptures).toHaveBeenCalledWith("work");
   });
 
   it("opens a card into RecentDetail with its entry", async () => {

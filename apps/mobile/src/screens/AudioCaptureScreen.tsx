@@ -47,6 +47,7 @@ import {
 } from "../lib/shareHelpers";
 import { isSttModelMissingMessage } from "../voice/sttOnboarding";
 import { triggerVoiceModelDownload } from "../voice/sttReadiness";
+import { captureVaultSnapshot } from "../lib/captureVaultSnapshot";
 
 // The recognizer package Speech Services by Google installs and downloads
 // its voice models through — same target VoiceButton's Play Store fallback
@@ -243,6 +244,8 @@ export default function AudioCaptureScreen({ navigation }: Props) {
       return;
     }
     try {
+      const vault = await captureVaultSnapshot();
+      const root = vault?.root;
       await rec.stopAndUnloadAsync();
       recordingRef.current = null;
       pulseRef.current?.stop();
@@ -277,6 +280,7 @@ export default function AudioCaptureScreen({ navigation }: Props) {
         `${desiredSlug}.m4a`,
         base64,
         mime,
+        root,
       );
       const sharedStem = finalName.replace(/\.[^.]+$/, "");
 
@@ -310,7 +314,7 @@ export default function AudioCaptureScreen({ navigation }: Props) {
       // with a generic "writeIdea threw" that gives the user no recovery path.
       let filepath: string;
       try {
-        ({ filepath } = await writeIdea(sharedStem, mdNote));
+        ({ filepath } = await writeIdea(sharedStem, mdNote, root));
       } catch (e: unknown) {
         const reason = e instanceof Error ? e.message : String(e);
         throw new Error(
@@ -319,13 +323,10 @@ export default function AudioCaptureScreen({ navigation }: Props) {
       }
 
       try {
-        await recordCapture({
-          id: localId(),
-          mode: "audio",
-          title,
-          filepath,
-          createdAt: Date.now(),
-        });
+        await recordCapture(
+          { id: localId(), mode: "audio", title, filepath, createdAt: Date.now() },
+          vault?.context.profileId,
+        );
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         console.warn("[AudioCapture] recordCapture failed (files saved):", msg);

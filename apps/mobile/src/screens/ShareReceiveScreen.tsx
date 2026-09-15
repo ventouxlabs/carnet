@@ -60,6 +60,8 @@ import { caretProps, useCarnetTheme } from "../lib/theme";
 import { deriveTitle } from "@carnet/shared";
 import { getSettings } from "../lib/settings";
 import { resolveActiveProvider, UNKNOWN_PROVIDER_LABEL } from "../lib/llmProviders";
+import { captureVaultContext, type VaultContext } from "../lib/vaultContext";
+import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "ShareReceive">;
 
@@ -174,6 +176,16 @@ export default function ShareReceiveScreen({ navigation }: Props) {
     setDegradedReason(null);
     setSavingDetail(`${providerLabel} is enriching + saving…`);
     setPhase("saving");
+    // A share may take several awaits to read, enrich and write. Keep its
+    // binary and note pair in the vault selected when Save was tapped.
+    let vaultContext: VaultContext | undefined;
+    try {
+      vaultContext = captureVaultContext(await getSettings());
+    } catch {
+      // The individual writer fallbacks preserve the existing recoverable
+      // behavior when settings storage is unavailable.
+    }
+    const root = vaultContext ? resolveContextRoot(vaultContext) : undefined;
     // Tracked across the branch to gate auto-transcribe — only fires on
     // the audio branch, not on image / link / other-file shares.
     let wasAudioBranch = false;
@@ -243,7 +255,7 @@ export default function ShareReceiveScreen({ navigation }: Props) {
         const desiredSlug = slugify(title) || `shared-image-${slugFallback}`;
 
         const ext = extFromMime(mime);
-        const { finalName } = await writeBinary("Photos", `${desiredSlug}.${ext}`, base64, mime);
+        const { finalName } = await writeBinary("Photos", `${desiredSlug}.${ext}`, base64, mime, root);
 
         // Share the collision-bumped stem so .jpg and .md stay paired. If
         // writeBinary returned `foo-3.jpg`, the .md is forced to start from
@@ -251,7 +263,7 @@ export default function ShareReceiveScreen({ navigation }: Props) {
         // but the link to the photo is preserved correctly).
         const sharedStem = finalName.replace(/\.[^.]+$/, "");
         const withImage = injectImageEmbed(enrichedMd, `../Photos/${finalName}`);
-        const { filepath: mdPath } = await writeIdea(sharedStem, withImage);
+        const { filepath: mdPath } = await writeIdea(sharedStem, withImage, root);
         filepath = mdPath;
         setSaveSource({ kind: "image", base64, mime, imageName: finalName });
       } else if (audioFile) {
@@ -291,7 +303,7 @@ export default function ShareReceiveScreen({ navigation }: Props) {
         const ext = extFromMime(mime);
         const baseName = fileName.replace(/\.[^.]+$/, "");
         const desiredSlug = slugify(baseName) || `shared-audio-${slugFallback}`;
-        const { finalName } = await writeBinary("Audio", `${desiredSlug}.${ext}`, base64, mime);
+        const { finalName } = await writeBinary("Audio", `${desiredSlug}.${ext}`, base64, mime, root);
         const sharedStem = finalName.replace(/\.[^.]+$/, "");
 
         title = `Shared audio: ${fileName}`;
@@ -320,6 +332,7 @@ export default function ShareReceiveScreen({ navigation }: Props) {
         const { filepath: mdPath } = await writeIdea(
           sharedStem,
           sanitizeMarkdown(mdNote),
+          root,
         );
         filepath = mdPath;
         wasAudioBranch = true;
@@ -349,7 +362,7 @@ export default function ShareReceiveScreen({ navigation }: Props) {
         const ext = extFromMime(mime);
         const baseName = fileName.replace(/\.[^.]+$/, "");
         const desiredSlug = slugify(baseName) || `shared-file-${slugFallback}`;
-        const { finalName } = await writeBinary("Files", `${desiredSlug}.${ext}`, base64, mime);
+        const { finalName } = await writeBinary("Files", `${desiredSlug}.${ext}`, base64, mime, root);
         const sharedStem = finalName.replace(/\.[^.]+$/, "");
 
         title = `Shared file: ${fileName}`;
@@ -373,6 +386,7 @@ export default function ShareReceiveScreen({ navigation }: Props) {
         const { filepath: mdPath } = await writeIdea(
           sharedStem,
           sanitizeMarkdown(mdNote),
+          root,
         );
         filepath = mdPath;
       } else if (url || text) {
@@ -409,7 +423,7 @@ export default function ShareReceiveScreen({ navigation }: Props) {
 
         title = deriveTitle(enrichedMd) || (url ? `Shared link ${slugFallback}` : `Shared text ${slugFallback}`);
         const slug = slugify(title) || `shared-${slugFallback}`;
-        const { filepath: mdPath } = await writeIdea(slug, enrichedMd);
+        const { filepath: mdPath } = await writeIdea(slug, enrichedMd, root);
         filepath = mdPath;
         setSaveSource({ kind: "link", url, text });
       } else {
@@ -421,13 +435,16 @@ export default function ShareReceiveScreen({ navigation }: Props) {
       // transition to "saved" — retrying would re-write the binary +
       // markdown as a duplicate (collision-bumped to slug-2.jpg/.md).
       try {
-        await recordCapture({
-          id: localId(),
-          mode,
-          title,
-          filepath,
-          createdAt: Date.now(),
-        });
+        await recordCapture(
+          {
+            id: localId(),
+            mode,
+            title,
+            filepath,
+            createdAt: Date.now(),
+          },
+          vaultContext?.profileId,
+        );
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         console.warn("[ShareReceive] recordCapture failed (files saved):", msg);

@@ -32,6 +32,8 @@ export interface ChainHistoryWriteInput {
   title: string;
   id: string;
   createdAt: number;
+  /** Profile selected when this capture attempt began. */
+  profileId?: string;
 }
 
 /**
@@ -48,12 +50,17 @@ export interface ChainHistoryWriteInput {
  */
 export async function chainHistoryWrite(input: ChainHistoryWriteInput): Promise<void> {
   await input.priorWrite;
-  if (input.resuming) await removeFromHistoryByFilepath(input.filepath);
-  await recordCapture({
+  if (input.resuming) {
+    await (input.profileId
+      ? removeFromHistoryByFilepath(input.filepath, input.profileId)
+      : removeFromHistoryByFilepath(input.filepath));
+  }
+  const entry = {
     id: input.id,
     mode: input.mode,
     title: input.title,
     filepath: input.filepath,
     createdAt: input.createdAt,
-  });
+  };
+  await (input.profileId ? recordCapture(entry, input.profileId) : recordCapture(entry));
 }

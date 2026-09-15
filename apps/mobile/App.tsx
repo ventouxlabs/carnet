@@ -49,6 +49,7 @@ import {
   createForegroundDrainTrigger,
   type ForegroundDrainTrigger,
 } from "./src/lib/foregroundDrainTrigger";
+import { refreshActiveVault } from "./src/lib/vaultRefreshService";
 
 // Installed once at module load, as early as possible — chains onto RN's
 // default handler so every uncaught JS exception lands in the local crash
@@ -233,6 +234,19 @@ export default function App() {
     });
     return () => sub.remove();
   }, [queueDrainTrigger]);
+
+  // Syncthing has no portable SAF watcher. Reconcile lazily on foreground,
+  // never on the capture path; cached UI remains available while the scan runs.
+  useEffect(() => {
+    const kickVaultRefresh = () => {
+      void refreshActiveVault().catch(() => undefined);
+    };
+    kickVaultRefresh();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") kickVaultRefresh();
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     // Load the persisted theme override before first paint so the app

@@ -18,6 +18,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../App";
 import type { CaptureEntry, CaptureMode } from "../lib/storage";
 import { getTagIndex, notesForTag, refreshTagIndex, type TagIndexEntry } from "../lib/vault";
+import { refreshActiveVault } from "../lib/vaultRefreshService";
 
 type Props = NativeStackScreenProps<RootStackParamList, "TagBrowser">;
 
@@ -63,6 +64,7 @@ export default function TagBrowserScreen({ route, navigation }: Props) {
         .finally(() => {
           if (active) setLoading(false);
         });
+      void refreshActiveVault().catch(() => undefined);
       return () => {
         active = false;
       };

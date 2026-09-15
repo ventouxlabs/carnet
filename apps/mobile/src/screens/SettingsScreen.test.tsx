@@ -103,6 +103,12 @@ vi.mock("../lib/settings", () => ({
   shouldShowMigrationBanner: () => shouldShowMigrationBanner(),
   dismissMigrationBanner: () => dismissMigrationBanner(),
   setKarakeepApiKey: (key: string) => setKarakeepApiKey(key),
+  withVaultProfileState: (settings: Settings, state: { profiles: unknown[]; activeProfileId: string }) => ({
+    ...settings,
+    vaultProfiles: state.profiles,
+    activeVaultProfileId: state.activeProfileId,
+    captureFolderPath: (state.profiles.find((p: any) => p.id === state.activeProfileId) as any)?.rootUri ?? settings.captureFolderPath,
+  }),
 }));
 
 const listModels = vi.fn(async (_url: string, _key: string) => [
@@ -232,6 +238,35 @@ describe("SettingsScreen", () => {
 
     const switches = screen.getAllByRole("switch") as HTMLInputElement[];
     expect(switches[3].checked).toBe(true);
+  });
+
+  describe("vault profiles", () => {
+    it("switches the active registration without changing either registered root", async () => {
+      getSettings.mockResolvedValue(baseSettings({
+        vaultProfiles: [
+          { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+          { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+        ],
+        activeVaultProfileId: "default",
+        captureFolderPath: "file:///personal",
+      }));
+
+      renderScreen();
+      fireEvent.click(await screen.findByText("Work"));
+
+      await waitFor(() =>
+        expect(savePersistedOnly).toHaveBeenCalledWith(
+          expect.objectContaining({
+            activeVaultProfileId: "work",
+            captureFolderPath: "file:///work",
+            vaultProfiles: expect.arrayContaining([
+              expect.objectContaining({ id: "default", rootUri: "file:///personal" }),
+              expect.objectContaining({ id: "work", rootUri: "file:///work" }),
+            ]),
+          }),
+        ),
+      );
+    });
   });
 
   describe("vault tag reuse toggle", () => {

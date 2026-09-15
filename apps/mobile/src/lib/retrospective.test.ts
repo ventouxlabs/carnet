@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_NOTES, PER_NOTE_CHARS, TOTAL_BUDGET_CHARS,
   orderCandidates, pickForRead, packBodies,
-  resolveCitations, buildSynthesisNote, disclosureLine, normalizeLeadingMarkdown,
+  citationLabel, MAX_CITATION_LABEL_CHARS, resolveCitations, buildSynthesisNote, disclosureLine,
+  normalizeLeadingMarkdown,
 } from "./retrospective";
 
 const cand = (uri: string, title: string, fromBodyMatch = false) => ({ uri, title, fromBodyMatch });
@@ -78,6 +79,7 @@ describe("resolveCitations", () => {
     expect(out.find((s) => s.linkUri)).toEqual({
       text: "Coffee roasting",
       linkUri: "file:///v/Ideas/a.md",
+      accessibilityLabel: "Coffee roasting",
     });
   });
 
@@ -90,6 +92,40 @@ describe("resolveCitations", () => {
   it("matches titles case-insensitively and ignores surrounding whitespace", () => {
     const out = resolveCitations("[[  coffee ROASTING  ]]", set);
     expect(out.find((s) => s.linkUri)?.linkUri).toBe("file:///v/Ideas/a.md");
+  });
+
+  it("uses the retrieved full title for accessibility while shortening a long inline label", () => {
+    const title = "My family traveled to France via Strasbourg after arriving from the US.";
+    const out = resolveCitations(`See [[${title}]].`, [sel("file:///v/Journal/a.md", title)]);
+    expect(out.find((s) => s.linkUri)).toEqual({
+      text: "My family traveled to France via Strasbourg after…",
+      linkUri: "file:///v/Journal/a.md",
+      accessibilityLabel: title,
+    });
+  });
+});
+
+describe("citationLabel", () => {
+  it("keeps a short label unchanged", () => {
+    expect(citationLabel("Coffee roasting")).toBe("Coffee roasting");
+  });
+
+  it("removes terminal sentence punctuation without altering the identity title", () => {
+    expect(citationLabel("A daily note.")).toBe("A daily note");
+  });
+
+  it("cuts at a word boundary and uses an ellipsis over the limit", () => {
+    const title = "word ".repeat(20).trim();
+    const label = citationLabel(title);
+    expect(label.endsWith("…")).toBe(true);
+    expect(label.length).toBeLessThanOrEqual(MAX_CITATION_LABEL_CHARS + 1);
+    expect(label).not.toMatch(/\s…$/);
+  });
+
+  it("still bounds one long Unicode token", () => {
+    expect(citationLabel("é".repeat(MAX_CITATION_LABEL_CHARS + 1))).toBe(
+      `${"é".repeat(MAX_CITATION_LABEL_CHARS)}…`,
+    );
   });
 });
 

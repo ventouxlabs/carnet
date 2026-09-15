@@ -70,7 +70,7 @@ export async function probeCardScanReadiness(): Promise<CardScanOcrOutcome> {
  */
 export function cardScanPreflightHint(outcome: CardScanOcrOutcome): string | null {
   if (outcome.kind !== "notConfigured") return null;
-  return `${outcome.message}. You can still capture — the card image is saved for later.`;
+  return `${outcome.message}. You can still capture, but no image is saved until card detection works.`;
 }
 
 /** User-facing hint for an outcome, or null when OCR succeeded. */

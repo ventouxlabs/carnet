@@ -37,9 +37,11 @@ vi.mock("../lib/vault", () => ({
   refreshTagIndex: vi.fn(async () => ({ builtAt: 2, tags: [] })),
   notesForTag: vi.fn(async () => []),
 }));
+vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
 
 import TagBrowserScreen from "./TagBrowserScreen";
 import { getTagIndex } from "../lib/vault";
+import { refreshActiveVault } from "../lib/vaultRefreshService";
 
 type ScreenProps = Parameters<typeof TagBrowserScreen>[0];
 
@@ -83,6 +85,12 @@ describe("TagBrowserScreen", () => {
     expect(screen.getByText("2")).toBeTruthy();
     expect(screen.getByText("1")).toBeTruthy();
     expect(getTagIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it("schedules a background vault reconciliation when focused", async () => {
+    renderScreen();
+    await screen.findByText("#qa-test");
+    expect(refreshActiveVault).toHaveBeenCalledTimes(1);
   });
 
   it("sets the header title", async () => {

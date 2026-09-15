@@ -28,6 +28,7 @@ import {
   writeIdea,
   type AttachmentRef,
 } from "./writer";
+import type { Root } from "./vaultRoot";
 import { preserveFrontmatterFields, upsertFrontmatterField } from "./frontmatter";
 import { mergeUserTags } from "./tags";
 import {
@@ -153,10 +154,13 @@ export interface WriteRawIdeaResult {
 export async function writeRawIdea(
   input: RawIdeaInput,
   now?: Date,
+  root?: Root,
 ): Promise<WriteRawIdeaResult> {
   const slug = deriveRawIdeaSlug(input.text);
   const markdown = buildRawIdeaMarkdown(input, now);
-  const { filepath } = await writeIdea(slug, markdown);
+  const { filepath } = root
+    ? await writeIdea(slug, markdown, root)
+    : await writeIdea(slug, markdown);
   const mtime = await getModificationTime(filepath);
   return { filepath, slug, mtime, markdown };
 }

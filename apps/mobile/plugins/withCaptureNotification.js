@@ -89,6 +89,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import androidx.core.app.RemoteInput
 import ${packageName}.R
 
@@ -108,6 +109,7 @@ class CaptureForegroundService : Service() {
     const val CHANNEL_ID = "carnet_capture"
     const val NOTIFICATION_ID = 1042
     const val ACTION_STOP = "${packageName}.CAPTURE_STOP"
+    const val ACTION_REFRESH_DRIVE_INBOX = "${packageName}.REFRESH_DRIVE_INBOX"
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
@@ -119,6 +121,10 @@ class CaptureForegroundService : Service() {
       return START_NOT_STICKY
     }
     ensureChannel()
+    if (intent?.action == ACTION_REFRESH_DRIVE_INBOX) {
+      getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification())
+      return START_STICKY
+    }
     startForeground(NOTIFICATION_ID, buildNotification())
     // START_STICKY so the OS re-creates the service if it kills it for
     // resources — the user opted into "always available" by flipping the
@@ -158,12 +164,10 @@ class CaptureForegroundService : Service() {
    * idea directly in the notification shade — zero app open — and QuickIdeaReceiver
    * hands it to the save-first headless task.
    *
-   * FLAG_IMMUTABLE is CORRECT and sound here despite RemoteInput: the typed text
-   * is attached at the notification-action level and read back via
-   * RemoteInput.getResultsFromIntent(), NOT by mutating the PendingIntent. The OS
-   * fills the results in without needing a mutable PendingIntent (documented
-   * Android 12+ behavior), so the verified-sound FLAG_IMMUTABLE + setPackage
-   * pattern is preserved unchanged.
+   * Direct replies require a mutable PendingIntent on Android 12+, but the
+   * intent remains explicit and the receiver remains non-exported. That limits
+   * mutation to RemoteInput's OS-delivered result rather than allowing another
+   * app to redirect the action to a different component.
    */
   private fun quickIdeaAction(): NotificationCompat.Action {
     val remoteInput = RemoteInput.Builder(QuickIdeaReceiver.KEY_QUICK_IDEA)
@@ -177,12 +181,68 @@ class CaptureForegroundService : Service() {
       this,
       5,
       intent,
-      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+      PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
     return NotificationCompat.Action.Builder(R.drawable.shortcut_idea, "Quick idea", pi)
       .addRemoteInput(remoteInput)
       .setAllowGeneratedReplies(false)
       .build()
+  }
+
+  /** Android Auto pilot: one self-conversation, not a vault browser. The reply
+   * reuses QuickIdeaReceiver's tested save-first headless capture path. */
+  private fun driveInboxReplyAction(): NotificationCompat.Action {
+    val remoteInput = RemoteInput.Builder(QuickIdeaReceiver.KEY_QUICK_IDEA)
+      .setLabel("Dictate a note")
+      .build()
+    val intent = Intent(this, QuickIdeaReceiver::class.java).apply {
+      action = QuickIdeaReceiver.ACTION_QUICK_IDEA
+      setPackage(packageName)
+    }
+    val pi = PendingIntent.getBroadcast(
+      this,
+      6,
+      intent,
+      PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+    return NotificationCompat.Action.Builder(R.drawable.shortcut_idea, "Reply", pi)
+      .addRemoteInput(remoteInput)
+      .setAllowGeneratedReplies(true)
+      .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+      .setShowsUserInterface(false)
+      .build()
+  }
+
+  private fun driveInboxMarkReadAction(): NotificationCompat.Action {
+    val intent = Intent(this, DriveInboxReadReceiver::class.java).apply {
+      action = DriveInboxReadReceiver.ACTION_MARK_READ
+      setPackage(packageName)
+    }
+    val pi = PendingIntent.getBroadcast(
+      this,
+      7,
+      intent,
+      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+    return NotificationCompat.Action.Builder(R.drawable.shortcut_idea, "Mark read", pi)
+      .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+      .setShowsUserInterface(false)
+      .build()
+  }
+
+  private fun driveInboxStyle(): NotificationCompat.MessagingStyle {
+    val self = Person.Builder().setName("You").setKey("carnet:self").build()
+    val inbox = Person.Builder().setName("Drive Inbox").setKey("carnet:drive-inbox").build()
+    return NotificationCompat.MessagingStyle(self)
+      .setConversationTitle("Drive Inbox")
+      .setGroupConversation(false)
+      .addMessage(
+        NotificationCompat.MessagingStyle.Message(
+          "Dictate a note to yourself.",
+          System.currentTimeMillis(),
+          inbox,
+        ),
+      )
   }
 
   private fun buildNotification(): Notification {
@@ -199,11 +259,15 @@ class CaptureForegroundService : Service() {
     return NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.drawable.shortcut_idea)
       .setContentTitle("Carnet")
-      .setContentText("Quick capture")
+      .setContentText("Drive Inbox ready for a voice note")
       .setContentIntent(launchPi)
       .setOngoing(true)
       .setPriority(NotificationCompat.PRIORITY_LOW)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+      .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+      .setStyle(driveInboxStyle())
+      .addAction(driveInboxReplyAction())
+      .addAction(driveInboxMarkReadAction())
       .addAction(quickIdeaAction())
       .addAction(R.drawable.shortcut_idea, "Idea", captureIntent("carnet://capture/idea", 1))
       .addAction(R.drawable.shortcut_journal, "Journal", captureIntent("carnet://capture/journal", 2))
@@ -448,6 +512,51 @@ class QuickIdeaTaskService : HeadlessJsTaskService() {
 `;
 }
 
+function driveInboxReadReceiverKt(packageName) {
+  return `package ${packageName}.notification
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+
+/**
+ * Handles Android Auto's required mark-as-read action for Drive Inbox. It
+ * records no note content and never starts JS, so acknowledgement cannot create
+ * a capture or delay the car host.
+ */
+class DriveInboxReadReceiver : BroadcastReceiver() {
+  companion object {
+    const val ACTION_MARK_READ = "${packageName}.DRIVE_INBOX_MARK_READ"
+    const val KEY_LAST_READ_AT = "drive_inbox_last_read_at"
+  }
+
+  override fun onReceive(context: Context, intent: Intent) {
+    if (intent.action != ACTION_MARK_READ) return
+    context.getSharedPreferences(CaptureNotificationModule.PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .putLong(KEY_LAST_READ_AT, System.currentTimeMillis())
+      .apply()
+    try {
+      context.startService(Intent(context, CaptureForegroundService::class.java).apply {
+        action = CaptureForegroundService.ACTION_REFRESH_DRIVE_INBOX
+      })
+    } catch (e: Exception) {
+      android.util.Log.w("CarnetDriveInbox", "Failed to refresh after mark-read: \${e.message}")
+    }
+  }
+}
+`;
+}
+
+function automotiveAppDescXml() {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<automotiveApp>
+  <!-- Notification-powered messaging only. No media, navigation, or template claim. -->
+  <uses name="notification" />
+</automotiveApp>
+`;
+}
+
 function escapeXml(s) {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -486,6 +595,22 @@ module.exports = function withCaptureNotification(config) {
 
     const application = manifest.application?.[0];
     if (!application) return cfg;
+
+    // Android Auto notification-powered messaging only. The pilot deliberately
+    // does not claim media, navigation, or a templated car-app category.
+    if (!Array.isArray(application['meta-data'])) application['meta-data'] = [];
+    const carMetadataName = 'com.google.android.gms.car.application';
+    const hasCarMetadata = application['meta-data'].some(
+      (m) => m?.$?.['android:name'] === carMetadataName,
+    );
+    if (!hasCarMetadata) {
+      application['meta-data'].push({
+        $: {
+          'android:name': carMetadataName,
+          'android:resource': '@xml/automotive_app_desc',
+        },
+      });
+    }
 
     // Service.
     if (!Array.isArray(application.service)) application.service = [];
@@ -554,6 +679,22 @@ module.exports = function withCaptureNotification(config) {
       application.receiver.push({
         $: {
           'android:name': quickReceiverName,
+          'android:exported': 'false',
+        },
+      });
+    }
+
+    // Android Auto's required mark-as-read action for the Drive Inbox
+    // self-conversation. It is private and only reached by an explicit
+    // PendingIntent emitted by this package.
+    const driveInboxReadReceiverName = `${packageName}.notification.DriveInboxReadReceiver`;
+    const hasDriveInboxReadReceiver = application.receiver.some(
+      (r) => r?.$?.['android:name'] === driveInboxReadReceiverName,
+    );
+    if (!hasDriveInboxReadReceiver) {
+      application.receiver.push({
+        $: {
+          'android:name': driveInboxReadReceiverName,
           'android:exported': 'false',
         },
       });
@@ -701,6 +842,11 @@ module.exports = function withCaptureNotification(config) {
         quickIdeaTaskServiceKt(packageName),
         'utf8',
       );
+      fs.writeFileSync(
+        path.join(javaDir, 'DriveInboxReadReceiver.kt'),
+        driveInboxReadReceiverKt(packageName),
+        'utf8',
+      );
 
       // shortcut_audio drawable — referenced by both this plugin and the
       // widget plugin. Both plugins emit it identically so removing one
@@ -717,6 +863,13 @@ module.exports = function withCaptureNotification(config) {
       fs.writeFileSync(
         path.join(drawableDir, 'shortcut_audio.xml'),
         buildVectorDrawable(SHORTCUT_AUDIO_PATH_DATA),
+        'utf8',
+      );
+      const xmlDir = path.join(root, 'app', 'src', 'main', 'res', 'xml');
+      fs.mkdirSync(xmlDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(xmlDir, 'automotive_app_desc.xml'),
+        automotiveAppDescXml(),
         'utf8',
       );
 

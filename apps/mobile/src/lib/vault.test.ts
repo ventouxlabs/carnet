@@ -25,6 +25,10 @@ vi.mock("./writer", () => ({
   }),
 }));
 
+vi.mock("./settings", () => ({
+  getSettings: vi.fn(async () => ({ captureFolderPath: "" })),
+}));
+
 const _store: Map<string, string> = new Map();
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
@@ -58,6 +62,7 @@ import {
   type TagIndex,
 } from "./vault";
 import { listNoteFiles, readNote } from "./writer";
+import { getSettings } from "./settings";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -72,6 +77,7 @@ function reset(): void {
   _unreadable.clear();
   _listRefs = [];
   vi.clearAllMocks();
+  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
 }
 
 beforeEach(reset);
@@ -628,5 +634,26 @@ describe("readNoteBodies", () => {
 
     expect(bodies.size).toBe(0);
     expect(vi.mocked(readNote)).not.toHaveBeenCalled();
+  });
+});
+
+describe("profile-scoped note-index cache", () => {
+  it("reads the active profile's cache and never treats v1 as another profile's data", async () => {
+    const personal: NoteIndex = { builtAt: 1, notes: [] };
+    const work: NoteIndex = { builtAt: 2, notes: [] };
+    _store.set("carnet:noteindex:v2:default", JSON.stringify(personal));
+    _store.set("carnet:noteindex:v2:work", JSON.stringify(work));
+    _store.set("carnet:noteindex:v1", JSON.stringify({ builtAt: 0, notes: [{ uri: "legacy" }] }));
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+
+    expect(await loadCachedNoteIndex()).toEqual(work);
+    expect(_store.get("carnet:noteindex:v2:work")).toBe(JSON.stringify(work));
   });
 });

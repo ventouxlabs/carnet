@@ -12,6 +12,7 @@ import Base64 from "crypto-js/enc-base64";
 import Hex from "crypto-js/enc-hex";
 
 import { extFromMime, updateNote, writeBinary, writeTextFile } from "./writer";
+import { resolveRoot } from "./vaultRoot";
 
 const CROCKFORD32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -51,6 +52,11 @@ export function sha256Base64Bytes(base64: string): string {
 export async function saveBusinessCardCapture(
   input: SaveBusinessCardCaptureInput,
 ): Promise<BusinessCardCapture> {
+  // Resolve exactly once: a profile switch while the original, OCR sidecar,
+  // and capture record are being written must not split one package across
+  // roots. Higher-level capture contexts will supply the same contract for
+  // all capture modes; this package is already self-contained.
+  const root = await resolveRoot();
   const capturedAt = input.capturedAt ?? new Date();
   const captureId = await createMdcrmId("capture", capturedAt.getTime());
   const attachmentId = await createMdcrmId("attachment", capturedAt.getTime());
@@ -60,11 +66,13 @@ export async function saveBusinessCardCapture(
     `${attachmentId}.${extension}`,
     input.imageBase64,
     input.mimeType,
+    root,
   );
   const rawOcr = await writeTextFile(
     "processing/results",
     `${captureId}.ocr.txt`,
     input.rawOcrText ?? "",
+    root,
   );
   const markdown = renderBusinessCardCapture({
     captureId,
@@ -76,7 +84,7 @@ export async function saveBusinessCardCapture(
     capturedAt,
     capturedBy: input.capturedBy ?? "carnet-mobile",
   });
-  await writeTextFile("captures", `${captureId}.md`, markdown);
+  await writeTextFile("captures", `${captureId}.md`, markdown, root);
   return { captureId, attachmentId, rawOcrPath: rawOcr.filepath };
 }
 

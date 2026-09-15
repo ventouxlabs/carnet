@@ -45,7 +45,8 @@ import {
   saveDraft,
 } from "./captureDraft";
 
-const IDEA_KEY = "carnet:capture_draft:v1:idea";
+const IDEA_KEY = "carnet:capture_draft:v2:default:idea";
+const LEGACY_IDEA_KEY = "carnet:capture_draft:v1:idea";
 
 beforeEach(() => {
   _store.clear();
@@ -144,7 +145,7 @@ describe("draft at-rest encryption", () => {
 
   it("still reads a legacy plaintext draft written before encryption", async () => {
     _store.set(
-      IDEA_KEY,
+      LEGACY_IDEA_KEY,
       JSON.stringify({ ...FIELDS, savedAt: 1_700_000_000_000 }),
     );
     expect(await loadDraft("idea")).toMatchObject(FIELDS);
@@ -152,13 +153,25 @@ describe("draft at-rest encryption", () => {
 
   it("re-seals a legacy plaintext draft on the next save", async () => {
     _store.set(
-      IDEA_KEY,
+      LEGACY_IDEA_KEY,
       JSON.stringify({ ...FIELDS, savedAt: 1_700_000_000_000 }),
     );
     await saveDraft("idea", { ...FIELDS, text: "updated" });
     expect(_store.get(IDEA_KEY)!).not.toContain("conference");
     expect(_store.get(IDEA_KEY)!).not.toContain("updated");
     expect((await loadDraft("idea"))!.text).toBe("updated");
+  });
+
+  it("isolates drafts by profile and only migrates v1 into default", async () => {
+    _store.set(
+      LEGACY_IDEA_KEY,
+      JSON.stringify({ ...FIELDS, text: "legacy personal", savedAt: 1 }),
+    );
+    await saveDraft("idea", { text: "work draft", transcript: "", ocrText: "" }, "work");
+
+    expect((await loadDraft("idea", "work"))?.text).toBe("work draft");
+    expect((await loadDraft("idea", "default"))?.text).toBe("legacy personal");
+    expect(_store.has("carnet:capture_draft:v2:default:idea")).toBe(true);
   });
 
   it("returns null rather than throwing when a draft cannot be decrypted", async () => {

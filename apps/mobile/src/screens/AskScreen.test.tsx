@@ -148,6 +148,24 @@ describe("AskScreen", () => {
     );
   });
 
+  it("keeps a long citation's full title in its accessible tap target", async () => {
+    const longTitle = "My family traveled to France via Strasbourg after arriving from the US.";
+    askVault.mockResolvedValue({
+      result: { markdown: `See [[${longTitle}]].`, model: "m" },
+      usedFallback: false,
+      fallbackProviderId: null,
+      providerLabel: "Test",
+    });
+    const candidate = { uri: CANDIDATE_A.uri, title: longTitle, fromBodyMatch: false };
+    const { navigation } = renderScreen({ candidates: [candidate] });
+
+    const link = await screen.findByLabelText(`Open note ${longTitle}`);
+    expect(link.textContent).toContain("…");
+    fireEvent.click(link);
+    await waitFor(() => expect(resolveNoteEntry).toHaveBeenCalledWith(CANDIDATE_A.uri));
+    expect(navigation.navigate).not.toHaveBeenCalled();
+  });
+
   it("does not navigate when the cited note no longer resolves", async () => {
     // A citation can outlive its note (deleted since the index was built).
     // RecentDetailScreen would crash on a null entry.

@@ -27,6 +27,7 @@ import {
   type AttachmentRef,
   type Place,
 } from "./writer";
+import type { Root } from "./vaultRoot";
 
 /** Inject the selected location into a note's frontmatter (no-op when unset). */
 function applyLocation(markdown: string, location: string | null): string {
@@ -57,12 +58,15 @@ export interface ConfirmSaveIdeaInput {
   refs: AttachmentRef[];
   tags: string[];
   location: string | null;
+  root?: Root;
 }
 
 /** Compose the final Idea markdown and write it to `Ideas/{slug}.md`. */
 export async function confirmSaveIdea(input: ConfirmSaveIdeaInput): Promise<ConfirmSaveResult> {
   const markdown = composeMarkdown(input.markdown, input.refs, input.tags, input.location);
-  const { filepath } = await writeIdea(input.slug, markdown);
+  const { filepath } = input.root
+    ? await writeIdea(input.slug, markdown, input.root)
+    : await writeIdea(input.slug, markdown);
   return { filepath, markdown, title: deriveTitle(input.markdown) };
 }
 
@@ -76,6 +80,7 @@ export interface ConfirmSaveJournalInput {
    * body, so a second same-day capture keeps its own list rather than
    * overwriting this one — see injectPlaces. */
   places?: Place[];
+  root?: Root;
 }
 
 /** Compose the final Journal entry and append it to today's day file.
@@ -93,7 +98,9 @@ export async function confirmSaveJournal(
     composeMarkdown(input.markdown, input.refs, input.tags, input.location),
     input.places ?? [],
   );
-  const { filepath, markdown: dayFileMarkdown } = await appendJournal(input.date, markdown);
+  const { filepath, markdown: dayFileMarkdown } = input.root
+    ? await appendJournal(input.date, markdown, input.root)
+    : await appendJournal(input.date, markdown);
   return { filepath, markdown: dayFileMarkdown, title: deriveTitle(input.markdown) };
 }
 
@@ -103,6 +110,7 @@ export interface ConfirmSavePersonInput {
   markdown: string;
   tags: string[];
   location: string | null;
+  root?: Root;
 }
 
 /** Compose the final Person markdown and write it to `People/`. Person
@@ -111,6 +119,8 @@ export async function confirmSavePerson(
   input: ConfirmSavePersonInput,
 ): Promise<ConfirmSaveResult> {
   const markdown = applyLocation(mergeUserTags(input.markdown, input.tags), input.location);
-  const { filepath } = await writePerson(input.firstName, input.lastName, markdown);
+  const { filepath } = input.root
+    ? await writePerson(input.firstName, input.lastName, markdown, input.root)
+    : await writePerson(input.firstName, input.lastName, markdown);
   return { filepath, markdown, title: deriveTitle(input.markdown) };
 }

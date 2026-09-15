@@ -82,6 +82,8 @@ check_file "app/src/main/java/$PKG_PATH/notification/CaptureNotificationPackage.
 check_file "app/src/main/java/$PKG_PATH/notification/BootReceiver.kt" "BootReceiver.kt"
 check_file "app/src/main/java/$PKG_PATH/notification/QuickIdeaReceiver.kt" "QuickIdeaReceiver.kt (B5 inline reply)"
 check_file "app/src/main/java/$PKG_PATH/notification/QuickIdeaTaskService.kt" "QuickIdeaTaskService.kt (B5 headless task)"
+check_file "app/src/main/java/$PKG_PATH/notification/DriveInboxReadReceiver.kt" "DriveInboxReadReceiver.kt (Android Auto mark-read)"
+check_file "app/src/main/res/xml/automotive_app_desc.xml" "automotive_app_desc.xml (notification messaging only)"
 
 echo "→ Widget plugin — emitted Kotlin + resources:"
 check_file "app/src/main/java/$PKG_PATH/widget/CaptureWidgetProvider.kt" "CaptureWidgetProvider.kt"
@@ -132,13 +134,15 @@ check_manifest_contains "PROPERTY_SPECIAL_USE_FGS_SUBTYPE" "subtype property"
 check_manifest_contains "BootReceiver" "receiver: BootReceiver"
 check_manifest_contains "QuickIdeaReceiver" "receiver: QuickIdeaReceiver (B5)"
 check_manifest_contains "QuickIdeaTaskService" "service: QuickIdeaTaskService (B5)"
+check_manifest_contains "DriveInboxReadReceiver" "receiver: DriveInboxReadReceiver (Android Auto mark-read)"
+check_manifest_contains "com.google.android.gms.car.application" "Android Auto messaging declaration"
 check_manifest_contains "CaptureWidgetProvider" "receiver: CaptureWidgetProvider"
 check_manifest_contains "android.appwidget.action.APPWIDGET_UPDATE" "widget intent filter"
 check_manifest_contains "FOREGROUND_SERVICE_SPECIAL_USE" "permission: FOREGROUND_SERVICE_SPECIAL_USE"
 check_manifest_contains "POST_NOTIFICATIONS" "permission: POST_NOTIFICATIONS"
 check_manifest_contains "RECEIVE_BOOT_COMPLETED" "permission: RECEIVE_BOOT_COMPLETED"
 
-echo "→ B5 inline-reply action — RemoteInput + FLAG_IMMUTABLE (security invariant):"
+echo "→ Inline replies — RemoteInput + explicit mutable PendingIntent (security invariant):"
 NOTIF_SVC="$ANDROID_DIR/app/src/main/java/$PKG_PATH/notification/CaptureForegroundService.kt"
 check_kt_source_contains() {
   local file="$1"
@@ -153,13 +157,19 @@ check_kt_source_contains() {
 }
 check_kt_source_contains "$NOTIF_SVC" "addRemoteInput" "quick-idea action has a RemoteInput"
 check_kt_source_contains "$NOTIF_SVC" "quickIdeaAction()" "quick-idea action wired into the notification"
-# The quick-idea PendingIntent must keep FLAG_IMMUTABLE + setPackage — the
-# verified-sound pattern must not be weakened by the new inline-reply action.
+# RemoteInput requires a mutable PendingIntent on Android 12+. Each reply is
+# still explicit and targets a non-exported receiver, which prevents redirecting
+# it to another app component.
 check_kt_source_contains "$NOTIF_SVC" "getBroadcast" "quick-idea uses a broadcast PendingIntent"
-check_kt_source_contains "$NOTIF_SVC" "FLAG_IMMUTABLE" "quick-idea PendingIntent keeps FLAG_IMMUTABLE"
+check_kt_source_contains "$NOTIF_SVC" "FLAG_MUTABLE" "direct-reply PendingIntents are mutable"
 QUICK_RCV="$ANDROID_DIR/app/src/main/java/$PKG_PATH/notification/QuickIdeaReceiver.kt"
 check_kt_source_contains "$QUICK_RCV" "getResultsFromIntent" "receiver reads RemoteInput results"
 check_kt_source_contains "$QUICK_RCV" "isEmpty()" "receiver drops empty submissions (no-op guard)"
+check_kt_source_contains "$NOTIF_SVC" "MessagingStyle" "Drive Inbox uses messaging notification style"
+check_kt_source_contains "$NOTIF_SVC" "driveInboxMarkReadAction" "Drive Inbox supplies mark-as-read"
+DRIVE_READ_RCV="$ANDROID_DIR/app/src/main/java/$PKG_PATH/notification/DriveInboxReadReceiver.kt"
+check_kt_source_contains "$DRIVE_READ_RCV" "ACTION_MARK_READ" "mark-read receiver validates its action"
+check_kt_source_contains "$DRIVE_READ_RCV" "putLong" "mark-read is recorded without note writes"
 
 echo "→ MainApplication package registration:"
 check_main_app_contains "import ${PKG}.notification.CaptureNotificationPackage" "import line present"

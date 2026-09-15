@@ -29,6 +29,7 @@ const fetchMock = vi.fn();
 globalThis.fetch = fetchMock as unknown as typeof fetch;
 
 import {
+  classifyBusinessCardViaVision,
   ocrCardViaVision,
   LlmClientError,
   isPermanentError,
@@ -235,5 +236,39 @@ describe("ocrCardViaVision", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { model: string };
     expect(body.model).toBe("test-local-model");
+  });
+});
+
+describe("classifyBusinessCardViaVision", () => {
+  it("asks the vision model for one fail-closed classification label before OCR", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse(" uncertain "));
+
+    const result = await classifyBusinessCardViaVision(
+      { base64: "QkFTRTY0", mimeType: "image/png" },
+      CONFIG,
+    );
+
+    expect(result).toEqual({ classification: "uncertain" });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as {
+      model: string;
+      temperature: number;
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(body.model).toBe("vision-model-xyz");
+    expect(body.temperature).toBe(0);
+    expect(body.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "Is this image a business card? Reply with exactly one label: card, not-card, or uncertain. Use uncertain whenever the image is ambiguous, unreadable, or not clearly a business card.",
+          },
+          { type: "image_url", image_url: { url: "data:image/png;base64,QkFTRTY0" } },
+        ],
+      },
+    ]);
   });
 });

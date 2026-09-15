@@ -101,6 +101,7 @@ import ShareReceiveScreen from "./ShareReceiveScreen";
 import { enrichSharedLink } from "../lib/dispatcher";
 import { writeIdea } from "../lib/writer";
 import { getSettings } from "../lib/settings";
+import { recordCapture } from "../lib/storage";
 
 type ScreenProps = Parameters<typeof ShareReceiveScreen>[0];
 
@@ -129,6 +130,8 @@ function renderScreen() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getSettings).mockReset();
+  vi.mocked(getSettings).mockResolvedValue({ activeProviderId: "omniroute", captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   shareCtx.shareIntent = { text: "a shared thought", webUrl: null, files: null };
   shareCtx.hasShareIntent = true;
@@ -151,6 +154,28 @@ describe("ShareReceiveScreen", () => {
     await waitFor(() => expect(writeIdea).toHaveBeenCalledTimes(1));
     expect(vi.mocked(writeIdea).mock.calls[0][1]).toContain("# Enriched");
     expect(await screen.findByText("Done")).toBeTruthy();
+  });
+
+  it("pins a share's note and recents entry to its starting Work vault", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      activeProviderId: "omniroute",
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    vi.mocked(enrichSharedLink).mockResolvedValue({
+      markdown: "---\nkind: shared-text\n---\n# Work share\n\nbody\n",
+    } as Awaited<ReturnType<typeof enrichSharedLink>>);
+    renderScreen();
+
+    fireEvent.click(await screen.findByText("Save to vault"));
+
+    await waitFor(() => expect(writeIdea).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(writeIdea).mock.calls[0][2]).toEqual(expect.objectContaining({ uri: "file:///work" }));
+    expect(recordCapture).toHaveBeenCalledWith(expect.anything(), "work");
   });
 
   it("SECURITY: a degraded save sanitizes hostile share text before it reaches the vault", async () => {

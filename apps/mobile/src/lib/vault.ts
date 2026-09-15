@@ -29,13 +29,18 @@ import {
 import { listNoteFiles, readNote, type NoteFileRef } from "./writer";
 import { parentSegment, subdirForUri, type NoteSubdir } from "./noteSubdirs";
 import type { CaptureEntry, CaptureMode } from "./storage";
+import { getSettings } from "./settings";
+import { captureVaultContext } from "./vaultContext";
+import {
+  LEGACY_NOTE_INDEX_KEY,
+  noteIndexKey,
+} from "./vaultStorageKeys";
+import { DEFAULT_VAULT_PROFILE_ID } from "./vaultProfiles";
 
 /** One AsyncStorage blob holding per-note metadata for browse + search; the tag
  * index is derived from it (deriveTagIndex). One scan, one blob keeps the
  * shared ~6 MB AsyncStorage ceiling from being split across two vault-sized
  * caches. */
-const NOTE_INDEX_KEY = "carnet:noteindex:v1";
-
 /** Max characters kept per note excerpt — capped to bound blob growth against
  * the shared AsyncStorage ceiling (see NOTE_INDEX_KEY). */
 const EXCERPT_MAX = 200;
@@ -92,6 +97,16 @@ export interface NoteIndex {
   builtAt: number;
   /** One entry per readable note, in vault enumeration order. */
   notes: NoteIndexEntry[];
+}
+
+/** Resolve once per cache operation. A settings failure falls back only to
+ * default, which is where pre-profile cache data belongs. */
+async function activeIndexProfileId(): Promise<string> {
+  try {
+    return captureVaultContext(await getSettings()).profileId;
+  } catch {
+    return DEFAULT_VAULT_PROFILE_ID;
+  }
 }
 
 /** Run `fn` over `items` with at most `limit` in flight at once. When `signal`
@@ -254,8 +269,17 @@ function deriveTagIndex(index: NoteIndex): TagIndex {
 // ── Note index cache lifecycle ────────────────────────────────────────────────
 
 /** Read the cached note index, or null when absent / corrupt. */
-export async function loadCachedNoteIndex(): Promise<NoteIndex | null> {
-  const raw = await AsyncStorage.getItem(NOTE_INDEX_KEY);
+export async function loadCachedNoteIndex(profileId?: string): Promise<NoteIndex | null> {
+  const resolvedProfileId = profileId ?? await activeIndexProfileId();
+  const key = noteIndexKey(resolvedProfileId);
+  let raw = await AsyncStorage.getItem(key);
+  // v1 was a single-vault cache. Keep it visible only to default and copy it
+  // verbatim first, so interrupted migration is harmless and a new profile
+  // never briefly renders the prior vault's search results.
+  if (!raw && resolvedProfileId === DEFAULT_VAULT_PROFILE_ID) {
+    raw = await AsyncStorage.getItem(LEGACY_NOTE_INDEX_KEY);
+    if (raw) await AsyncStorage.setItem(key, raw);
+  }
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as NoteIndex;
@@ -269,9 +293,10 @@ export async function loadCachedNoteIndex(): Promise<NoteIndex | null> {
 }
 
 /** Build the note index fresh and persist it to the cache. */
-export async function refreshNoteIndex(): Promise<NoteIndex> {
+export async function refreshNoteIndex(profileId?: string): Promise<NoteIndex> {
+  const resolvedProfileId = profileId ?? await activeIndexProfileId();
   const index = await buildNoteIndex();
-  await AsyncStorage.setItem(NOTE_INDEX_KEY, JSON.stringify(index));
+  await AsyncStorage.setItem(noteIndexKey(resolvedProfileId), JSON.stringify(index));
   return index;
 }
 
@@ -281,18 +306,19 @@ export async function refreshNoteIndex(): Promise<NoteIndex> {
  * incremental upsert isn't available (offline drain, in-place tag edit). The
  * common capture path should prefer upsertNoteInIndex to avoid a full rescan.
  */
-export async function invalidateNoteIndex(): Promise<void> {
-  await AsyncStorage.removeItem(NOTE_INDEX_KEY);
+export async function invalidateNoteIndex(profileId?: string): Promise<void> {
+  await AsyncStorage.removeItem(noteIndexKey(profileId ?? await activeIndexProfileId()));
 }
 
 /**
  * Return the cached note index immediately when present, else build + persist
  * one. Hold the result in memory for the session; refresh lazily via pull.
  */
-export async function getNoteIndex(): Promise<NoteIndex> {
-  const cached = await loadCachedNoteIndex();
+export async function getNoteIndex(profileId?: string): Promise<NoteIndex> {
+  const resolvedProfileId = profileId ?? await activeIndexProfileId();
+  const cached = await loadCachedNoteIndex(resolvedProfileId);
   if (cached) return cached;
-  return refreshNoteIndex();
+  return refreshNoteIndex(resolvedProfileId);
 }
 
 /**
@@ -301,8 +327,13 @@ export async function getNoteIndex(): Promise<NoteIndex> {
  * so no full vault rescan is needed. No-op when there is no cached index yet
  * (the next getNoteIndex builds it fresh, which would include this note anyway).
  */
-export async function upsertNoteInIndex(uri: string, markdown: string): Promise<void> {
-  const cached = await loadCachedNoteIndex();
+export async function upsertNoteInIndex(
+  uri: string,
+  markdown: string,
+  profileId?: string,
+): Promise<void> {
+  const resolvedProfileId = profileId ?? await activeIndexProfileId();
+  const cached = await loadCachedNoteIndex(resolvedProfileId);
   if (!cached) return;
   // The uri is authoritative; the mode round-trip is only a fallback. Going
   // through subdirForMode alone would record "Ideas" for anything outside
@@ -317,7 +348,10 @@ export async function upsertNoteInIndex(uri: string, markdown: string): Promise<
     idx === -1
       ? [...cached.notes, entry]
       : cached.notes.map((n, i) => (i === idx ? entry : n));
-  await AsyncStorage.setItem(NOTE_INDEX_KEY, JSON.stringify({ builtAt: cached.builtAt, notes }));
+  await AsyncStorage.setItem(
+    noteIndexKey(resolvedProfileId),
+    JSON.stringify({ builtAt: cached.builtAt, notes }),
+  );
 }
 
 // ── Tag index (derived from the note index) ───────────────────────────────────
@@ -338,8 +372,8 @@ export async function loadCachedTagIndex(): Promise<TagIndex | null> {
 }
 
 /** Rebuild + persist the note index, returning the derived tag index. */
-export async function refreshTagIndex(): Promise<TagIndex> {
-  return deriveTagIndex(await refreshNoteIndex());
+export async function refreshTagIndex(profileId?: string): Promise<TagIndex> {
+  return deriveTagIndex(await refreshNoteIndex(profileId));
 }
 
 /**
@@ -347,8 +381,8 @@ export async function refreshTagIndex(): Promise<TagIndex> {
  * for existing call sites; delegates to invalidateNoteIndex since the tag index
  * is now derived from the single note-index blob.
  */
-export async function invalidateTagIndex(): Promise<void> {
-  await invalidateNoteIndex();
+export async function invalidateTagIndex(profileId?: string): Promise<void> {
+  await invalidateNoteIndex(profileId);
 }
 
 /**
@@ -356,8 +390,8 @@ export async function invalidateTagIndex(): Promise<void> {
  * miss). For stale-while-revalidate, render this and fire refreshTagIndex() in
  * the background.
  */
-export async function getTagIndex(): Promise<TagIndex> {
-  return deriveTagIndex(await getNoteIndex());
+export async function getTagIndex(profileId?: string): Promise<TagIndex> {
+  return deriveTagIndex(await getNoteIndex(profileId));
 }
 
 /** Just the distinct normalized tags carried by a note's markdown. */
