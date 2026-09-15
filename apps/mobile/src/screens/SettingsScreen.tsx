@@ -277,6 +277,20 @@ export default function SettingsScreen() {
     }
   };
 
+  /** New profiles need their own SAF picker: their root must be the granted
+   * tree URI, not the display-only label shown by captureFolderLabel(). */
+  const pickNewVaultFolder = async () => {
+    if (Platform.OS !== "android") return;
+    try {
+      const res = await StorageAccessFramework.requestDirectoryPermissionsAsync();
+      if (res.granted && res.directoryUri) {
+        setNewVaultRoot(res.directoryUri);
+      }
+    } catch (e: unknown) {
+      setPickerError(errorMessage(e, "Folder picker failed"));
+    }
+  };
+
   const persistVaultProfiles = async (next: VaultProfileState) => {
     const settings = await getSettings();
     await savePersistedOnly(withVaultProfileState(settings, next));
@@ -393,6 +407,7 @@ export default function SettingsScreen() {
           <TextInput
             {...caretProps(theme)}
             label="New vault name"
+            accessibilityLabel="New vault name"
             mode="outlined"
             value={newVaultName}
             onChangeText={setNewVaultName}
@@ -400,13 +415,24 @@ export default function SettingsScreen() {
           <TextInput
             {...caretProps(theme)}
             label="New vault folder"
+            accessibilityLabel="New vault folder"
             mode="outlined"
             autoCapitalize="none"
             autoCorrect={false}
-            value={captureFolderLabel(newVaultRoot)}
+            value={newVaultRoot}
             onChangeText={setNewVaultRoot}
             placeholder="(app sandbox folder by default)"
           />
+          {Platform.OS === "android" && (
+            <Button
+              mode="text"
+              icon="folder-open"
+              compact
+              onPress={() => void pickNewVaultFolder()}
+            >
+              Pick new vault folder
+            </Button>
+          )}
           <Button mode="text" compact onPress={() => void addVault()}>
             Add vault profile
           </Button>
