@@ -52,6 +52,7 @@ import { NoteMarkdownEditCard } from "../components/NoteMarkdownEditCard";
 import { NoteMetaRow } from "../components/NoteMetaRow";
 import { NoteMissingState } from "../components/NoteMissingState";
 import { RelatedNotesCard } from "../components/RelatedNotesCard";
+import { PersonJournalLinksCard } from "../components/PersonJournalLinksCard";
 import { RecentDetailSnackbars } from "../components/RecentDetailSnackbars";
 import { RichNoteEditor } from "../components/RichNoteEditor";
 import { markdownStyle } from "../lib/markdownStyle";
@@ -70,6 +71,7 @@ import {
   noteCapabilities,
 } from "../lib/recentDetailView";
 import { insertRelatedLink } from "../lib/relatedNotes";
+import { findPersonJournalMatches, type PersonJournalMatch } from "../lib/personJournalLinks";
 import { reEnrichNote, transcribeNote } from "../lib/noteReprocess";
 import {
   finishPendingEnrichment,
@@ -464,6 +466,36 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     };
   }, [body, missing, entry.filepath, entry.title, entry.mode]);
 
+  // A Person gets a second, deliberately narrower relation: full-name scans
+  // of bounded journal bodies. It never rewrites anything by itself; the card
+  // below exposes each ambiguous hit for an explicit one-file wikilink action.
+  const [personJournalMatches, setPersonJournalMatches] = useState<PersonJournalMatch[]>([]);
+  useEffect(() => {
+    let active = true;
+    if (missing || !body || entry.mode !== "person") {
+      setPersonJournalMatches([]);
+      return;
+    }
+    void loadCachedNoteIndex()
+      .then(async (index) => {
+        if (!index) return [];
+        return findPersonJournalMatches(
+          deriveTitle(body) || entry.title,
+          index.notes,
+          readNote,
+        );
+      })
+      .then((matches) => {
+        if (active) setPersonJournalMatches(matches);
+      })
+      .catch(() => {
+        if (active) setPersonJournalMatches([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [body, missing, entry.mode, entry.title]);
+
   // Link a related note INTO this one as a persisted [[wikilink]] under a
   // "## Related" section. The insert is pure + deduped (insertRelatedLink); the
   // screen owns the disk write. A failed write surfaces through the existing
@@ -692,6 +724,11 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
                 onLink={(title) => void linkRelated(title)}
               />
             ) : null}
+
+            <PersonJournalLinksCard
+              matches={personJournalMatches}
+              onLink={(title) => void linkRelated(title)}
+            />
           </>
         ) : null}
       </ScrollView>
