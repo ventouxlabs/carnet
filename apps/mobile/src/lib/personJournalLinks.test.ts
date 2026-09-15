@@ -70,4 +70,25 @@ describe("findPersonJournalMatches", () => {
     ]);
     expect(read).toHaveBeenCalledTimes(2);
   });
+
+  it("stops after cancellation so a switched detail cannot continue journal reads", async () => {
+    const controller = new AbortController();
+    const read = vi.fn(async () => {
+      controller.abort();
+      return "Ada Lovelace arrived.";
+    });
+
+    await expect(
+      findPersonJournalMatches(
+        "Ada Lovelace",
+        [
+          journal("file:///vault/Journal/2026-09-14.md", 2),
+          journal("file:///vault/Journal/2026-09-13.md", 1),
+        ],
+        read,
+        { signal: controller.signal },
+      ),
+    ).resolves.toEqual([]);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
 });
