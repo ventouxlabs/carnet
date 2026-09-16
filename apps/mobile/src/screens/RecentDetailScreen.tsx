@@ -100,12 +100,14 @@ import {
   updateCaptureTitleByFilepath,
 } from "../lib/storage";
 import { useNoteDetailSettings } from "../lib/useNoteDetailSettings";
+import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "RecentDetail">;
 
 export default function RecentDetailScreen({ route, navigation }: Props) {
   const theme = useCarnetTheme();
-  const { entry } = route.params;
+  const { entry, vaultContext } = route.params;
+  const { profileId } = vaultContext;
 
   const [body, setBody] = useState<string>("");
   const [missing, setMissing] = useState(false);
@@ -234,7 +236,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     deletingRef.current = true;
     setConfirmVisible(false);
     try {
-      await moveToArchive(entry.filepath);
+      await moveToArchive(entry.filepath, resolveContextRoot(vaultContext));
     } catch (e: unknown) {
       // Best-effort archive: even on failure, drop the entry from history
       // so the user isn't stuck staring at a ghost row.
@@ -244,8 +246,8 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     try {
       // Remove by id (recents-opened) AND by filepath (tag-browser-opened notes
       // carry a synthesized id that won't match) so no ghost row survives.
-      await removeFromHistory(entry.id);
-      await removeFromHistoryByFilepath(entry.filepath);
+      await removeFromHistory(entry.id, profileId);
+      await removeFromHistoryByFilepath(entry.filepath, profileId);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("[RecentDetail] removeFromHistory failed:", msg);
@@ -257,7 +259,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       deletingRef.current = false;
     }
     navigation.goBack();
-  }, [entry.filepath, entry.id, navigation]);
+  }, [entry.filepath, entry.id, navigation, profileId, vaultContext]);
 
   const handleRemoveFromHistory = useCallback(async () => {
     if (deletingRef.current) return;
@@ -265,7 +267,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     try {
       // Mirrors handleDelete's best-effort shape: warn and still navigate away,
       // rather than leaving the user on a screen whose note is already gone.
-      await removeFromHistory(entry.id);
+      await removeFromHistory(entry.id, profileId);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("[RecentDetail] removeFromHistory failed:", msg);
@@ -279,7 +281,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       deletingRef.current = false;
     }
     navigation.goBack();
-  }, [entry.id, navigation]);
+  }, [entry.id, navigation, profileId]);
 
   const handleReEnrich = useCallback(async () => {
     if (reEnrichingRef.current) return;
@@ -341,10 +343,11 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
         // the recents history — not from this screen's state. Without these two
         // the note stays stale everywhere but here until the next full vault scan.
         // Best-effort: a failure must not undo a write that already landed.
-        void upsertNoteInIndex(entry.filepath, outcome.markdown).catch(() => undefined);
+        void upsertNoteInIndex(entry.filepath, outcome.markdown, profileId).catch(() => undefined);
         void updateCaptureTitleByFilepath(
           entry.filepath,
           deriveTitle(outcome.markdown) || entry.title,
+          profileId,
         ).catch(() => undefined);
       } else setReEnrichError(outcome.reason);
     } finally {
@@ -352,7 +355,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       reEnrichingRef.current = false;
       setReEnriching(false);
     }
-  }, [body, entry.filepath, entry.mode, entry.title]);
+  }, [body, entry.filepath, entry.mode, entry.title, profileId]);
 
   const handleTranscribe = useCallback(async () => {
     if (transcribingRef.current) return;
@@ -449,7 +452,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       setRelated([]);
       return;
     }
-    loadCachedNoteIndex()
+    loadCachedNoteIndex(profileId)
       .then((index) => {
         if (!active || !index) return;
         setRelated(
@@ -464,7 +467,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     return () => {
       active = false;
     };
-  }, [body, missing, entry.filepath, entry.title, entry.mode]);
+  }, [body, missing, entry.filepath, entry.title, entry.mode, profileId]);
 
   // A Person gets a second, deliberately narrower relation: full-name scans
   // of bounded journal bodies. It never rewrites anything by itself; the card
@@ -477,7 +480,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       setPersonJournalMatches([]);
       return;
     }
-    void loadCachedNoteIndex()
+    void loadCachedNoteIndex(profileId)
       .then(async (index) => {
         if (!index) return [];
         return findPersonJournalMatches(
@@ -497,7 +500,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       active = false;
       controller.abort();
     };
-  }, [body, missing, entry.mode, entry.title, entry.filepath]);
+  }, [body, missing, entry.mode, entry.title, entry.filepath, profileId]);
 
   // Link a related note INTO this one as a persisted [[wikilink]] under a
   // "## Related" section. The insert is pure + deduped (insertRelatedLink); the
@@ -551,12 +554,12 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       openingRelatedRef.current = true;
       try {
         const target = await resolveNoteEntry(uri);
-        if (target) navigation.push("RecentDetail", { entry: target });
+        if (target) navigation.push("RecentDetail", { entry: target, vaultContext });
       } finally {
         openingRelatedRef.current = false;
       }
     },
-    [navigation],
+    [navigation, vaultContext],
   );
 
   const markdownRules = useMemo(

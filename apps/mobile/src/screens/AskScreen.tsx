@@ -52,6 +52,8 @@ import { writeSynthesis } from "../lib/writer";
 import { slugify } from "../lib/noteNaming";
 import { todayLocal } from "../lib/captureLocalIds";
 import type { CaptureEntry } from "../lib/storage";
+import type { VaultContext } from "../lib/vaultContext";
+import { resolveContextRoot } from "../lib/vaultRoot";
 import { MIN_TAP_TARGET, spacing, useCarnetTheme } from "../lib/theme";
 
 /** Route params. Exported so App.tsx can declare `Ask: AskRouteParams` in
@@ -59,6 +61,8 @@ import { MIN_TAP_TARGET, spacing, useCarnetTheme } from "../lib/theme";
 export interface AskRouteParams {
   question: string;
   candidates: RetrievalCandidate[];
+  /** The vault that supplied the candidates; kept through delayed Save. */
+  vaultContext: VaultContext;
 }
 
 /** Structural props rather than NativeStackScreenProps: this component is
@@ -67,7 +71,7 @@ export interface AskRouteParams {
 export interface AskScreenProps {
   route: { params: AskRouteParams };
   navigation: {
-    navigate: (screen: "RecentDetail", params: { entry: CaptureEntry }) => void;
+    navigate: (screen: "RecentDetail", params: { entry: CaptureEntry; vaultContext: VaultContext }) => void;
   };
 }
 
@@ -81,7 +85,7 @@ const SAVED_NOT_INDEXED = "Saved to Notes, but Search needs a refresh to show it
 
 export default function AskScreen({ route, navigation }: AskScreenProps) {
   const theme = useCarnetTheme();
-  const { question, candidates } = route.params;
+  const { question, candidates, vaultContext } = route.params;
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [segments, setSegments] = useState<AnswerSegment[]>([]);
@@ -217,7 +221,11 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
       // and an empty stem makes findCollisionFreeName write a file named ".md":
       // a hidden dotfile, invisible in Obsidian, saved "successfully". Every
       // other slugify call site in this repo pairs it with a fallback stem.
-      const { filepath } = await writeSynthesis(slugify(question) || "synthesis", md);
+      const { filepath } = await writeSynthesis(
+        slugify(question) || "synthesis",
+        md,
+        resolveContextRoot(vaultContext),
+      );
       // The file is on disk from here on, so latch Save closed no matter how
       // indexing goes — re-saving would duplicate the note, not repair it.
       setSaved(true);
@@ -231,7 +239,7 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
       // still confirm the write but say the note needs a refresh to appear.
       // Please don't "fix" this back to fire-and-forget.
       try {
-        await upsertNoteInIndex(filepath, md);
+        await upsertNoteInIndex(filepath, md, vaultContext.profileId);
         setToast(SAVED_OK);
       } catch {
         setToast(SAVED_NOT_INDEXED);
@@ -242,7 +250,7 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [question, saved]);
+  }, [question, saved, vaultContext]);
 
   // Ref guard for the same reason as save: a double-tap must not stack the
   // detail screen twice. Mirrors RecentDetailScreen's openRelated.
@@ -255,12 +263,12 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
         const entry = await resolveNoteEntry(uri);
         // A citation can outlive its note (deleted since the index was built).
         // Navigating with a null entry would crash the detail screen.
-        if (entry) navigation.navigate("RecentDetail", { entry });
+        if (entry) navigation.navigate("RecentDetail", { entry, vaultContext });
       } finally {
         openingRef.current = false;
       }
     },
-    [navigation],
+    [navigation, vaultContext],
   );
 
   return (

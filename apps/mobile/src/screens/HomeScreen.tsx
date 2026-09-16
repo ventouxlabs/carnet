@@ -29,7 +29,6 @@ import { pairConflicts, type ConflictPair } from "../lib/syncConflicts";
 import { reportColdStart } from "../lib/startupTiming";
 import {
   loadCachedNoteIndex,
-  refreshNoteIndex,
   resolveNoteEntry,
   type NoteIndex,
   type NoteIndexEntry,
@@ -53,6 +52,7 @@ import { CaptureFab, type CaptureTarget } from "../components/CaptureFab";
 import { NoteCard } from "../components/NoteCard";
 import { SyncStatusDot } from "../components/SyncStatusDot";
 import { refreshActiveVault } from "../lib/vaultRefreshService";
+import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Home">;
 
@@ -63,6 +63,10 @@ export default function HomeScreen({ navigation }: Props) {
   const theme = useCarnetTheme();
   // null = first load in flight → skeleton cards, not a spinner.
   const [recent, setRecent] = useState<CaptureEntry[] | null>(null);
+  const [recentVaultContext, setRecentVaultContext] = useState({
+    profileId: DEFAULT_VAULT_PROFILE_ID,
+    rootUri: "",
+  });
   const [noteMeta, setNoteMeta] = useState<Map<string, NoteMeta>>(new Map());
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [syncDialogVisible, setSyncDialogVisible] = useState(false);
@@ -89,6 +93,8 @@ export default function HomeScreen({ navigation }: Props) {
   const bulkDeletingRef = useRef(false);
   // Single-flight guard for the background index rebuild below.
   const rebuildingIndexRef = useRef(false);
+  // A late profile refresh must never repaint an already-focused newer vault.
+  const refreshGenerationRef = useRef(0);
 
   const applyNoteIndex = useCallback((index: NoteIndex) => {
     const map = new Map<string, NoteMeta>();
@@ -103,57 +109,68 @@ export default function HomeScreen({ navigation }: Props) {
   }, []);
 
   const refresh = useCallback(async () => {
-    void refreshActiveVault().catch(() => undefined);
+    const generation = ++refreshGenerationRef.current;
+    const isCurrent = () => refreshGenerationRef.current === generation;
     // Resolve this refresh's profile once. The history read is allowed to
     // await, but it must not follow a settings switch that lands while it is
     // in flight and paint the prior vault's recents into the new Home view.
-    let profileId = DEFAULT_VAULT_PROFILE_ID;
+    let context = { profileId: DEFAULT_VAULT_PROFILE_ID, rootUri: "" };
     try {
-      profileId = captureVaultContext(await getSettings()).profileId;
+      context = captureVaultContext(await getSettings());
     } catch {
       // Settings failures should not hide durable captures; default is the
       // only safe interpretation for pre-profile local state.
     }
+    const { profileId } = context;
+    if (!isCurrent()) return;
+    setRecentVaultContext(context);
     const items = await getRecentCaptures(profileId);
+    if (!isCurrent()) return;
     setRecent(items);
     // Join excerpts/tags/pending-status from the cached vault index. On a
     // cache miss (e.g. an offline drain invalidated it), render plain cards
     // now and rebuild the index in the background — never block Home on a
     // full vault scan.
     try {
-      const index = await loadCachedNoteIndex();
+      const index = await loadCachedNoteIndex(profileId);
+      if (!isCurrent()) return;
       if (index) {
         applyNoteIndex(index);
       } else if (!rebuildingIndexRef.current) {
         rebuildingIndexRef.current = true;
-        refreshNoteIndex()
-          .then(applyNoteIndex)
-          .catch((e: unknown) => {
-            const msg = e instanceof Error ? e.message : String(e);
-            console.warn("[Home] note index rebuild failed:", msg);
-          })
-          .finally(() => {
-            rebuildingIndexRef.current = false;
-          });
+        // The pinned foreground reconciliation below owns cold builds too.
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("[Home] note index read failed:", msg);
     }
+    // Cache-first content has already painted. Reconcile the same captured
+    // profile and apply the result only if this refresh still owns it.
+    void refreshActiveVault(context)
+      .then((index) => {
+        if (index && isCurrent()) applyNoteIndex(index);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (isCurrent()) rebuildingIndexRef.current = false;
+      });
     try {
-      setSyncStatus(await getSyncStatus());
+      const status = await getSyncStatus();
+      if (isCurrent()) setSyncStatus(status);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("[Home] sync status read failed:", msg);
     }
     try {
-      setKarakeepPending(await getPendingExportCount());
+      const pending = await getPendingExportCount();
+      if (isCurrent()) setKarakeepPending(pending);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("[Home] pending-sync count read failed:", msg);
     }
     try {
-      setConflictFiles(await listSyncConflictFiles());
+      const conflicts = await listSyncConflictFiles();
+      if (isCurrent()) setConflictFiles(conflicts);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("[Home] sync-conflict scan failed:", msg);
@@ -182,9 +199,9 @@ export default function HomeScreen({ navigation }: Props) {
       const entry = await resolveNoteEntry(uri);
       if (!entry) return;
       setConflictDialogVisible(false);
-      navigation.navigate("RecentDetail", { entry });
+      navigation.navigate("RecentDetail", { entry, vaultContext: recentVaultContext });
     },
-    [navigation],
+    [navigation, recentVaultContext],
   );
 
   // Banner Retry: run a pending-export drain pass now (reachability probe
@@ -298,7 +315,7 @@ export default function HomeScreen({ navigation }: Props) {
       // Best-effort per item — one SAF revocation shouldn't abort the rest.
       // The intent of bulk delete is "clean up as much as you can."
       const results = await Promise.allSettled(
-        entries.map((e) => moveToArchive(e.filepath)),
+        entries.map((e) => moveToArchive(e.filepath, resolveContextRoot(recentVaultContext))),
       );
       results.forEach((r, i) => {
         if (r.status === "rejected") {
@@ -306,7 +323,7 @@ export default function HomeScreen({ navigation }: Props) {
           console.warn(`[Home] archive failed for ${entries[i].filepath}: ${reason}`);
         }
       });
-      await removeManyFromHistory(ids);
+      await removeManyFromHistory(ids, recentVaultContext.profileId);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("[Home] bulk delete failed:", msg);
@@ -318,7 +335,7 @@ export default function HomeScreen({ navigation }: Props) {
         console.warn("[Home] refresh after bulk delete failed:", reason);
       });
     }
-  }, [selectedIds, recent, refresh, exitSelection]);
+  }, [selectedIds, recent, refresh, exitSelection, recentVaultContext]);
 
   useEffect(() => {
     const unsubFocus = navigation.addListener("focus", () => {
@@ -460,7 +477,7 @@ export default function HomeScreen({ navigation }: Props) {
               selected={selectedIds.has(item.id)}
               onPress={() => {
                 if (selectionMode) toggleSelection(item.id);
-                else navigation.navigate("RecentDetail", { entry: item });
+                else navigation.navigate("RecentDetail", { entry: item, vaultContext: recentVaultContext });
               }}
               onLongPress={() => enterSelection(item.id)}
             />

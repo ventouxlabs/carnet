@@ -36,6 +36,7 @@ import SearchScreen from "./src/screens/SearchScreen";
 import TodosScreen from "./src/screens/TodosScreen";
 import AskScreen, { type AskRouteParams } from "./src/screens/AskScreen";
 import type { CaptureEntry, CaptureMode } from "./src/lib/storage";
+import type { VaultContext } from "./src/lib/vaultContext";
 import { carnetDark, carnetLight } from "./src/lib/theme";
 import {
   getThemePreference,
@@ -64,7 +65,9 @@ export type RootStackParamList = {
   ShareReceive: undefined;
   PhotoCapture: undefined;
   AudioCapture: undefined;
-  RecentDetail: { entry: CaptureEntry };
+  /** `profileId` is a navigation-time snapshot: history actions must never
+   * follow a profile switch that happens after a note card was tapped. */
+  RecentDetail: { entry: CaptureEntry; vaultContext: VaultContext };
   TagBrowser: { tag?: string } | undefined;
   /** `tag` pre-applies a tag filter — how "tap a tag anywhere" lands here. */
   Search: { tag?: string } | undefined;

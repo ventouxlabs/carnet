@@ -45,6 +45,9 @@ vi.mock("../lib/dispatcher", () => ({
 }));
 
 vi.mock("../lib/writer", () => ({ writeSynthesis }));
+vi.mock("../lib/vaultRoot", () => ({
+  resolveContextRoot: vi.fn(() => ({ uri: "file:///vault", fs: {} })),
+}));
 
 vi.mock("../lib/vault", () => ({ upsertNoteInIndex, resolveNoteEntry, readNoteBodies }));
 
@@ -62,6 +65,7 @@ function renderScreen(params?: Partial<AskScreenProps["route"]["params"]>) {
           params: {
             question: "what about A?",
             candidates: [CANDIDATE_A],
+            vaultContext: { profileId: "default", rootUri: "file:///vault" },
             ...params,
           },
         }}
@@ -110,6 +114,7 @@ describe("AskScreen", () => {
       expect(upsertNoteInIndex).toHaveBeenCalledWith(
         "file:///v/Notes/q.md",
         expect.stringContaining("tags: [synthesis]"),
+        "default",
       );
     });
   });
@@ -144,7 +149,10 @@ describe("AskScreen", () => {
 
     await waitFor(() => expect(resolveNoteEntry).toHaveBeenCalledWith(CANDIDATE_A.uri));
     await waitFor(() =>
-      expect(navigation.navigate).toHaveBeenCalledWith("RecentDetail", { entry }),
+      expect(navigation.navigate).toHaveBeenCalledWith("RecentDetail", {
+        entry,
+        vaultContext: { profileId: "default", rootUri: "file:///vault" },
+      }),
     );
   });
 

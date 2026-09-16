@@ -5,7 +5,7 @@
  * source note (updateChecklistItem, matched by text) with an optimistic
  * local flip that reverts on failure.
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { Checkbox, SegmentedButtons, Snackbar, Text } from "react-native-paper";
 import { useFocusEffect } from "@react-navigation/native";
@@ -24,6 +24,10 @@ import {
 import { refreshActiveVault } from "../lib/vaultRefreshService";
 import { readNote, updateChecklistItem } from "../lib/writer";
 import { MIN_TAP_TARGET, useCarnetTheme } from "../lib/theme";
+import { getSettings } from "../lib/settings";
+import { captureVaultContext } from "../lib/vaultContext";
+import { DEFAULT_VAULT_PROFILE_ID } from "../lib/vaultProfiles";
+import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Todos">;
 
@@ -73,6 +77,7 @@ export function flipInIndex(index: NoteIndex, todo: AggregatedTodo): NoteIndex {
 export default function TodosScreen({ navigation }: Props) {
   const theme = useCarnetTheme();
   const [index, setIndex] = useState<NoteIndex | null>(null);
+  const vaultContextRef = useRef<ReturnType<typeof captureVaultContext> | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -83,12 +88,16 @@ export default function TodosScreen({ navigation }: Props) {
     useCallback(() => {
       let active = true;
       setLoading(true);
-      void getNoteIndex()
-        .then((next) => (active ? setIndex(next) : undefined))
+      void getSettings().then((settings) => captureVaultContext(settings)).then((context) => {
+        vaultContextRef.current = context;
+        return getNoteIndex(context.profileId, resolveContextRoot(context))
+          .then((next) => (active ? setIndex(next) : undefined))
+          .then(() => refreshActiveVault(context))
+          .then((next) => (active && next ? setIndex(next) : undefined));
+      })
         .finally(() => {
           if (active) setLoading(false);
         });
-      void refreshActiveVault().catch(() => undefined);
       return () => {
         active = false;
       };
@@ -99,7 +108,12 @@ export default function TodosScreen({ navigation }: Props) {
     setRefreshing(true);
     setRefreshError(null);
     try {
-      setIndex(await refreshNoteIndex());
+      const context = vaultContextRef.current;
+      setIndex(
+        await (context
+          ? refreshNoteIndex(context.profileId, resolveContextRoot(context))
+          : refreshNoteIndex()),
+      );
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setRefreshError(`Refresh failed — showing cached results: ${msg}`);
@@ -117,7 +131,13 @@ export default function TodosScreen({ navigation }: Props) {
   const openNote = useCallback(
     async (uri: string) => {
       const entry = await resolveNoteEntry(uri);
-      if (entry) navigation.navigate("RecentDetail", { entry });
+      if (entry) navigation.navigate("RecentDetail", {
+        entry,
+        vaultContext: vaultContextRef.current ?? {
+          profileId: DEFAULT_VAULT_PROFILE_ID,
+          rootUri: "",
+        },
+      });
     },
     [navigation],
   );
@@ -145,7 +165,11 @@ export default function TodosScreen({ navigation }: Props) {
     }
     // Cache sync only — the write already succeeded, so a failure here must NOT revert.
     try {
-      await upsertNoteInIndex(todo.uri, await readNote(todo.uri));
+      await upsertNoteInIndex(
+        todo.uri,
+        await readNote(todo.uri),
+        vaultContextRef.current?.profileId ?? DEFAULT_VAULT_PROFILE_ID,
+      );
     } catch (e: unknown) {
       // Stale cache self-corrects on the next pull-to-refresh. Warn (don't
       // revert, don't alert) — matches buildNoteIndex's own skip-and-warn

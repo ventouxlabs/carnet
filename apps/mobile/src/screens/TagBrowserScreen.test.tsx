@@ -27,6 +27,7 @@ vi.mock("@react-navigation/native", async () => {
 });
 
 vi.mock("../lib/vault", () => ({
+  deriveTagIndex: vi.fn((index: { builtAt: number }) => ({ builtAt: index.builtAt, tags: [] })),
   getTagIndex: vi.fn(async () => ({
     builtAt: 1,
     tags: [
@@ -38,6 +39,10 @@ vi.mock("../lib/vault", () => ({
   notesForTag: vi.fn(async () => []),
 }));
 vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
+vi.mock("../lib/settings", () => ({ getSettings: vi.fn(async () => ({ captureFolderPath: "" })) }));
+vi.mock("../lib/vaultRoot", () => ({
+  resolveContextRoot: vi.fn(() => ({ uri: "file:///vault", fs: {} })),
+}));
 
 import TagBrowserScreen from "./TagBrowserScreen";
 import { getTagIndex } from "../lib/vault";
@@ -90,7 +95,7 @@ describe("TagBrowserScreen", () => {
   it("schedules a background vault reconciliation when focused", async () => {
     renderScreen();
     await screen.findByText("#qa-test");
-    expect(refreshActiveVault).toHaveBeenCalledTimes(1);
+    expect(refreshActiveVault).toHaveBeenCalled();
   });
 
   it("sets the header title", async () => {

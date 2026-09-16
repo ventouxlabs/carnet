@@ -582,12 +582,13 @@ export async function listSyncConflictFiles(): Promise<NoteFileRef[]> {
  */
 export async function moveToArchive(
   filepath: string,
+  rootOverride?: Root,
 ): Promise<{
   archivedMdPath: string;
   archivedBinaryPath: string | null;
   archivedBinaryPaths: string[];
 }> {
-  const root = await resolveRoot();
+  const root = rootOverride ?? await resolveRoot();
   const archiveUri = await root.fs.findOrCreateSubdir(root.uri, "Archive");
 
   const content = await readByUri(filepath);

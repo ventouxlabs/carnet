@@ -31,6 +31,10 @@ vi.mock("../lib/mdcrmCapturePackage", () => ({
   saveBusinessCardCapture: vi.fn(),
   saveRawOcrResult: vi.fn(),
 }));
+vi.mock("../lib/settings", () => ({ getSettings: vi.fn(async () => ({ captureFolderPath: "" })) }));
+vi.mock("../lib/vaultRoot", () => ({
+  resolveContextRoot: vi.fn(() => ({ uri: "file:///vault", fs: {} })),
+}));
 
 import { CardScannerModal } from "./CardScannerModal";
 import {
@@ -41,6 +45,7 @@ import {
   saveBusinessCardCapture,
   saveRawOcrResult,
 } from "../lib/mdcrmCapturePackage";
+import { resolveContextRoot } from "../lib/vaultRoot";
 import { carnetLight } from "../lib/theme";
 
 const saved = { captureId: "cap_1", attachmentId: "att_1", rawOcrPath: "file:///raw.txt" };
@@ -82,6 +87,10 @@ describe("CardScannerModal", () => {
     fireEvent.click(screen.getByText("Use as business card"));
 
     await waitFor(() => expect(saveBusinessCardCapture).toHaveBeenCalledTimes(1));
+    expect(resolveContextRoot).toHaveBeenCalledWith({ profileId: "default", rootUri: "" });
+    expect(saveBusinessCardCapture).toHaveBeenCalledWith(
+      expect.objectContaining({ rootOverride: { uri: "file:///vault", fs: {} } }),
+    );
     expect(ocrCardViaVision).toHaveBeenCalledWith({ base64: "PHOTO", mimeType: "image/jpeg" });
     expect(saveRawOcrResult).toHaveBeenCalledWith(saved, "Jane Doe");
     expect(onResult).toHaveBeenCalledWith({ text: "Jane Doe", capture: saved, ocr: { kind: "ok" } });

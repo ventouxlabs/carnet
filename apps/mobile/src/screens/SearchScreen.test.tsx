@@ -13,6 +13,10 @@ import { carnetLight } from "../lib/theme";
 import type { NoteIndexEntry } from "../lib/vault";
 
 vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
+vi.mock("../lib/settings", () => ({ getSettings: vi.fn(async () => ({ captureFolderPath: "" })) }));
+vi.mock("../lib/vaultRoot", () => ({
+  resolveContextRoot: vi.fn(() => ({ uri: "file:///vault", fs: {} })),
+}));
 
 vi.mock("@react-navigation/native", async () => {
   const { useEffect } = await import("react");
@@ -147,6 +151,7 @@ describe("SearchScreen", () => {
     await waitFor(() =>
       expect(navigation.navigate).toHaveBeenCalledWith("RecentDetail", {
         entry: expect.objectContaining({ filepath: "file:///v/Ideas/first.md" }),
+        vaultContext: { profileId: "default", rootUri: "" },
       }),
     );
     expect(resolveNoteEntry).toHaveBeenCalledWith("file:///v/Ideas/first.md");

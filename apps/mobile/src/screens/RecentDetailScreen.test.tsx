@@ -226,7 +226,7 @@ function renderScreen(entry: CaptureEntry = ENTRY) {
           {
             key: "d",
             name: "RecentDetail",
-            params: { entry },
+            params: { entry, vaultContext: { profileId: "default", rootUri: "file:///vault" } },
           } as ScreenProps["route"]
         }
       />
@@ -297,6 +297,7 @@ describe("RecentDetailScreen", () => {
     await waitFor(() =>
       expect(navigation.push).toHaveBeenCalledWith("RecentDetail", {
         entry: target,
+        vaultContext: { profileId: "default", rootUri: "file:///vault" },
       }),
     );
   });
@@ -494,7 +495,7 @@ describe("RecentDetailScreen", () => {
     expect(screen.queryByLabelText("Edit note")).toBeNull();
 
     fireEvent.click(screen.getByText("Remove from list"));
-    await waitFor(() => expect(removeFromHistory).toHaveBeenCalledWith("r1"));
+    await waitFor(() => expect(removeFromHistory).toHaveBeenCalledWith("r1", "default"));
     await waitFor(() => expect(navigation.goBack).toHaveBeenCalled());
   });
 
@@ -589,10 +590,15 @@ describe("RecentDetailScreen — re-enrich family", () => {
       expect(upsertNoteInIndex).toHaveBeenCalledWith(
         ENTRY.filepath,
         "---\n---\n# Re-enriched\n\nRe-enriched body.\n",
+        "default",
       ),
     );
     await waitFor(() =>
-      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(ENTRY.filepath, "Re-enriched"),
+      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "Re-enriched",
+        "default",
+      ),
     );
   });
 

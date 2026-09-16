@@ -32,6 +32,9 @@ import {
   inspectBusinessCardPhoto,
   type CardPhoto,
 } from "../lib/cardScanWorkflow";
+import { getSettings } from "../lib/settings";
+import { captureVaultContext } from "../lib/vaultContext";
+import { resolveContextRoot } from "../lib/vaultRoot";
 
 export interface CardScanResult {
   text: string;
@@ -95,6 +98,10 @@ export function CardScannerModal({ visible, onResult, onClose }: Props) {
     setError(null);
     setBusy(true);
     try {
+      // The photo is the user action that starts this package. Freeze its
+      // destination before any camera/provider await so confirmation cannot
+      // follow a later profile switch into another vault.
+      const captureContext = captureVaultContext(await getSettings());
       const photo = await cameraRef.current.takePictureAsync({
         base64: true,
         quality: 0.6,
@@ -111,7 +118,11 @@ export function CardScannerModal({ visible, onResult, onClose }: Props) {
       if (inspection.kind === "suggest-card") {
         confirmationRef.current = createCardCaptureConfirmation(inspection.photo, {
           saveCapture: async (input) =>
-            saveBusinessCardCapture({ imageBase64: input.base64, mimeType: input.mimeType }),
+            saveBusinessCardCapture({
+              imageBase64: input.base64,
+              mimeType: input.mimeType,
+              rootOverride: resolveContextRoot(captureContext),
+            }),
           ocr: (input) => ocrCardViaVision(input),
           saveRawOcr: saveRawOcrResult,
           classifyOcrError: classifyCardScanOcrError,

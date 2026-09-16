@@ -15,6 +15,9 @@ import type { NoteIndex } from "../lib/vault";
 
 vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
 vi.mock("../lib/settings", () => ({ getSettings: vi.fn(async () => ({ captureFolderPath: "" })) }));
+vi.mock("../lib/vaultRoot", () => ({
+  resolveContextRoot: vi.fn(() => ({ uri: "file:///vault", fs: {} })),
+}));
 
 vi.mock("@react-navigation/native", async () => {
   const { useEffect } = await import("react");
@@ -139,7 +142,13 @@ describe("TodosScreen", () => {
     await waitFor(() =>
       expect(updateChecklistItem).toHaveBeenCalledWith("file:///v/Ideas/a.md", "Buy milk", false),
     );
-    await waitFor(() => expect(upsertNoteInIndex).toHaveBeenCalledWith("file:///v/Ideas/a.md", expect.any(String)));
+    await waitFor(() =>
+      expect(upsertNoteInIndex).toHaveBeenCalledWith(
+        "file:///v/Ideas/a.md",
+        expect.any(String),
+        "default",
+      ),
+    );
   });
 
   it("reverts the optimistic flip and shows the Snackbar on an ambiguous result", async () => {

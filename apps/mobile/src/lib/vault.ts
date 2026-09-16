@@ -26,7 +26,8 @@ import {
   normalizeTag,
   stripFrontmatter,
 } from "./frontmatter";
-import { listNoteFiles, readNote, type NoteFileRef } from "./writer";
+import { listNoteFiles, listNoteFilesInRoot, readNote, type NoteFileRef } from "./writer";
+import type { Root } from "./vaultRoot";
 import { parentSegment, subdirForUri, type NoteSubdir } from "./noteSubdirs";
 import type { CaptureEntry, CaptureMode } from "./storage";
 import { getSettings } from "./settings";
@@ -177,8 +178,11 @@ function buildNoteEntry(uri: string, subdir: NoteSubdir, markdown: string): Note
  * that fail to read (deleted mid-scan, SAF permission revoked) are skipped.
  * Entries preserve vault enumeration order.
  */
-export async function buildNoteIndex(): Promise<NoteIndex> {
-  const files = await listNoteFiles();
+export async function buildNoteIndex(rootOverride?: Root): Promise<NoteIndex> {
+  // A foreground refresh captures its vault before any asynchronous work.
+  // Never re-resolve the active root while that scan is in flight: a profile
+  // switch must not cache the new vault's rows under the old profile's key.
+  const files = rootOverride ? await listNoteFilesInRoot(rootOverride) : await listNoteFiles();
   const slots: (NoteIndexEntry | null)[] = new Array(files.length).fill(null);
   let skipped = 0;
 
@@ -248,7 +252,7 @@ export function getAllTodos(index: NoteIndex): AggregatedTodo[] {
 
 /** Derive the tag index (tag → carrying notes, count-sorted) from a note index.
  * Tags are already normalized on each note; a tag is counted once per note. */
-function deriveTagIndex(index: NoteIndex): TagIndex {
+export function deriveTagIndex(index: NoteIndex): TagIndex {
   const tagToFiles = new Map<string, Set<string>>();
   for (const note of index.notes) {
     for (const tag of note.tags) {
@@ -293,9 +297,9 @@ export async function loadCachedNoteIndex(profileId?: string): Promise<NoteIndex
 }
 
 /** Build the note index fresh and persist it to the cache. */
-export async function refreshNoteIndex(profileId?: string): Promise<NoteIndex> {
+export async function refreshNoteIndex(profileId?: string, rootOverride?: Root): Promise<NoteIndex> {
   const resolvedProfileId = profileId ?? await activeIndexProfileId();
-  const index = await buildNoteIndex();
+  const index = await buildNoteIndex(rootOverride);
   await AsyncStorage.setItem(noteIndexKey(resolvedProfileId), JSON.stringify(index));
   return index;
 }
@@ -314,11 +318,11 @@ export async function invalidateNoteIndex(profileId?: string): Promise<void> {
  * Return the cached note index immediately when present, else build + persist
  * one. Hold the result in memory for the session; refresh lazily via pull.
  */
-export async function getNoteIndex(profileId?: string): Promise<NoteIndex> {
+export async function getNoteIndex(profileId?: string, rootOverride?: Root): Promise<NoteIndex> {
   const resolvedProfileId = profileId ?? await activeIndexProfileId();
   const cached = await loadCachedNoteIndex(resolvedProfileId);
   if (cached) return cached;
-  return refreshNoteIndex(resolvedProfileId);
+  return refreshNoteIndex(resolvedProfileId, rootOverride);
 }
 
 /**
@@ -372,8 +376,8 @@ export async function loadCachedTagIndex(): Promise<TagIndex | null> {
 }
 
 /** Rebuild + persist the note index, returning the derived tag index. */
-export async function refreshTagIndex(profileId?: string): Promise<TagIndex> {
-  return deriveTagIndex(await refreshNoteIndex(profileId));
+export async function refreshTagIndex(profileId?: string, rootOverride?: Root): Promise<TagIndex> {
+  return deriveTagIndex(await refreshNoteIndex(profileId, rootOverride));
 }
 
 /**
@@ -390,8 +394,8 @@ export async function invalidateTagIndex(profileId?: string): Promise<void> {
  * miss). For stale-while-revalidate, render this and fire refreshTagIndex() in
  * the background.
  */
-export async function getTagIndex(profileId?: string): Promise<TagIndex> {
-  return deriveTagIndex(await getNoteIndex(profileId));
+export async function getTagIndex(profileId?: string, rootOverride?: Root): Promise<TagIndex> {
+  return deriveTagIndex(await getNoteIndex(profileId, rootOverride));
 }
 
 /** Just the distinct normalized tags carried by a note's markdown. */

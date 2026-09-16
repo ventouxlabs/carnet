@@ -39,6 +39,9 @@ vi.mock("../lib/storage", () => ({
 vi.mock("../lib/settings", () => ({
   getSettings: vi.fn(async () => ({ captureFolderPath: "" })),
 }));
+vi.mock("../lib/vaultRoot", () => ({
+  resolveContextRoot: vi.fn((context: { rootUri: string }) => ({ uri: context.rootUri, fs: {} })),
+}));
 
 // writer.ts imports expo-file-system at module scope — never load the real one.
 vi.mock("../lib/writer", () => ({
@@ -194,6 +197,7 @@ describe("HomeScreen", () => {
     await waitFor(() =>
       expect(navigation.navigate).toHaveBeenCalledWith("RecentDetail", {
         entry: expect.objectContaining({ id: "r1" }),
+        vaultContext: { profileId: "default", rootUri: "" },
       }),
     );
   });

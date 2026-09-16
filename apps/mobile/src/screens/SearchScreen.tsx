@@ -34,6 +34,10 @@ import { MIN_TAP_TARGET, useCarnetTheme } from "../lib/theme";
 import { NoteCard, modeStamp } from "../components/NoteCard";
 import { StampChip } from "../components/StampChip";
 import { AskExplainerDialog } from "../components/AskExplainerDialog";
+import { getSettings } from "../lib/settings";
+import { captureVaultContext, type VaultContext } from "../lib/vaultContext";
+import { DEFAULT_VAULT_PROFILE_ID } from "../lib/vaultProfiles";
+import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Search">;
 
@@ -57,6 +61,7 @@ const MAX_RENDERED_MATCHES = 50;
 export default function SearchScreen({ route, navigation }: Props) {
   const theme = useCarnetTheme();
   const [index, setIndex] = useState<NoteIndex | null>(null);
+  const vaultContextRef = useRef<VaultContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -158,12 +163,18 @@ export default function SearchScreen({ route, navigation }: Props) {
     useCallback(() => {
       let active = true;
       setLoading(true);
-      void getNoteIndex()
-        .then((next) => (active ? setIndex(next) : undefined))
+      void getSettings().then((settings) => captureVaultContext(settings)).then((context) => {
+        vaultContextRef.current = context;
+        return getNoteIndex(context.profileId, resolveContextRoot(context)).then((next) => {
+          if (active) setIndex(next);
+          return refreshActiveVault(context);
+        }).then((next) => {
+          if (active && next) setIndex(next);
+        });
+      })
         .finally(() => {
           if (active) setLoading(false);
         });
-      void refreshActiveVault().catch(() => undefined);
       return () => {
         active = false;
       };
@@ -174,7 +185,12 @@ export default function SearchScreen({ route, navigation }: Props) {
     setRefreshing(true);
     setRefreshError(null);
     try {
-      setIndex(await refreshNoteIndex());
+      const context = vaultContextRef.current;
+      setIndex(
+        await (context
+          ? refreshNoteIndex(context.profileId, resolveContextRoot(context))
+          : refreshNoteIndex()),
+      );
     } catch (e: unknown) {
       // A failed rebuild previously just stopped the spinner and showed
       // stale results with no signal (and escaped as an unhandled rejection).
@@ -214,7 +230,13 @@ export default function SearchScreen({ route, navigation }: Props) {
   const openNote = useCallback(
     async (uri: string) => {
       const entry = await resolveNoteEntry(uri);
-      if (entry) navigation.navigate("RecentDetail", { entry });
+      if (entry) navigation.navigate("RecentDetail", {
+        entry,
+        vaultContext: vaultContextRef.current ?? {
+          profileId: DEFAULT_VAULT_PROFILE_ID,
+          rootUri: "",
+        },
+      });
     },
     [navigation],
   );
@@ -272,7 +294,11 @@ export default function SearchScreen({ route, navigation }: Props) {
   // Holds the question/candidates chosen at press time, across the async
   // explainer check and (if shown) the dialog round-trip. A ref, not state:
   // nothing here needs to trigger a re-render while it's pending.
-  const pendingAskRef = useRef<{ question: string; candidates: RetrievalCandidate[] } | null>(
+  const pendingAskRef = useRef<{
+    question: string;
+    candidates: RetrievalCandidate[];
+    vaultContext: VaultContext;
+  } | null>(
     null,
   );
   const [explainerVisible, setExplainerVisible] = useState(false);
@@ -286,7 +312,9 @@ export default function SearchScreen({ route, navigation }: Props) {
     // This is the only place the params are built — the explainer path
     // re-navigates from pendingAskRef, not from `query` — so trimming at this
     // call site covers both routes into AskScreen.
-    const params = { question: query.trim(), candidates };
+    const vaultContext = vaultContextRef.current;
+    if (!vaultContext) return;
+    const params = { question: query.trim(), candidates, vaultContext };
     let showExplainer: boolean;
     try {
       showExplainer = await shouldShowAskExplainer();
