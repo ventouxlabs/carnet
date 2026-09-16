@@ -303,6 +303,9 @@ describe("SettingsScreen", () => {
         });
         fireEvent.click(screen.getByText("Pick new vault folder"));
         await waitFor(() => expect(requestDirectoryPermissionsAsync).toHaveBeenCalledOnce());
+        await waitFor(() =>
+          expect((screen.getByLabelText("New vault folder") as HTMLInputElement).value).toBe(safUri),
+        );
         fireEvent.click(screen.getByText("Add vault profile"));
 
         await waitFor(() =>
