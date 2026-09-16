@@ -26,7 +26,11 @@ runs:
         java-version: '21'
 
     - name: Set up Android SDK
+      # `tools` was removed from the Android SDK package index. Retain only
+      # platform-tools here; install the project-specific SDK components below.
       uses: android-actions/setup-android@v3
+      with:
+        packages: platform-tools
 
     # Versions come from Expo's gradle plugin (ExpoRootProject) for SDK 54:
     # compileSdk 36 / buildTools 36.0.0 / ndk 27.1.12297006. Keep in sync if
