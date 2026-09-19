@@ -5,12 +5,14 @@ import { DiscardEditsDialog } from "./DiscardEditsDialog";
 import { TagInput } from "./TagInput";
 import { WysiwygEditor, type WysiwygEditorRef } from "./WysiwygEditor";
 import type { CarnetTheme } from "../lib/theme";
+import type { Root } from "../lib/vaultRoot";
 
 interface RichNoteEditorProps {
   theme: CarnetTheme;
   editorRef: React.RefObject<WysiwygEditorRef | null>;
   /** Body-only seed: frontmatter is split off before the editor ever sees it. */
   seed: string;
+  rootOverride?: Root;
   editError: string | null;
   saving: boolean;
   tags: string[];
@@ -36,6 +38,7 @@ export function RichNoteEditor({
   theme,
   editorRef,
   seed,
+  rootOverride,
   editError,
   saving,
   tags,
@@ -79,7 +82,7 @@ export function RichNoteEditor({
         <TagInput tags={tags} onChange={onTagsChange} knownTags={knownTags} />
       </View>
       <View style={styles.richEditor}>
-        <WysiwygEditor ref={editorRef} value={seed} />
+        <WysiwygEditor ref={editorRef} value={seed} rootOverride={rootOverride} />
       </View>
       <Portal>
         <DiscardEditsDialog

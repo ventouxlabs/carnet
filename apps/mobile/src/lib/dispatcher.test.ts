@@ -713,6 +713,27 @@ describe("dispatcher threads the vault tag vocabulary", () => {
     expect(systemOf()).toContain("dev, journal");
   });
 
+  it("uses the capture's vault tags after the active profile has switched", async () => {
+    // The saved note belongs to Personal (A); by the time its deferred
+    // enrichment runs Work (B) is active. Only A's cached vocabulary may be
+    // sent to the provider, even though provider routing remains live.
+    vi.mocked(getVaultTagStrings).mockImplementation(
+      async (profileIdOrLimit?: string | number) => {
+        const profileId = typeof profileIdOrLimit === "string" ? profileIdOrLimit : undefined;
+        return profileId === "personal" ? ["personal-only"] : ["work-secret"];
+      },
+    );
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+
+    await enrichIdea("deferred A capture", {
+      vaultContext: { profileId: "personal", rootUri: "file:///personal" },
+    });
+
+    expect(getVaultTagStrings).toHaveBeenCalledWith("personal");
+    expect(systemOf()).toContain("personal-only");
+    expect(systemOf()).not.toContain("work-secret");
+  });
+
   it("passes nothing when useExistingTagsForAutoTag is false", async () => {
     vi.mocked(getSettings).mockResolvedValueOnce({
       ...BASE_SETTINGS,

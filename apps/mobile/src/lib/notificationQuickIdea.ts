@@ -132,6 +132,7 @@ export async function handleQuickIdeaCapture(rawText: string): Promise<QuickIdea
     tags: ctx.tags,
     location: ctx.location,
     attachments: ctx.attachments,
+    vaultContext,
   });
   return finishQuickIdea(outcome, ctx, filepath, mtime, rawMarkdown, vaultContext);
 }

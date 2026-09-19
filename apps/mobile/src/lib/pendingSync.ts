@@ -23,6 +23,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { createLock, localId, sanitizeError } from "./asyncQueueUtils";
+import { isVaultContext, type VaultContext } from "./vaultContext";
 
 /** A queued export. `kind` is future-proofing — only Karakeep exports queue
  * today, but the drain/storage layer doesn't care what the item means. */
@@ -33,6 +34,8 @@ export interface PendingExport {
   filepath: string;
   /** History-entry title, forwarded to the export's filename-stem fallback. */
   entryTitle: string;
+  /** Frozen source vault for resolving this note's attachment links at drain time. */
+  vaultContext?: VaultContext;
   queuedAt: number;
   attempts: number;
   lastError: string | null;
@@ -51,7 +54,14 @@ async function loadItems(): Promise<PendingExport[]> {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as PendingExport[];
-    return Array.isArray(parsed) ? parsed : [];
+    // v1 records predate multi-vault context. Keep them drainable through the
+    // current-profile fallback in the runner, but reject malformed new fields.
+    return Array.isArray(parsed)
+      ? parsed.map((item) => ({
+          ...item,
+          ...(isVaultContext(item.vaultContext) ? { vaultContext: item.vaultContext } : {}),
+        }))
+      : [];
   } catch {
     return [];
   }
@@ -118,13 +128,18 @@ function notifyChanged(): void {
 export async function enqueuePendingExport(input: {
   filepath: string;
   entryTitle: string;
+  vaultContext?: VaultContext;
 }): Promise<void> {
   await withLock(async () => {
     const items = await loadItems();
     const existing = items.findIndex((i) => i.filepath === input.filepath);
     if (existing !== -1) {
       const next = [...items];
-      next[existing] = { ...next[existing], entryTitle: input.entryTitle };
+      next[existing] = {
+        ...next[existing],
+        entryTitle: input.entryTitle,
+        vaultContext: input.vaultContext,
+      };
       await saveItems(next);
       return;
     }
@@ -135,6 +150,7 @@ export async function enqueuePendingExport(input: {
         kind: "karakeep-export",
         filepath: input.filepath,
         entryTitle: input.entryTitle,
+        vaultContext: input.vaultContext,
         queuedAt: Date.now(),
         attempts: 0,
         lastError: null,

@@ -457,6 +457,7 @@ describe("RecentDetailScreen", () => {
         base64: "AAAA",
         mime: "image/jpeg",
         basename: undefined,
+        rootOverride: expect.any(Object),
       }),
     );
     // The refreshed body comes back from the lib module, not a local splice.
@@ -571,6 +572,7 @@ describe("RecentDetailScreen — re-enrich family", () => {
         body: ENRICHED_MD,
         filepath: ENTRY.filepath,
         mode: "idea",
+        vaultContext: expect.objectContaining({ profileId: "default" }),
       }),
     );
     expect(await screen.findByText(/Re-enriched body\./)).toBeTruthy();

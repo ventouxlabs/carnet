@@ -26,7 +26,6 @@ import { readNote, updateChecklistItem } from "../lib/writer";
 import { MIN_TAP_TARGET, useCarnetTheme } from "../lib/theme";
 import { getSettings } from "../lib/settings";
 import { captureVaultContext } from "../lib/vaultContext";
-import { DEFAULT_VAULT_PROFILE_ID } from "../lib/vaultProfiles";
 import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Todos">;
@@ -77,6 +76,9 @@ export function flipInIndex(index: NoteIndex, todo: AggregatedTodo): NoteIndex {
 export default function TodosScreen({ navigation }: Props) {
   const theme = useCarnetTheme();
   const [index, setIndex] = useState<NoteIndex | null>(null);
+  // Keep the exact index instance paired with its frozen vault context. A
+  // stale row handler must never mutate an index replaced by another vault.
+  const indexRef = useRef<NoteIndex | null>(null);
   const vaultContextRef = useRef<ReturnType<typeof captureVaultContext> | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -87,19 +89,35 @@ export default function TodosScreen({ navigation }: Props) {
   useFocusEffect(
     useCallback(() => {
       let active = true;
+      vaultContextRef.current = null;
+      indexRef.current = null;
+      setIndex(null);
       setLoading(true);
       void getSettings().then((settings) => captureVaultContext(settings)).then((context) => {
+        if (!active) return;
         vaultContextRef.current = context;
         return getNoteIndex(context.profileId, resolveContextRoot(context))
-          .then((next) => (active ? setIndex(next) : undefined))
+          .then((next) => {
+            if (active && vaultContextRef.current === context) {
+              indexRef.current = next;
+              setIndex(next);
+            }
+          })
           .then(() => refreshActiveVault(context))
-          .then((next) => (active && next ? setIndex(next) : undefined));
+          .then((next) => {
+            if (active && vaultContextRef.current === context && next) {
+              indexRef.current = next;
+              setIndex(next);
+            }
+          });
       })
         .finally(() => {
           if (active) setLoading(false);
         });
       return () => {
         active = false;
+        vaultContextRef.current = null;
+        indexRef.current = null;
       };
     }, []),
   );
@@ -109,11 +127,12 @@ export default function TodosScreen({ navigation }: Props) {
     setRefreshError(null);
     try {
       const context = vaultContextRef.current;
-      setIndex(
-        await (context
-          ? refreshNoteIndex(context.profileId, resolveContextRoot(context))
-          : refreshNoteIndex()),
-      );
+      if (!context) return;
+      const next = await refreshNoteIndex(context.profileId, resolveContextRoot(context));
+      if (vaultContextRef.current === context) {
+        indexRef.current = next;
+        setIndex(next);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setRefreshError(`Refresh failed — showing cached results: ${msg}`);
@@ -130,25 +149,47 @@ export default function TodosScreen({ navigation }: Props) {
 
   const openNote = useCallback(
     async (uri: string) => {
+      // Pin navigation to the vault that supplied the tapped todo. Resolving
+      // the entry can yield to SAF; a profile switch in that gap must not open
+      // the old URI under the new vault's detail context.
+      const context = vaultContextRef.current;
+      if (!context) return;
       const entry = await resolveNoteEntry(uri);
-      if (entry) navigation.navigate("RecentDetail", {
+      if (entry && vaultContextRef.current === context) navigation.navigate("RecentDetail", {
         entry,
-        vaultContext: vaultContextRef.current ?? {
-          profileId: DEFAULT_VAULT_PROFILE_ID,
-          rootUri: "",
-        },
+        vaultContext: context,
       });
     },
     [navigation],
   );
 
   const onToggle = useCallback(async (todo: AggregatedTodo) => {
+    // The note write and its cache repair are one logical operation. Capture
+    // the profile before the first await so a profile switch cannot put this
+    // note's fresh metadata into the newly active vault's cache.
+    const context = vaultContextRef.current;
+    const capturedIndex = indexRef.current;
+    if (!context || !capturedIndex || capturedIndex !== index) {
+      setToggleError("Tasks changed vaults — wait for the current vault to finish loading.");
+      return;
+    }
+    const profileId = context.profileId;
     // Optimistic: flip immediately, revert on failure.
-    setIndex((prev) => prev && flipInIndex(prev, todo));
+    setIndex((prev) => {
+      if (prev !== capturedIndex || vaultContextRef.current !== context) return prev;
+      const next = flipInIndex(prev, todo);
+      indexRef.current = next;
+      return next;
+    });
     try {
       const result = await updateChecklistItem(todo.uri, todo.text, todo.checked);
       if (!result.ok) {
-        setIndex((prev) => prev && flipInIndex(prev, todo)); // revert
+        setIndex((prev) => {
+          if (!prev || vaultContextRef.current !== context) return prev;
+          const next = flipInIndex(prev, todo);
+          indexRef.current = next;
+          return next;
+        }); // revert
         setToggleError(
           result.reason === "ambiguous"
             ? "Can't tell which item — edit the text in the note to make it unique."
@@ -157,7 +198,12 @@ export default function TodosScreen({ navigation }: Props) {
         return;
       }
     } catch (e: unknown) {
-      setIndex((prev) => prev && flipInIndex(prev, todo)); // revert
+      setIndex((prev) => {
+        if (!prev || vaultContextRef.current !== context) return prev;
+        const next = flipInIndex(prev, todo);
+        indexRef.current = next;
+        return next;
+      }); // revert
       setToggleError(
         `Couldn't update that item: ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -168,7 +214,7 @@ export default function TodosScreen({ navigation }: Props) {
       await upsertNoteInIndex(
         todo.uri,
         await readNote(todo.uri),
-        vaultContextRef.current?.profileId ?? DEFAULT_VAULT_PROFILE_ID,
+        profileId,
       );
     } catch (e: unknown) {
       // Stale cache self-corrects on the next pull-to-refresh. Warn (don't
@@ -176,7 +222,7 @@ export default function TodosScreen({ navigation }: Props) {
       // precedent (vault.ts) for a benign, expected-to-sometimes-fail path.
       console.warn("[TodosScreen] cache sync failed after a successful toggle:", e);
     }
-  }, []);
+  }, [index]);
 
   const renderItem = useCallback(
     ({ item }: { item: AggregatedTodo }) => (

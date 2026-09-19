@@ -110,6 +110,8 @@ class CaptureForegroundService : Service() {
     const val NOTIFICATION_ID = 1042
     const val ACTION_STOP = "${packageName}.CAPTURE_STOP"
     const val ACTION_REFRESH_DRIVE_INBOX = "${packageName}.REFRESH_DRIVE_INBOX"
+    const val KEY_DRIVE_INBOX_PROMPT_AT = "drive_inbox_prompt_at"
+    const val KEY_DRIVE_INBOX_LAST_READ_AT = "drive_inbox_last_read_at"
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
@@ -122,7 +124,12 @@ class CaptureForegroundService : Service() {
     }
     ensureChannel()
     if (intent?.action == ACTION_REFRESH_DRIVE_INBOX) {
-      getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification())
+      // A stale notification action can arrive after Android killed the
+      // service. In that case the broadcast must start a foreground service,
+      // which in turn MUST call startForeground promptly; notify() alone
+      // violates that contract. Calling it again for an already-running
+      // foreground service is also the supported way to replace its content.
+      startForeground(NOTIFICATION_ID, buildNotification())
       return START_STICKY
     }
     startForeground(NOTIFICATION_ID, buildNotification())
@@ -230,19 +237,46 @@ class CaptureForegroundService : Service() {
       .build()
   }
 
-  private fun driveInboxStyle(): NotificationCompat.MessagingStyle {
+  private data class DriveInboxState(
+    val promptAt: Long,
+    val unread: Boolean,
+  )
+
+  /**
+   * The Drive Inbox prompt is a single persisted message, not a freshly
+   * timestamped unread message every time the notification is rebuilt. Without
+   * this state, mark-read only writes a preference which the MessagingStyle
+   * immediately ignores on refresh.
+   */
+  private fun driveInboxState(): DriveInboxState {
+    val prefs = getSharedPreferences(CaptureNotificationModule.PREFS_NAME, Context.MODE_PRIVATE)
+    var promptAt = prefs.getLong(KEY_DRIVE_INBOX_PROMPT_AT, 0L)
+    if (promptAt == 0L) {
+      promptAt = System.currentTimeMillis()
+      prefs.edit().putLong(KEY_DRIVE_INBOX_PROMPT_AT, promptAt).apply()
+    }
+    val lastReadAt = prefs.getLong(KEY_DRIVE_INBOX_LAST_READ_AT, 0L)
+    return DriveInboxState(promptAt, lastReadAt < promptAt)
+  }
+
+  private fun driveInboxStyle(state: DriveInboxState): NotificationCompat.MessagingStyle {
     val self = Person.Builder().setName("You").setKey("carnet:self").build()
     val inbox = Person.Builder().setName("Drive Inbox").setKey("carnet:drive-inbox").build()
-    return NotificationCompat.MessagingStyle(self)
+    val style = NotificationCompat.MessagingStyle(self)
       .setConversationTitle("Drive Inbox")
       .setGroupConversation(false)
-      .addMessage(
+    // Once acknowledged, omit the prompt rather than re-creating it as an
+    // unread message. Reply remains available for a hands-free capture.
+    if (state.unread) {
+      style.addMessage(
         NotificationCompat.MessagingStyle.Message(
           "Dictate a note to yourself.",
-          System.currentTimeMillis(),
+          state.promptAt,
           inbox,
         ),
       )
+    }
+    return style
   }
 
   private fun buildNotification(): Notification {
@@ -256,18 +290,24 @@ class CaptureForegroundService : Service() {
       PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
+    val driveInbox = driveInboxState()
     return NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.drawable.shortcut_idea)
       .setContentTitle("Carnet")
-      .setContentText("Drive Inbox ready for a voice note")
+      .setContentText(
+        if (driveInbox.unread) "Drive Inbox ready for a voice note" else "Drive Inbox is caught up",
+      )
+      .setNumber(if (driveInbox.unread) 1 else 0)
       .setContentIntent(launchPi)
       .setOngoing(true)
       .setPriority(NotificationCompat.PRIORITY_LOW)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-      .setStyle(driveInboxStyle())
+      .setStyle(driveInboxStyle(driveInbox))
       .addAction(driveInboxReplyAction())
-      .addAction(driveInboxMarkReadAction())
+      .apply {
+        if (driveInbox.unread) addAction(driveInboxMarkReadAction())
+      }
       .addAction(quickIdeaAction())
       .addAction(R.drawable.shortcut_idea, "Idea", captureIntent("carnet://capture/idea", 1))
       .addAction(R.drawable.shortcut_journal, "Journal", captureIntent("carnet://capture/journal", 2))
@@ -527,19 +567,27 @@ import android.content.Intent
 class DriveInboxReadReceiver : BroadcastReceiver() {
   companion object {
     const val ACTION_MARK_READ = "${packageName}.DRIVE_INBOX_MARK_READ"
-    const val KEY_LAST_READ_AT = "drive_inbox_last_read_at"
   }
 
   override fun onReceive(context: Context, intent: Intent) {
     if (intent.action != ACTION_MARK_READ) return
     context.getSharedPreferences(CaptureNotificationModule.PREFS_NAME, Context.MODE_PRIVATE)
       .edit()
-      .putLong(KEY_LAST_READ_AT, System.currentTimeMillis())
+      .putLong(CaptureForegroundService.KEY_DRIVE_INBOX_LAST_READ_AT, System.currentTimeMillis())
       .apply()
     try {
-      context.startService(Intent(context, CaptureForegroundService::class.java).apply {
+      val refreshIntent = Intent(context, CaptureForegroundService::class.java).apply {
         action = CaptureForegroundService.ACTION_REFRESH_DRIVE_INBOX
-      })
+      }
+      // The action may outlive the foreground service that rendered it. Start
+      // with the foreground API so that a stale action cannot trip Android's
+      // background-service restriction; the service refresh path immediately
+      // calls startForeground with the rebuilt notification.
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        context.startForegroundService(refreshIntent)
+      } else {
+        context.startService(refreshIntent)
+      }
     } catch (e: Exception) {
       android.util.Log.w("CarnetDriveInbox", "Failed to refresh after mark-read: \${e.message}")
     }

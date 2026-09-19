@@ -14,6 +14,7 @@ import * as Sharing from "expo-sharing";
 
 import type { ResolvedAttachment } from "../components/NoteAttachmentsCard";
 import { listPairedBinaries, resolvePairedUri } from "./writer";
+import type { Root } from "./vaultRoot";
 
 /**
  * Resolve every non-Audio paired binary linked from `body` to a storage URI.
@@ -23,11 +24,14 @@ import { listPairedBinaries, resolvePairedUri } from "./writer";
  */
 export async function resolveNoteAttachments(
   body: string,
+  rootOverride?: Root,
 ): Promise<ResolvedAttachment[]> {
   const links = listPairedBinaries(body).filter((b) => b.subdir !== "Audio");
   const resolved: ResolvedAttachment[] = [];
   for (const link of links) {
-    const r = await resolvePairedUri(link.subdir, link.filename);
+    const r = rootOverride
+      ? await resolvePairedUri(link.subdir, link.filename, rootOverride)
+      : await resolvePairedUri(link.subdir, link.filename);
     if (r) {
       resolved.push({
         rel: link.rel,

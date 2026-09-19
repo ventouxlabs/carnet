@@ -18,6 +18,8 @@ import {
 } from "./writer";
 import { enrichSharedImage } from "./dispatcher";
 import { transcribeAudio } from "./dispatcher";
+import type { VaultContext } from "./vaultContext";
+import type { Root } from "./vaultRoot";
 
 /**
  * Locate the first paired-binary filename of a given subdir in a note body.
@@ -49,6 +51,8 @@ export type ReprocessOutcome =
 export async function reEnrichNote(input: {
   body: string;
   filepath: string;
+  vaultContext?: VaultContext;
+  rootOverride?: Root;
 }): Promise<ReprocessOutcome> {
   try {
     // The match also gives us the relative path to re-inject after the LLM
@@ -59,12 +63,13 @@ export async function reEnrichNote(input: {
         "No paired image found in this note — re-enrich needs the original image on disk.",
       );
     }
-    const { base64, mime } = await readPairedBinaryFromNote(input.body);
-    const result = await enrichSharedImage({
-      base64,
-      mimeType: mime,
-      context: "",
-    });
+    const { base64, mime } = input.rootOverride
+      ? await readPairedBinaryFromNote(input.body, input.rootOverride)
+      : await readPairedBinaryFromNote(input.body);
+    const result = await enrichSharedImage(
+      { base64, mimeType: mime, context: "" },
+      { vaultContext: input.vaultContext },
+    );
     const withImage = injectImageEmbed(
       result.markdown,
       `../Photos/${imageFilename}`,
@@ -87,6 +92,7 @@ export async function reEnrichNote(input: {
 export async function transcribeNote(input: {
   body: string;
   filepath: string;
+  rootOverride?: Root;
 }): Promise<ReprocessOutcome> {
   try {
     const filename = findPairedLink(input.body, "Audio");
@@ -95,7 +101,9 @@ export async function transcribeNote(input: {
         "No paired audio found in this note — transcription needs the original audio on disk.",
       );
     }
-    const { base64, mime } = await readPairedBinaryFromNote(input.body);
+    const { base64, mime } = input.rootOverride
+      ? await readPairedBinaryFromNote(input.body, input.rootOverride)
+      : await readPairedBinaryFromNote(input.body);
     const { text } = await transcribeAudio({ base64, mimeType: mime, filename });
     const next = upsertSection(input.body, "Transcript", text);
     await updateNote(input.filepath, next);

@@ -108,6 +108,10 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
   const theme = useCarnetTheme();
   const { entry, vaultContext } = route.params;
   const { profileId } = vaultContext;
+  // The route context was captured before navigation. Keep this resolved root
+  // stable for every edit/view attachment operation even if Settings switches
+  // profiles while this detail screen remains mounted.
+  const noteRoot = useMemo(() => resolveContextRoot(vaultContext), [vaultContext]);
 
   const [body, setBody] = useState<string>("");
   const [missing, setMissing] = useState(false);
@@ -165,6 +169,8 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     filepath: entry.filepath,
     entryId: entry.id,
     entryTitle: entry.title,
+    profileId,
+    rootOverride: noteRoot,
     richEditorEnabled,
     onBodyChange: setBody,
   });
@@ -172,9 +178,11 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     body,
     filepath: entry.filepath,
     entryTitle: entry.title,
+    vaultContext,
+    rootOverride: noteRoot,
     onBodyChange: setBody,
   });
-  const audio = useNoteAudioPlayer(body);
+  const audio = useNoteAudioPlayer(body, noteRoot);
 
   // Header overflow (⋮) — the entry to the secondary-actions sheet. Hidden
   // while editing (the edit surface has its own Save/Cancel chrome).
@@ -289,7 +297,12 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     setReEnrichError(null);
     setReEnriching(true);
     try {
-      const outcome = await reEnrichNote({ body, filepath: entry.filepath });
+      const outcome = await reEnrichNote({
+        body,
+        filepath: entry.filepath,
+        vaultContext,
+        rootOverride: noteRoot,
+      });
       if (outcome.kind === "updated") setBody(outcome.nextBody);
       else setReEnrichError(outcome.reason);
     } finally {
@@ -299,7 +312,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       reEnrichingRef.current = false;
       setReEnriching(false);
     }
-  }, [body, entry.filepath]);
+  }, [body, entry.filepath, noteRoot, vaultContext]);
 
   // Reuses the re-enrich in-flight ref and error slot: both are "re-run the
   // enrichment call on this note", they are mutually exclusive (a note is
@@ -311,7 +324,11 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     setReEnrichError(null);
     setReEnriching(true);
     try {
-      const outcome = await finishPendingEnrichment({ body, filepath: entry.filepath });
+      const outcome = await finishPendingEnrichment({
+        body,
+        filepath: entry.filepath,
+        vaultContext,
+      });
       if (outcome.kind === "updated") setBody(outcome.markdown);
       else setReEnrichError(outcome.reason);
     } finally {
@@ -319,7 +336,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       reEnrichingRef.current = false;
       setReEnriching(false);
     }
-  }, [body, entry.filepath]);
+  }, [body, entry.filepath, vaultContext]);
 
   // The third member of the re-enrich family, and the only one not gated on the
   // note being stuck: "I edited this note, run enrichment on my edit". Shares
@@ -335,6 +352,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
         body,
         filepath: entry.filepath,
         mode: entry.mode,
+        vaultContext,
       });
       if (outcome.kind === "updated") {
         setBody(outcome.markdown);
@@ -355,7 +373,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       reEnrichingRef.current = false;
       setReEnriching(false);
     }
-  }, [body, entry.filepath, entry.mode, entry.title, profileId]);
+  }, [body, entry.filepath, entry.mode, entry.title, profileId, vaultContext]);
 
   const handleTranscribe = useCallback(async () => {
     if (transcribingRef.current) return;
@@ -363,7 +381,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     setTranscribeError(null);
     setTranscribing(true);
     try {
-      const outcome = await transcribeNote({ body, filepath: entry.filepath });
+      const outcome = await transcribeNote({ body, filepath: entry.filepath, rootOverride: noteRoot });
       if (outcome.kind === "updated") setBody(outcome.nextBody);
       else setTranscribeError(outcome.reason);
     } finally {
@@ -371,7 +389,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       transcribingRef.current = false;
       setTranscribing(false);
     }
-  }, [body, entry.filepath]);
+  }, [body, entry.filepath, noteRoot]);
 
   const handleEnhance = useCallback(async () => {
     if (enhancingRef.current) return;
@@ -404,6 +422,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
           base64,
           mime,
           basename,
+          rootOverride: noteRoot,
         });
         if (outcome.kind === "attached") {
           setBody(outcome.nextBody);
@@ -415,7 +434,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
         setAttachingPhoto(false);
       }
     },
-    [entry.filepath],
+    [entry.filepath, noteRoot],
   );
 
   // ── Attachments (images inline + tappable file rows) ──────────────────────
@@ -428,7 +447,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     // Best-effort: a resolution failure (SAF permission hiccup) degrades to
     // "no attachment rows" — the note body still renders. Previously a
     // reject here escaped as an unhandled rejection (lint find, 2026-07-18).
-    resolveNoteAttachments(body)
+    resolveNoteAttachments(body, noteRoot)
       .then((resolved) => {
         if (active) setAttachments(resolved);
       })
@@ -439,7 +458,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     return () => {
       active = false;
     };
-  }, [body]);
+  }, [body, noteRoot]);
 
   // ── Related notes (lexical, over the cached index) ─────────────────────────
   // Cache-first and best-effort: a missing/stale index just means an empty
@@ -618,10 +637,11 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
   // can dock above the keyboard.
   if (edit.editMode && richEditorEnabled) {
     return (
-      <RichNoteEditor
+        <RichNoteEditor
         theme={theme}
         editorRef={edit.wysiwygRef}
-        seed={edit.wysiwygSeed}
+          seed={edit.wysiwygSeed}
+          rootOverride={noteRoot}
         editError={edit.editError}
         saving={edit.saving}
         tags={edit.editTags}

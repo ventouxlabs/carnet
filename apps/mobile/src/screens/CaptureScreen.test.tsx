@@ -128,17 +128,23 @@ import { enqueue } from "../lib/queue";
 import { persistAttachments } from "../lib/attachmentPersistence";
 import { clearDraft as clearDraftMock } from "../lib/captureDraft";
 import { upsertNoteInIndex } from "../lib/vault";
+import { getTagIndex } from "../lib/vault";
 import { appendJournal } from "../lib/writer";
 import { resolvePlaceName } from "../lib/location";
 
 type ScreenProps = Parameters<typeof CaptureScreen>[0];
 
 function makeNavigation() {
+  const focusListeners = new Set<() => void>();
   return {
     setOptions: vi.fn(),
     navigate: vi.fn(),
     goBack: vi.fn(),
-    addListener: vi.fn(() => vi.fn()),
+    addListener: vi.fn((event: string, listener: () => void) => {
+      if (event === "focus") focusListeners.add(listener);
+      return () => focusListeners.delete(listener);
+    }),
+    focus: () => focusListeners.forEach((listener) => listener()),
   };
 }
 
@@ -166,6 +172,26 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("CaptureScreen (idea)", () => {
+  it("reloads tag autocomplete for the vault focused after a profile switch", async () => {
+    let settings = {
+      previewBeforeSave: false,
+      captureFolderPath: "file:///vault-a",
+      vaultProfiles: [
+        { id: "a", name: "A", rootUri: "file:///vault-a", createdAt: 1 },
+        { id: "b", name: "B", rootUri: "file:///vault-b", createdAt: 2 },
+      ],
+      activeVaultProfileId: "a",
+    };
+    vi.mocked(getSettings).mockImplementation(async () => settings as Awaited<ReturnType<typeof getSettings>>);
+    vi.mocked(getTagIndex).mockResolvedValue({ builtAt: 1, tags: [] });
+    const { navigation } = renderScreen();
+
+    await waitFor(() => expect(getTagIndex).toHaveBeenCalledWith("a", expect.anything()));
+    settings = { ...settings, captureFolderPath: "file:///vault-b", activeVaultProfileId: "b" };
+    navigation.focus();
+    await waitFor(() => expect(getTagIndex).toHaveBeenCalledWith("b", expect.anything()));
+  });
+
   it("starts distraction-free: input + disabled Send, metadata behind '+'", async () => {
     renderScreen();
     const input = await screen.findByPlaceholderText("What's on your mind?");

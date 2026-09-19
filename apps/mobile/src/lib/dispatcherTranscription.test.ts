@@ -90,6 +90,8 @@ import { transcribeAudio, autoTranscribeIfEnabled, MAX_TRANSCRIPTION_BYTES } fro
 import * as llmClient from "./llmClient";
 import { getSettings } from "./settings";
 
+const CAPTURE_ROOT = { uri: "file:///vault-a", fs: {} } as never;
+
 beforeEach(() => {
   fetchMock.mockReset();
   vi.mocked(getSettings).mockResolvedValue(BASE_SETTINGS);
@@ -214,8 +216,9 @@ describe("autoTranscribeIfEnabled", () => {
     // Default global settings mock has autoTranscribeOnSave: false.
     const { readNote } = await import("./writer");
     const { transcribeOnDevice } = await import("./audioTranscribeOnDevice");
-    const result = await autoTranscribeIfEnabled("/vault/Ideas/foo.md");
+    const result = await autoTranscribeIfEnabled("/vault/Ideas/foo.md", CAPTURE_ROOT);
     expect(result).toBeNull();
+
     // Short-circuits before reading the note OR hitting the recognizer.
     expect(readNote).not.toHaveBeenCalled();
     expect(transcribeOnDevice).not.toHaveBeenCalled();
@@ -234,8 +237,10 @@ describe("autoTranscribeIfEnabled", () => {
     });
     vi.mocked(transcribeOnDevice).mockResolvedValueOnce("hello world");
 
-    const result = await autoTranscribeIfEnabled("/vault/Ideas/foo.md");
+    const result = await autoTranscribeIfEnabled("/vault/Ideas/foo.md", CAPTURE_ROOT);
     expect(result).toBeNull();
+
+    expect(readPairedBinaryFromNote).toHaveBeenCalledWith(AUDIO_NOTE, CAPTURE_ROOT);
 
     // Pin that the filename extracted by the ../Audio/ regex ("clip.m4a")
     // reaches the on-device wrapper, alongside the binary's base64.
@@ -268,7 +273,7 @@ describe("autoTranscribeIfEnabled", () => {
       `---\nkind: idea\n---\n# Plain idea\n\nNo binary link here.\n`,
     );
 
-    const result = await autoTranscribeIfEnabled("/vault/Ideas/foo.md");
+    const result = await autoTranscribeIfEnabled("/vault/Ideas/foo.md", CAPTURE_ROOT);
     expect(result).toBe("Note has no Audio/ link");
     expect(readPairedBinaryFromNote).not.toHaveBeenCalled();
     expect(transcribeOnDevice).not.toHaveBeenCalled();
@@ -283,7 +288,7 @@ describe("autoTranscribeIfEnabled", () => {
       new Error("ENOENT: no such file"),
     );
 
-    const result = await autoTranscribeIfEnabled("/vault/Ideas/gone.md");
+    const result = await autoTranscribeIfEnabled("/vault/Ideas/gone.md", CAPTURE_ROOT);
     expect(result).toContain("ENOENT");
     expect(transcribeOnDevice).not.toHaveBeenCalled();
   });
@@ -304,7 +309,7 @@ describe("autoTranscribeIfEnabled", () => {
       new Error("On-device STT error: no-speech — no speech detected"),
     );
 
-    const result = await autoTranscribeIfEnabled("/vault/Ideas/foo.md");
+    const result = await autoTranscribeIfEnabled("/vault/Ideas/foo.md", CAPTURE_ROOT);
     expect(result).toContain("no-speech");
     // updateNote MUST NOT run on transcribe failure — the original note
     // stays untouched.
@@ -332,7 +337,7 @@ describe("autoTranscribeIfEnabled", () => {
     // string in one idiomatic line — and preserves the failure if it ever
     // does throw (the old manual try/catch swallowed the stack).
     await expect(
-      autoTranscribeIfEnabled("/vault/Ideas/foo.md"),
+      autoTranscribeIfEnabled("/vault/Ideas/foo.md", CAPTURE_ROOT),
     ).resolves.toContain("SAF tree permission revoked");
   });
 });

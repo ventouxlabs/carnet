@@ -12,6 +12,7 @@ import {
   restoreImagesFromEditor,
 } from '../lib/editorImages';
 import { resolvePhotoDataUri } from '../lib/photoDataUri';
+import type { Root } from '../lib/vaultRoot';
 
 // Higher-contrast toolbar icons than TenTap's washed-out greys, tinted from the
 // active Paper theme so the bar holds contrast in dark mode too. Deep-merged
@@ -57,6 +58,8 @@ export interface WysiwygEditorRef {
 interface WysiwygEditorProps {
   /** Initial markdown body (frontmatter already split off by the caller). */
   value: string;
+  /** Root frozen by the note route for existing image previews. */
+  rootOverride?: Root;
 }
 
 /**
@@ -74,7 +77,7 @@ interface WysiwygEditorProps {
  * restored. See ../lib/editorImages and ../bridges/MarkdownBridge.
  */
 export const WysiwygEditor = forwardRef<WysiwygEditorRef, WysiwygEditorProps>(
-  function WysiwygEditor({ value }, ref) {
+  function WysiwygEditor({ value, rootOverride }, ref) {
     const theme = useTheme();
     const editor = useEditorBridge({
       customSource: editorHtml,
@@ -109,10 +112,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorRef, WysiwygEditorProps>(
     // Resolve a relative Photos embed to a data URI for in-editor display, and
     // remember the reverse mapping. Stable identity so the effects below don't re-run.
     const resolver = useCallback(async (rel: string): Promise<string | null> => {
-      const dataUri = await resolvePhotoDataUri(rel);
+      const dataUri = await resolvePhotoDataUri(rel, rootOverride);
       if (dataUri) imageMapRef.current.set(dataUri, rel);
       return dataUri;
-    }, []);
+    }, [rootOverride]);
 
     const loadedRef = useRef(false);
     const initializedRef = useRef(false);

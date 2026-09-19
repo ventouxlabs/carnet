@@ -18,6 +18,7 @@ import {
   loadPushedAssets,
   savePushedAssets,
 } from "./karakeepAssetSync";
+import type { Root } from "./vaultRoot";
 
 /**
  * Incrementally sync a note's image/file attachments to its Karakeep bookmark:
@@ -86,6 +87,7 @@ export function isUnsupportedAssetTypeError(e: unknown): boolean {
 export async function pushNoteAttachments(
   bookmarkId: string,
   noteBody: string,
+  rootOverride?: Root,
 ): Promise<PushAttachmentsResult> {
   // Load → mutate in memory → persist. Safe without a lock because exports are
   // single-flighted by the caller (RecentDetailScreen's exportingKarakeepRef),
@@ -120,7 +122,9 @@ export async function pushNoteAttachments(
       continue;
     }
     try {
-      const resolved = await resolvePairedUri(link.subdir, link.filename);
+      const resolved = rootOverride
+        ? await resolvePairedUri(link.subdir, link.filename, rootOverride)
+        : await resolvePairedUri(link.subdir, link.filename);
       if (!resolved) continue; // file moved/renamed externally — skip (not recorded)
       const { assetId } = await uploadAsset({
         uri: resolved.uri,

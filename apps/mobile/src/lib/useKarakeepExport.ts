@@ -17,12 +17,17 @@ import { Alert } from "react-native";
 import { exportNoteToKarakeep } from "./karakeepNoteExport";
 import { needsReexportConfirm, planKarakeepUiUpdate } from "./karakeepExportUi";
 import { enqueuePendingExport } from "./pendingSync";
+import type { VaultContext } from "./vaultContext";
+import type { Root } from "./vaultRoot";
 
 export interface UseKarakeepExportArgs {
   /** The note's full markdown, including frontmatter. */
   body: string;
   filepath: string;
   entryTitle: string;
+  /** Immutable routing captured by RecentDetail before any export await. */
+  vaultContext?: VaultContext;
+  rootOverride?: Root;
   /** Adopt the rewritten note after a successful (or partial) export. */
   onBodyChange: (next: string) => void;
 }
@@ -48,6 +53,8 @@ export function useKarakeepExport({
   body,
   filepath,
   entryTitle,
+  vaultContext,
+  rootOverride,
   onBodyChange,
 }: UseKarakeepExportArgs): KarakeepExportState {
   const [exportingKarakeep, setExportingKarakeep] = useState(false);
@@ -90,13 +97,13 @@ export function useKarakeepExport({
     // orchestration + the in-place note write; this hook only translates the
     // outcome into UI state.
     const plan = planKarakeepUiUpdate(
-      await exportNoteToKarakeep({ body: bodyRef.current, filepath, entryTitle }),
+      await exportNoteToKarakeep({ body: bodyRef.current, filepath, entryTitle, rootOverride }),
     );
     if (plan.kind === "queue") {
       // The enqueue runs OUTSIDE the mounted guard: a Back-during-export must
       // not lose the retry, only skip the snackbar.
       try {
-        await enqueuePendingExport({ filepath, entryTitle });
+        await enqueuePendingExport({ filepath, entryTitle, vaultContext });
         if (mountedRef.current) setKarakeepQueued(true);
       } catch {
         // Queueing itself failed (storage error) — fall back to the plain
@@ -118,7 +125,7 @@ export function useKarakeepExport({
     }
     exportingKarakeepRef.current = false;
     if (mountedRef.current) setExportingKarakeep(false);
-  }, [filepath, entryTitle, onBodyChange]);
+  }, [filepath, entryTitle, onBodyChange, rootOverride, vaultContext]);
 
   // If the note was already exported (frontmatter carries a karakeepId),
   // confirm before re-sending; otherwise export directly.

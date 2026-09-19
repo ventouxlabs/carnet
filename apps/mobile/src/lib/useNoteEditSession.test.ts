@@ -32,6 +32,7 @@ import { useNoteEditSession, type NoteEditSession } from "./useNoteEditSession";
 const HEADER = "---\ncreated: 2026-07-08T11:55:46.000Z\ntags: [qa-test]\n---\n";
 const NOTE_BODY = "# Draft Survival Test\n\nHello body text.\n";
 const NOTE = HEADER + NOTE_BODY;
+const ROOT = { uri: "file:///pinned-vault", fs: {} } as never;
 
 // A deliberately NON-CANONICAL header: block-list tags, padded key spacing and a
 // quoted, un-normalized tag value. Nothing here survives a round-trip through
@@ -52,6 +53,8 @@ function setup(overrides: Partial<Parameters<typeof useNoteEditSession>[0]> = {}
         filepath: "file:///v/Ideas/draft-survival-test.md",
         entryId: "r1",
         entryTitle: "Draft Survival Test",
+        profileId: "vault-a",
+        rootOverride: ROOT,
         richEditorEnabled: false,
         onBodyChange,
         ...props,
@@ -251,6 +254,7 @@ describe("toolbar editing", () => {
     });
 
     expect(result.current.draft).toBe("before ![](../Photos/shot.jpg)after");
+    expect(pickAndWriteVaultImage).toHaveBeenCalledWith(ROOT);
     expect(result.current.editError).toBeNull();
   });
 
@@ -308,6 +312,7 @@ describe("toolbar editing", () => {
       "../Photos/shot.jpg",
       "data:image/jpeg;base64,AAA",
     );
+    expect(pickAndWriteVaultImage).toHaveBeenCalledWith(ROOT);
   });
 
   it("ignores a format tap while a save is committing", async () => {
@@ -376,7 +381,7 @@ describe("markdown save", () => {
     expect(result.current.editMode).toBe(false);
     expect(result.current.saving).toBe(false);
     // H1 changed → the recents row is renamed to match.
-    expect(updateCaptureTitle).toHaveBeenCalledWith("r1", "Renamed Note");
+    expect(updateCaptureTitle).toHaveBeenCalledWith("r1", "Renamed Note", "vault-a");
   });
 
   it("skips the recents-title write when the H1 is unchanged", async () => {
@@ -537,7 +542,7 @@ describe("rich (WYSIWYG) save", () => {
     expect(written).toContain("created: 2026-07-08T11:55:46.000Z");
     expect(written.match(/^---$/gm)?.length).toBe(2);
     expect(written.endsWith(NOTE_BODY)).toBe(true);
-    expect(invalidateNoteIndex).toHaveBeenCalledTimes(1);
+    expect(invalidateNoteIndex).toHaveBeenCalledWith("vault-a");
   });
 
   it("reports a bridge failure instead of hanging on a disabled Save", async () => {
@@ -571,7 +576,7 @@ describe("rich (WYSIWYG) save", () => {
     await act(async () => {
       await result.current.handleSaveWysiwyg();
     });
-    expect(updateCaptureTitle).toHaveBeenCalledWith("r1", "Renamed In WebView");
+    expect(updateCaptureTitle).toHaveBeenCalledWith("r1", "Renamed In WebView", "vault-a");
   });
 
   // ── The byte-compatibility guarantee ───────────────────────────────────────

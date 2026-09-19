@@ -49,6 +49,64 @@ const EXCERPT_MAX = 200;
 /** Max concurrent note reads during a scan — keeps SAF/IPC pressure bounded. */
 const SCAN_CONCURRENCY = 8;
 
+/**
+ * Cache writes are serialized because a full refresh and an incremental
+ * upsert can otherwise each read a valid cache, then let the later write
+ * silently discard the other operation's work. The vault scan itself stays
+ * outside this queue: SAF reads can take seconds and must never delay a
+ * completed capture's cache update.
+ */
+let cacheWriteTail: Promise<void> = Promise.resolve();
+
+async function serializeCacheWrite<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = cacheWriteTail;
+  let release!: () => void;
+  cacheWriteTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+type PendingIndexUpsert = { revision: number; entry: NoteIndexEntry };
+
+/** Per-profile revisions let an in-flight full scan retain only writes that
+ * landed after it began. Without this journal, merging the whole cache would
+ * incorrectly resurrect files an authoritative refresh has just removed. */
+type IndexMutationState = {
+  revision: number;
+  pendingUpserts: PendingIndexUpsert[];
+  /** A count, not a Set: two overlapping scans can start at the same revision. */
+  activeRefreshStarts: Map<number, number>;
+};
+
+const indexMutationStates = new Map<string, IndexMutationState>();
+
+function indexMutationState(profileId: string): IndexMutationState {
+  let state = indexMutationStates.get(profileId);
+  if (!state) {
+    state = { revision: 0, pendingUpserts: [], activeRefreshStarts: new Map() };
+    indexMutationStates.set(profileId, state);
+  }
+  return state;
+}
+
+function discardMergedUpserts(state: IndexMutationState): void {
+  // A still-running older refresh may need every upsert after its start.
+  // Once it finishes, newer refreshes already include earlier writes in their
+  // scan snapshot, so those journal records can be released.
+  const oldestActiveStart = state.activeRefreshStarts.size
+    ? Math.min(...state.activeRefreshStarts.keys())
+    : state.revision;
+  state.pendingUpserts = state.pendingUpserts.filter(
+    (mutation) => mutation.revision > oldestActiveStart,
+  );
+}
+
 export interface TagIndexEntry {
   /** Normalized tag (see normalizeTag). */
   tag: string;
@@ -299,9 +357,38 @@ export async function loadCachedNoteIndex(profileId?: string): Promise<NoteIndex
 /** Build the note index fresh and persist it to the cache. */
 export async function refreshNoteIndex(profileId?: string, rootOverride?: Root): Promise<NoteIndex> {
   const resolvedProfileId = profileId ?? await activeIndexProfileId();
-  const index = await buildNoteIndex(rootOverride);
-  await AsyncStorage.setItem(noteIndexKey(resolvedProfileId), JSON.stringify(index));
-  return index;
+  const state = indexMutationState(resolvedProfileId);
+  const refreshStart = state.revision;
+  state.activeRefreshStarts.set(
+    refreshStart,
+    (state.activeRefreshStarts.get(refreshStart) ?? 0) + 1,
+  );
+  try {
+    const scanned = await buildNoteIndex(rootOverride);
+    return await serializeCacheWrite(async () => {
+      // An upsert that completed while the scan was running is newer than its
+      // file enumeration. Preserve it, but do not retain unrelated stale
+      // rows from the prior cache (a refresh is still authoritative for
+      // deletion and external edits).
+      const changes = state.pendingUpserts.filter(
+        (mutation) => mutation.revision > refreshStart,
+      );
+      if (changes.length === 0) {
+        await AsyncStorage.setItem(noteIndexKey(resolvedProfileId), JSON.stringify(scanned));
+        return scanned;
+      }
+      const notes = new Map(scanned.notes.map((note) => [note.uri, note]));
+      for (const { entry } of changes) notes.set(entry.uri, entry);
+      const index = { ...scanned, notes: [...notes.values()] };
+      await AsyncStorage.setItem(noteIndexKey(resolvedProfileId), JSON.stringify(index));
+      return index;
+    });
+  } finally {
+    const remainingAtStart = (state.activeRefreshStarts.get(refreshStart) ?? 1) - 1;
+    if (remainingAtStart === 0) state.activeRefreshStarts.delete(refreshStart);
+    else state.activeRefreshStarts.set(refreshStart, remainingAtStart);
+    discardMergedUpserts(state);
+  }
 }
 
 /**
@@ -337,8 +424,6 @@ export async function upsertNoteInIndex(
   profileId?: string,
 ): Promise<void> {
   const resolvedProfileId = profileId ?? await activeIndexProfileId();
-  const cached = await loadCachedNoteIndex(resolvedProfileId);
-  if (!cached) return;
   // The uri is authoritative; the mode round-trip is only a fallback. Going
   // through subdirForMode alone would record "Ideas" for anything outside
   // Journal/People — including a Notes/ synthesis note — while a full rebuild
@@ -347,15 +432,22 @@ export async function upsertNoteInIndex(
   // known note subdirs, which is when the mode collapse is the best guess left.
   const subdir = subdirForUri(uri) ?? subdirForMode(inferNoteMode(uri));
   const entry = buildNoteEntry(uri, subdir, markdown);
-  const idx = cached.notes.findIndex((n) => n.uri === uri);
-  const notes =
-    idx === -1
-      ? [...cached.notes, entry]
-      : cached.notes.map((n, i) => (i === idx ? entry : n));
-  await AsyncStorage.setItem(
-    noteIndexKey(resolvedProfileId),
-    JSON.stringify({ builtAt: cached.builtAt, notes }),
-  );
+  await serializeCacheWrite(async () => {
+    const cached = await loadCachedNoteIndex(resolvedProfileId);
+    if (!cached) return;
+    const idx = cached.notes.findIndex((n) => n.uri === uri);
+    const notes =
+      idx === -1
+        ? [...cached.notes, entry]
+        : cached.notes.map((n, i) => (i === idx ? entry : n));
+    const state = indexMutationState(resolvedProfileId);
+    state.revision += 1;
+    state.pendingUpserts.push({ revision: state.revision, entry });
+    await AsyncStorage.setItem(
+      noteIndexKey(resolvedProfileId),
+      JSON.stringify({ builtAt: cached.builtAt, notes }),
+    );
+  });
 }
 
 // ── Tag index (derived from the note index) ───────────────────────────────────
@@ -370,8 +462,8 @@ export async function buildTagIndex(): Promise<TagIndex> {
 }
 
 /** Read the cached tag index (derived from the cached note index), or null. */
-export async function loadCachedTagIndex(): Promise<TagIndex | null> {
-  const cached = await loadCachedNoteIndex();
+export async function loadCachedTagIndex(profileId?: string): Promise<TagIndex | null> {
+  const cached = await loadCachedNoteIndex(profileId);
   return cached ? deriveTagIndex(cached) : null;
 }
 
@@ -674,8 +766,12 @@ export async function searchNoteBodies(
   onMatch: (match: BodyMatch) => void,
   onProgress: (progress: { scanned: number; total: number }) => void,
   signal: AbortSignal,
+  rootOverride?: Root,
 ): Promise<{ scanned: number; total: number }> {
-  const files = await listNoteFiles();
+  // The screen captures this root at the explicit button press. Re-resolving
+  // the active root here would let a profile switch make one scan return a
+  // mixture of the old screen's state and the new vault's files.
+  const files = rootOverride ? await listNoteFilesInRoot(rootOverride) : await listNoteFiles();
   const total = files.length;
   let scanned = 0;
 

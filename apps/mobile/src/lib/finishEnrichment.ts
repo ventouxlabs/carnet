@@ -27,6 +27,7 @@ import { getFrontmatterTags, extractFrontmatterField, stripFrontmatter } from ".
 import { enrichIdeaInPlace, PENDING_ENRICH_STATUS, type EnrichIdeaOutcome } from "./ideaSaveFirst";
 import { enrichPersonInPlace, type EnrichInPlaceOutcome } from "./personInPlace";
 import type { CaptureMode } from "./storage";
+import type { VaultContext } from "./vaultContext";
 import {
   getModificationTime,
   listPairedBinaries,
@@ -95,6 +96,7 @@ export function isPendingEnrich(body: string): boolean {
 export async function finishPendingEnrichment(input: {
   body: string;
   filepath: string;
+  vaultContext?: VaultContext;
 }): Promise<FinishEnrichmentOutcome> {
   try {
     // Baseline first — a baseline read after the call would match whatever the
@@ -144,6 +146,7 @@ export async function finishPendingEnrichment(input: {
       tags: getFrontmatterTags(source),
       location,
       attachments: attachmentsFromBody(source),
+      vaultContext: input.vaultContext,
     });
 
     if (outcome.kind === "updated") {
@@ -196,6 +199,7 @@ export async function reEnrichNoteInPlace(input: {
   body: string;
   filepath: string;
   mode: CaptureMode;
+  vaultContext?: VaultContext;
 }): Promise<FinishEnrichmentOutcome> {
   try {
     if (input.mode === "journal") {
@@ -245,6 +249,7 @@ export async function reEnrichNoteInPlace(input: {
           // Same reason personInPlace re-merges tags/location: the model's
           // output carries none of the note's own embeds.
           attachments: attachmentsFromBody(source),
+          vaultContext: input.vaultContext,
         }),
       );
     }
@@ -265,6 +270,7 @@ export async function reEnrichNoteInPlace(input: {
         tags: getFrontmatterTags(source),
         location: extractFrontmatterField(source, "location") ?? undefined,
         attachments: attachmentsFromBody(source),
+        vaultContext: input.vaultContext,
       }),
     );
   } catch (e: unknown) {

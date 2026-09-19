@@ -390,7 +390,7 @@ async function processRow(payload: QueuePayload): Promise<void> {
     : legacyQueueContext(await getSettings());
   const root = resolveContextRoot(vaultContext);
   if (payload.mode === "idea") {
-    const result = await enrichIdea(payload.text);
+    const result = await enrichIdea(payload.text, { vaultContext });
     // Binaries were already written to disk at enqueue; fold their rel-paths
     // back into the body so the drained note matches the online capture.
     // Tags are merged AFTER attachments so the frontmatter merge sees the final body.
@@ -415,10 +415,10 @@ async function processRow(payload: QueuePayload): Promise<void> {
       await writeIdea(slug, md, root);
     }
   } else if (payload.mode === "journal") {
-    const result = await enrichJournal({
-      transcript: payload.transcript,
-      notes: payload.notes,
-    });
+    const result = await enrichJournal(
+      { transcript: payload.transcript, notes: payload.notes },
+      { vaultContext },
+    );
     // Same compose order as the online path (confirmSaveJournal): places go in
     // last, on this entry's own fragment, before appendJournal accumulates it.
     const md = injectPlaces(
@@ -430,10 +430,10 @@ async function processRow(payload: QueuePayload): Promise<void> {
     );
     await appendJournal(payload.date, md, root);
   } else if (payload.mode === "person") {
-    const result = await enrichPerson({
-      ocrResult: payload.ocrResult,
-      context: payload.context,
-    });
+    const result = await enrichPerson(
+      { ocrResult: payload.ocrResult, context: payload.context },
+      { vaultContext },
+    );
     // Extract name — pass empty strings to writePerson so it falls back to markdown
     await writePerson(
       "",

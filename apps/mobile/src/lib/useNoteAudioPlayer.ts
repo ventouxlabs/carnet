@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Audio } from "expo-av";
 
 import { readPairedBinaryUri } from "./writer";
+import type { Root } from "./vaultRoot";
 
 /** The three things a tap on Play/Pause can mean for an already-loaded sound. */
 export type PlaybackAction = "pause" | "restart" | "resume";
@@ -51,7 +52,7 @@ export interface NoteAudioPlayer {
 /**
  * @param body the note's full markdown — the paired binary is resolved from it.
  */
-export function useNoteAudioPlayer(body: string): NoteAudioPlayer {
+export function useNoteAudioPlayer(body: string, rootOverride?: Root): NoteAudioPlayer {
   const [playerLoading, setPlayerLoading] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -102,7 +103,9 @@ export function useNoteAudioPlayer(body: string): NoteAudioPlayer {
       }
       // First tap — load + start. Status callback drives the progress bar.
       setPlayerLoading(true);
-      const { uri } = await readPairedBinaryUri(body);
+      const { uri } = rootOverride
+        ? await readPairedBinaryUri(body, rootOverride)
+        : await readPairedBinaryUri(body);
       const { sound } = await Audio.Sound.createAsync(
         { uri },
         { shouldPlay: true, progressUpdateIntervalMillis: 250 },
@@ -126,7 +129,7 @@ export function useNoteAudioPlayer(body: string): NoteAudioPlayer {
     } finally {
       setPlayerLoading(false);
     }
-  }, [body]);
+  }, [body, rootOverride]);
 
   return { playerLoading, playerError, isPlaying, positionMs, durationMs, togglePlay };
 }

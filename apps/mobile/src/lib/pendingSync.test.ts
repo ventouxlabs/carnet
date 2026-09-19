@@ -40,6 +40,12 @@ beforeEach(() => {
 // ── CRUD + dedupe ────────────────────────────────────────────────────────────
 
 describe("enqueuePendingExport", () => {
+  it("persists the source vault context for a future drain", async () => {
+    const vaultContext = { profileId: "a", rootUri: "file:///vault-a" };
+    await enqueuePendingExport({ filepath: "file:///vault-a/Ideas/a.md", entryTitle: "A", vaultContext });
+    expect((await listPendingExports())[0].vaultContext).toEqual(vaultContext);
+  });
+
   it("stores a karakeep-export item with zero attempts", async () => {
     await enqueuePendingExport({
       filepath: "file:///vault/Ideas/a.md",

@@ -94,6 +94,15 @@ describe("getVaultTagStrings", () => {
     expect(await getVaultTagStrings(2)).toEqual(["a", "b"]);
   });
 
+  it("reads the explicitly captured profile cache", async () => {
+    vi.mocked(loadCachedTagIndex).mockResolvedValue(
+      mockIndex([{ tag: "work-only", count: 1 }]),
+    );
+
+    expect(await getVaultTagStrings("work")).toEqual(["work-only"]);
+    expect(loadCachedTagIndex).toHaveBeenCalledWith("work");
+  });
+
   it("returns [] for an empty vault index", async () => {
     vi.mocked(loadCachedTagIndex).mockResolvedValue(mockIndex([]));
     expect(await getVaultTagStrings()).toEqual([]);

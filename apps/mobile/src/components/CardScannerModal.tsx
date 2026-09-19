@@ -183,7 +183,7 @@ export function CardScannerModal({ visible, onResult, onClose }: Props) {
     <Portal>
       <Modal
         visible={visible}
-        onDismiss={onClose}
+        onDismiss={handleClose}
         contentContainerStyle={styles.modal}
       >
         <View style={styles.header}>

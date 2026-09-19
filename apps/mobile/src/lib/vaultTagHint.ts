@@ -42,10 +42,17 @@ export const MAX_TAG_LENGTH = 40;
  * The vault's existing tag vocabulary, most-used first, or `[]` when no index
  * is cached yet. Never triggers a vault scan; never throws.
  */
-export async function getVaultTagStrings(limit: number = MAX_HINT_TAGS): Promise<string[]> {
+export async function getVaultTagStrings(
+  profileIdOrLimit?: string | number,
+  limit: number = MAX_HINT_TAGS,
+): Promise<string[]> {
+  // Keep v0.4's `getVaultTagStrings(limit)` call shape for any callers outside
+  // this module while allowing capture flows to select a frozen profile.
+  const profileId = typeof profileIdOrLimit === "string" ? profileIdOrLimit : undefined;
+  const effectiveLimit = typeof profileIdOrLimit === "number" ? profileIdOrLimit : limit;
   let index;
   try {
-    index = await loadCachedTagIndex();
+    index = await loadCachedTagIndex(profileId);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn("[vaultTagHint] cached tag index read failed:", msg);
@@ -55,5 +62,5 @@ export async function getVaultTagStrings(limit: number = MAX_HINT_TAGS): Promise
   return index.tags
     .map((entry) => entry.tag)
     .filter((tag) => tag.length > 0 && tag.length <= MAX_TAG_LENGTH)
-    .slice(0, limit);
+    .slice(0, effectiveLimit);
 }

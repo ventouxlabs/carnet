@@ -96,4 +96,33 @@ describe("CardScannerModal", () => {
     expect(onResult).toHaveBeenCalledWith({ text: "Jane Doe", capture: saved, ocr: { kind: "ok" } });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it("cancels an in-flight classification when the backdrop dismisses the modal", async () => {
+    let resolveClassification!: (value: { classification: "card" }) => void;
+    vi.mocked(classifyBusinessCardViaVision).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveClassification = resolve;
+        }),
+    );
+    const { onResult, onClose } = renderModal();
+
+    fireEvent.click(screen.getByText("Capture"));
+    await waitFor(() => expect(classifyBusinessCardViaVision).toHaveBeenCalledTimes(1));
+
+    // Paper's dismissable overlay invokes the Modal's onDismiss callback. The
+    // parent deliberately leaves `visible` unchanged in this unit test, so
+    // only handleClose's synchronous session invalidation can stop the late
+    // classifier from reviving this cancelled interaction.
+    fireEvent.click(screen.getByLabelText("Close modal"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    resolveClassification({ classification: "card" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.queryByText("Use as business card")).toBeNull();
+    expect(onResult).not.toHaveBeenCalled();
+    expect(saveBusinessCardCapture).not.toHaveBeenCalled();
+  });
 });

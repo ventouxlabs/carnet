@@ -164,6 +164,11 @@ describe("handleQuickIdeaCapture — save-first ordering", () => {
     await handleQuickIdeaCapture("work reply");
 
     expect(writeRawIdeaMock).toHaveBeenCalledWith(expect.anything(), undefined, { uri: "file:///work" });
+    expect(enrichIdeaInPlaceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vaultContext: { profileId: "work", rootUri: "file:///work" },
+      }),
+    );
     expect(recordCaptureMock).toHaveBeenCalledWith(expect.anything(), "work");
     expect(invalidateTagIndexMock).toHaveBeenCalledWith("work");
   });

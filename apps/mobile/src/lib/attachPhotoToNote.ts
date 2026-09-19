@@ -26,6 +26,7 @@
 
 import { writeCapturedVaultImage } from "./vaultImageInsert";
 import { getModificationTime, readNote, updateNoteIfUnchanged } from "./writer";
+import type { Root } from "./vaultRoot";
 
 export type AttachPhotoOutcome =
   | { kind: "attached"; rel: string; nextBody: string }
@@ -46,6 +47,8 @@ export async function attachPhotoToNote(input: {
   mime: string;
   /** Original filename when the image came from the library; camera shots have none. */
   basename?: string;
+  /** Immutable root captured by the note route before any asynchronous work. */
+  rootOverride: Root;
 }): Promise<AttachPhotoOutcome> {
   try {
     // Baseline for the write-image → re-read → overwrite span below. The
@@ -56,6 +59,7 @@ export async function attachPhotoToNote(input: {
       input.base64,
       input.mime,
       input.basename,
+      input.rootOverride,
     );
 
     // CURRENT content, deliberately re-read rather than taken from the caller.

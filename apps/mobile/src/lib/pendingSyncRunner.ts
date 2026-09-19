@@ -8,6 +8,9 @@
  */
 
 import { getSettings } from "./settings";
+import { isVaultContext, type VaultContext } from "./vaultContext";
+import { resolveContextRoot } from "./vaultRoot";
+import { DEFAULT_VAULT_PROFILE_ID, defaultVaultProfile, normaliseVaultProfileState } from "./vaultProfiles";
 import { isHostReachable } from "./hostReachability";
 import { getModificationTime, readNote } from "./writer";
 import { exportNoteToKarakeep } from "./karakeepNoteExport";
@@ -41,10 +44,28 @@ async function exportPendingItem(
     const message = e instanceof Error ? e.message : String(e);
     return { kind: "error", message: `note read failed: ${message}` };
   }
+  // Legacy rows predate the context field. They belong to the original
+  // default/legacy vault, not whichever profile happens to be active when a
+  // later drain runs. New rows always carry the frozen context below.
+  let vaultContext: VaultContext;
+  if (isVaultContext(item.vaultContext)) {
+    vaultContext = item.vaultContext;
+  } else {
+    const settings = await getSettings();
+    const state = normaliseVaultProfileState({
+      profiles: settings.vaultProfiles,
+      activeProfileId: settings.activeVaultProfileId,
+      legacyCaptureFolderPath: settings.captureFolderPath,
+    });
+    const legacy = state.profiles.find((profile) => profile.id === DEFAULT_VAULT_PROFILE_ID)
+      ?? defaultVaultProfile(settings.captureFolderPath);
+    vaultContext = { profileId: legacy.id, rootUri: legacy.rootUri };
+  }
   const outcome = await exportNoteToKarakeep({
     body,
     filepath: item.filepath,
     entryTitle: item.entryTitle,
+    rootOverride: resolveContextRoot(vaultContext),
   });
   if (outcome.kind === "failed") {
     return outcome.unreachable

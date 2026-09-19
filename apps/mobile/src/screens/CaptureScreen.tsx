@@ -128,6 +128,9 @@ export default function CaptureScreen({ route, navigation }: Props) {
   // online and offline paths). knownTags backs the autocomplete.
   const [tags, setTags] = useState<string[]>([]);
   const [knownTags, setKnownTags] = useState<string[]>([]);
+  // The autocomplete index belongs to one vault. Its identity guard prevents
+  // a slow A read from repainting the suggestions after focus returns under B.
+  const tagVaultContextRef = useRef<VaultContext | null>(null);
   // User-selected location as a `lat,lon` string, injected into frontmatter on save.
   const [location, setLocation] = useState<string | null>(null);
   // Named places for this entry, written into the note BODY (not frontmatter) so
@@ -262,11 +265,45 @@ export default function CaptureScreen({ route, navigation }: Props) {
     void getQueueDepth().then(setQueueDepth);
     // Drain any queued captures on screen open
     void drainQueue().then(() => getQueueDepth().then(setQueueDepth));
-    // Load the vault tag index for autocomplete (cache-first; never blocks UI).
-    void getTagIndex()
-      .then((index) => setKnownTags(index.tags.map((entry) => entry.tag)))
-      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    let request = 0;
+    const reloadTags = (): void => {
+      // Clear A's values before awaiting B's settings/index reads. The
+      // autocomplete is optional, so an empty list is safer than cross-vault
+      // suggestions while the new profile loads.
+      tagVaultContextRef.current = null;
+      setKnownTags([]);
+      const ticket = ++request;
+      void getSettings()
+        .then((settings) => captureVaultContext(settings))
+        .then((context) => {
+          if (!active) return;
+          tagVaultContextRef.current = context;
+          return getTagIndex(context.profileId, resolveContextRoot(context))
+            .then((index) => ({ context, index }));
+        })
+        .then((result) => {
+          if (
+            active && result && request === ticket &&
+            tagVaultContextRef.current === result.context
+          ) {
+            const { index } = result;
+            setKnownTags(index.tags.map((entry) => entry.tag));
+          }
+        })
+        .catch(() => {});
+    };
+    reloadTags();
+    const unsubscribe = navigation.addListener("focus", reloadTags);
+    return () => {
+      active = false;
+      tagVaultContextRef.current = null;
+      unsubscribe();
+    };
+  }, [navigation]);
 
   const currentStatus = useMemo(
     () => parseStatusFromMarkdown(response?.preview_markdown ?? ""),
@@ -508,6 +545,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
       tags: ctx.tags,
       location: ctx.location,
       attachments: ctx.attachments,
+      vaultContext: attemptVaultContextRef.current ?? undefined,
     });
     if (superseded()) return;
     await finishSaveFirst(outcome, ctx, savedFilepath, baseline, baselineContent, superseded);
@@ -625,7 +663,9 @@ export default function CaptureScreen({ route, navigation }: Props) {
       // Blocking-preview (opt-in): enrich → preview → Save, exactly as before.
       if (previewBeforeSave) {
         try {
-          const result = await enrichIdea(text.trim());
+          const result = await enrichIdea(text.trim(), {
+            vaultContext: attemptVaultContextRef.current ?? undefined,
+          });
           if (superseded()) return;
           const title = deriveTitle(result.markdown);
           const slug = slugify(title) || "untitled";
@@ -757,6 +797,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
           tags: ctx.tags,
           location: ctx.location,
           attachments: ctx.attachments,
+          vaultContext: attemptVaultContextRef.current ?? undefined,
         });
         if (superseded()) return;
         await finishSaveFirst(outcome, ctx, filepath, mtime, rawMarkdown, superseded);
@@ -774,7 +815,10 @@ export default function CaptureScreen({ route, navigation }: Props) {
     if (mode === "journal") {
       const combined = [transcript, text].map((s) => s.trim()).filter(Boolean).join("\n\n");
       try {
-        const result = await enrichJournal({ transcript: combined, notes: "" });
+        const result = await enrichJournal(
+          { transcript: combined, notes: "" },
+          { vaultContext: attemptVaultContextRef.current ?? undefined },
+        );
         if (superseded()) return;
         const today = todayLocal();
         setPendingJournal({ date: today, markdown: result.markdown, model: result.model });
@@ -803,7 +847,10 @@ export default function CaptureScreen({ route, navigation }: Props) {
 
     // mode === "person"
     try {
-      const result = await enrichPerson({ ocrResult: ocrText.trim(), context: text.trim() });
+      const result = await enrichPerson(
+        { ocrResult: ocrText.trim(), context: text.trim() },
+        { vaultContext: attemptVaultContextRef.current ?? undefined },
+      );
       if (superseded()) return;
       const nameField = extractNameFromMarkdown(result.markdown);
       setPendingPerson({

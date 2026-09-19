@@ -86,6 +86,7 @@ import {
 // under test.
 import { writeBinary } from "./writer";
 import * as FileSystem from "expo-file-system/legacy";
+import { resolveProfileRoot } from "./vaultRoot";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -195,6 +196,18 @@ describe("readPairedBinaryFromNote", () => {
     const result = await readPairedBinaryFromNote(md);
     expect(result.base64).toBe("UE5HQllURVM=");
     expect(result.mime).toBe("image/png");
+  });
+
+  it("reads a same-named audio binary from the pinned vault, not another active vault", async () => {
+    const rootA = resolveProfileRoot({ rootUri: "file:///vault-a" });
+    const rootB = resolveProfileRoot({ rootUri: "file:///vault-b" });
+    await writeBinary("Audio", "clip.m4a", "QV9CWVRFUw==", "audio/mp4", rootA);
+    await writeBinary("Audio", "clip.m4a", "Ql9CWVRFUw==", "audio/mp4", rootB);
+    const md = "# Audio\n\n[clip.m4a](../Audio/clip.m4a)\n";
+
+    await expect(readPairedBinaryFromNote(md, rootA)).resolves.toMatchObject({
+      base64: "QV9CWVRFUw==",
+    });
   });
 
   it("throws when the body contains no recognized paired-binary link", async () => {

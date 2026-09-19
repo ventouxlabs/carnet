@@ -15,15 +15,21 @@ import * as FileSystem from "expo-file-system/legacy";
 
 import { MAX_EDITOR_IMAGE_BASE64, toDataUri } from "./editorImages";
 import { resolvePairedUri } from "./writer";
+import type { Root } from "./vaultRoot";
 
 const { StorageAccessFramework } = FileSystem;
 
-export async function resolvePhotoDataUri(rel: string): Promise<string | null> {
+export async function resolvePhotoDataUri(
+  rel: string,
+  rootOverride?: Root,
+): Promise<string | null> {
   const match = rel.match(/^\.\.\/Photos\/(.+)$/);
   if (!match) return null;
   const filename = match[1];
 
-  const resolved = await resolvePairedUri("Photos", filename);
+  const resolved = rootOverride
+    ? await resolvePairedUri("Photos", filename, rootOverride)
+    : await resolvePairedUri("Photos", filename);
   if (!resolved) return null;
 
   // content:// (SAF) and file:// read through different APIs — same split the
