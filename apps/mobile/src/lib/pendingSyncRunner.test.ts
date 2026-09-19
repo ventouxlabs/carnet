@@ -33,6 +33,7 @@ const ITEM: PendingExport = {
 function mockUrl(karakeepUrl: string): void {
   vi.mocked(getSettings).mockResolvedValue({
     karakeepUrl,
+    captureFolderPath: "file:///legacy",
   } as Awaited<ReturnType<typeof getSettings>>);
 }
 
@@ -106,12 +107,39 @@ describe("drainPendingKarakeepExports", () => {
       skippedUnsupported: [],
     });
     const deps = await capturedDeps();
-    await expect(deps.exportOne(ITEM)).resolves.toEqual({ kind: "ok" });
+    const item = {
+      ...ITEM,
+      vaultContext: { profileId: "a", rootUri: "file:///vault-a" },
+    };
+    await expect(deps.exportOne(item)).resolves.toEqual({ kind: "ok" });
     expect(exportNoteToKarakeep).toHaveBeenCalledWith({
       body: "# fresh body\n",
       filepath: ITEM.filepath,
       entryTitle: "A",
+      rootOverride: expect.objectContaining({ uri: "file:///vault-a" }),
     });
+  });
+
+  it("routes a legacy contextless row through the default profile, not the active profile", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      karakeepUrl: "https://kk",
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    vi.mocked(readNote).mockResolvedValue("# fresh body\n");
+    vi.mocked(exportNoteToKarakeep).mockResolvedValue({
+      kind: "exported", nextBody: "n", didUpdate: false, skippedUnsupported: [],
+    });
+    const deps = await capturedDeps();
+
+    await expect(deps.exportOne(ITEM)).resolves.toEqual({ kind: "ok" });
+    expect(exportNoteToKarakeep).toHaveBeenCalledWith(expect.objectContaining({
+      rootOverride: expect.objectContaining({ uri: "file:///personal" }),
+    }));
   });
 
   it("treats a partial export as delivered", async () => {

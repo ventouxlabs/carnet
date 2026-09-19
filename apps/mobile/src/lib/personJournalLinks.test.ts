@@ -1,0 +1,119 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { findPersonJournalMatches } from "./personJournalLinks";
+import type { NoteIndexEntry } from "./vault";
+
+function journal(uri: string, createdOrDate = 0): NoteIndexEntry {
+  return {
+    uri,
+    subdir: "Journal",
+    title: "Journal",
+    createdOrDate,
+    tags: [],
+    mode: "journal",
+    excerpt: "",
+  };
+}
+
+describe("findPersonJournalMatches", () => {
+  it("finds Unicode full-name matches and retains same-name ambiguity as separate journal links", async () => {
+    const read = vi.fn(async (uri: string) =>
+      uri.endsWith("2026-09-12.md")
+        ? "Met José Núñez after lunch."
+        : "JOSÉ NÚÑEZ called from the train.",
+    );
+
+    await expect(
+      findPersonJournalMatches("José Núñez", [
+        journal("file:///vault/Journal/2026-09-12.md", 2),
+        journal("file:///vault/Journal/2026-09-11.md", 1),
+      ], read),
+    ).resolves.toEqual([
+      {
+        uri: "file:///vault/Journal/2026-09-12.md",
+        linkTitle: "2026-09-12",
+        linkTarget: "Journal/2026-09-12",
+        excerpt: "Met José Núñez after lunch.",
+      },
+      {
+        uri: "file:///vault/Journal/2026-09-11.md",
+        linkTitle: "2026-09-11",
+        linkTarget: "Journal/2026-09-11",
+        excerpt: "JOSÉ NÚÑEZ called from the train.",
+      },
+    ]);
+  });
+
+  it("keeps distinct vault-relative targets when journal dates collide", async () => {
+    const matches = await findPersonJournalMatches("Ada Lovelace", [
+      journal("file:///vault/Journal/2026-09-14.md", 2),
+      journal("file:///vault/Journal/Archive/2026-09-14.md", 1),
+    ], async () => "Ada Lovelace arrived.");
+
+    expect(matches.map((match) => match.linkTarget)).toEqual([
+      "Journal/2026-09-14",
+      "Journal/Archive/2026-09-14",
+    ]);
+  });
+
+  it("derives a canonical target from an encoded SAF document URI", async () => {
+    const [match] = await findPersonJournalMatches("Ada Lovelace", [
+      journal(
+        "content://com.android.externalstorage.documents/document/primary%3ADocuments%2Fcarnet%2FJournal%2F2026-09-14.md",
+      ),
+    ], async () => "Ada Lovelace arrived.");
+
+    expect(match.linkTarget).toBe("Journal/2026-09-14");
+  });
+
+  it("rejects first-name and substring hits, malformed dates, and bounds body reads", async () => {
+    const read = vi.fn(async (uri: string) => {
+      if (uri.includes("2026-09-14")) return "Ada Lovelace arrived.";
+      if (uri.includes("2026-09-13")) return "Ada wrote notes.";
+      return "Ada Lovelacex is not the person.";
+    });
+
+    await expect(
+      findPersonJournalMatches(
+        "Ada Lovelace",
+        [
+          journal("file:///vault/Journal/2026-09-14.md", 4),
+          journal("file:///vault/Journal/2026-09-13.md", 3),
+          journal("file:///vault/Journal/2026-09-12.md", 2),
+          journal("file:///vault/Journal/not-a-date.md", 5),
+        ],
+        read,
+        { maxReads: 2 },
+      ),
+    ).resolves.toEqual([
+      {
+        uri: "file:///vault/Journal/2026-09-14.md",
+        linkTitle: "2026-09-14",
+        linkTarget: "Journal/2026-09-14",
+        excerpt: "Ada Lovelace arrived.",
+      },
+    ]);
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops after cancellation so a switched detail cannot continue journal reads", async () => {
+    const controller = new AbortController();
+    const read = vi.fn(async () => {
+      controller.abort();
+      return "Ada Lovelace arrived.";
+    });
+
+    await expect(
+      findPersonJournalMatches(
+        "Ada Lovelace",
+        [
+          journal("file:///vault/Journal/2026-09-14.md", 2),
+          journal("file:///vault/Journal/2026-09-13.md", 1),
+        ],
+        read,
+        { signal: controller.signal },
+      ),
+    ).resolves.toEqual([]);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+});

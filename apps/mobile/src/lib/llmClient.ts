@@ -58,6 +58,7 @@ import { withTimeout } from "./httpClient";
 import { fetchUrlPreview, type UrlPreview } from "./urlpreview";
 import type { IdeaStatus } from "@carnet/shared";
 import { LlmClientError, timeoutError } from "./llmErrors";
+import { parseCardClassification, type CardClassification } from "./cardClassification";
 import {
   assertHttpsOrLocalForProbe,
   assertModelConfigured,
@@ -462,6 +463,54 @@ export async function enrichSharedImage(
  */
 const OCR_CARD_PROMPT =
   "Transcribe ALL text on this business card exactly as printed. Preserve every field: name, title, company, phone numbers, email addresses, websites, physical address, and any other text. Output plain text, one field per line. Do not invent, omit, or normalize anything.";
+
+const CLASSIFY_CARD_PROMPT =
+  "Is this image a business card? Reply with exactly one label: card, not-card, or uncertain. Use uncertain whenever the image is ambiguous, unreadable, or not clearly a business card.";
+
+/**
+ * Classify an image before the card-capture workflow is allowed to OCR or
+ * persist it. The parsed result is intentionally fail-closed: unexpected
+ * provider prose is `uncertain`, never implicit authorization to write.
+ */
+export async function classifyBusinessCardViaVision(
+  input: { base64: string; mimeType: string },
+  config: ProviderConfig,
+): Promise<{ classification: CardClassification }> {
+  const safeMime = /^image\/(jpe?g|png|webp|gif|heic|heif)$/.test(input.mimeType)
+    ? input.mimeType
+    : "image/jpeg";
+  const { model, url: trimmedUrl } = assertVisionReady(config);
+  const messages: OpenAIMessage[] = [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: CLASSIFY_CARD_PROMPT },
+        { type: "image_url", image_url: { url: `data:${safeMime};base64,${input.base64}` } },
+      ],
+    },
+  ];
+
+  return await guardedFetch(
+    `${trimmedUrl}/v1/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+      },
+      body: JSON.stringify({ model, messages, stream: false, temperature: 0 }),
+    },
+    config.label,
+    resolveEnrichmentTimeoutMs(config.baseUrl),
+    async (response) => {
+      const json = (await response.json()) as OpenAIResponse;
+      const content = json.choices?.[0]?.message?.content;
+      return {
+        classification: parseCardClassification(typeof content === "string" ? content : ""),
+      };
+    },
+  );
+}
 
 /**
  * Transcribe a business-card image via the vision model, replacing the bespoke

@@ -27,12 +27,16 @@ import {
   type NoteIndex,
   type NoteIndexEntry,
 } from "../lib/vault";
+import { refreshActiveVault } from "../lib/vaultRefreshService";
 import { MAX_NOTES, orderCandidates, type RetrievalCandidate } from "../lib/retrospective";
 import { markAskExplainerSeen, shouldShowAskExplainer } from "../lib/askExplainer";
 import { MIN_TAP_TARGET, useCarnetTheme } from "../lib/theme";
 import { NoteCard, modeStamp } from "../components/NoteCard";
 import { StampChip } from "../components/StampChip";
 import { AskExplainerDialog } from "../components/AskExplainerDialog";
+import { getSettings } from "../lib/settings";
+import { captureVaultContext, type VaultContext } from "../lib/vaultContext";
+import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Search">;
 
@@ -56,6 +60,7 @@ const MAX_RENDERED_MATCHES = 50;
 export default function SearchScreen({ route, navigation }: Props) {
   const theme = useCarnetTheme();
   const [index, setIndex] = useState<NoteIndex | null>(null);
+  const vaultContextRef = useRef<VaultContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -81,10 +86,16 @@ export default function SearchScreen({ route, navigation }: Props) {
   });
   const bodyScanController = useRef<AbortController | null>(null);
 
-  useEffect(() => {
+  const clearBodySearch = useCallback(() => {
+    bodyScanController.current?.abort();
+    bodyScanController.current = null;
     setBodyMatches([]);
     setBodyScan("idle");
     setBodyScanProgress({ scanned: 0, total: 0 });
+  }, []);
+
+  useEffect(() => {
+    clearBodySearch();
     return () => {
       // Implicit cancel (query changed out from under a running scan): abort
       // AND null the ref. Aborting alone doesn't stop already-issued reads —
@@ -101,12 +112,16 @@ export default function SearchScreen({ route, navigation }: Props) {
       // own eventual `.then()` guard still passes and correctly transitions
       // to "cancelled" (so the user sees "Cancelled — N of M" after tapping
       // Cancel).
-      bodyScanController.current?.abort();
-      bodyScanController.current = null;
+      clearBodySearch();
     };
-  }, [query]);
+  }, [query, clearBodySearch]);
 
   const startBodySearch = useCallback(() => {
+    // A full-text scan is an operation on the vault that was on screen when
+    // the button was pressed. Capture its root once: the active profile may
+    // change while SAF reads are still finishing.
+    const context = vaultContextRef.current;
+    if (!context) return;
     const controller = new AbortController();
     bodyScanController.current = controller;
     setBodyMatches([]);
@@ -115,17 +130,18 @@ export default function SearchScreen({ route, navigation }: Props) {
     void searchNoteBodies(
       query,
       (match) => {
-        if (bodyScanController.current !== controller) return;
+        if (bodyScanController.current !== controller || vaultContextRef.current !== context) return;
         setBodyMatches((prev) => [...prev, match]);
       },
       (progress) => {
-        if (bodyScanController.current !== controller) return;
+        if (bodyScanController.current !== controller || vaultContextRef.current !== context) return;
         setBodyScanProgress(progress);
       },
       controller.signal,
+      resolveContextRoot(context),
     )
       .then((finalProgress) => {
-        if (bodyScanController.current !== controller) return;
+        if (bodyScanController.current !== controller || vaultContextRef.current !== context) return;
         setBodyScanProgress(finalProgress);
         setBodyScan(controller.signal.aborted ? "cancelled" : "done");
       })
@@ -136,7 +152,7 @@ export default function SearchScreen({ route, navigation }: Props) {
         // AND bodyScan gets stuck on "scanning" forever with no way out
         // except editing the query. Same staleness guard as the other three
         // callback sites: a rejected OLD scan must not clobber a newer scan.
-        if (bodyScanController.current !== controller) return;
+        if (bodyScanController.current !== controller || vaultContextRef.current !== context) return;
         setBodyScan("error");
       });
   }, [query]);
@@ -156,28 +172,48 @@ export default function SearchScreen({ route, navigation }: Props) {
   useFocusEffect(
     useCallback(() => {
       let active = true;
+      // Do not leave the previous profile's index or body matches visible
+      // during a focus/profile transition. In-flight callbacks also compare
+      // their captured context below, so an unabortable SAF read cannot land
+      // a stale match after this reset.
+      clearBodySearch();
+      vaultContextRef.current = null;
+      setIndex(null);
       setLoading(true);
-      void getNoteIndex()
-        .then((next) => (active ? setIndex(next) : undefined))
+      void getSettings().then((settings) => captureVaultContext(settings)).then((context) => {
+        if (!active) return;
+        vaultContextRef.current = context;
+        return getNoteIndex(context.profileId, resolveContextRoot(context)).then((next) => {
+          if (active && vaultContextRef.current === context) setIndex(next);
+          return refreshActiveVault(context);
+        }).then((next) => {
+          if (active && vaultContextRef.current === context && next) setIndex(next);
+        });
+      })
         .finally(() => {
           if (active) setLoading(false);
         });
       return () => {
         active = false;
+        clearBodySearch();
+        vaultContextRef.current = null;
       };
-    }, []),
+    }, [clearBodySearch]),
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setRefreshError(null);
     try {
-      setIndex(await refreshNoteIndex());
+      const context = vaultContextRef.current;
+      if (!context) return;
+      const next = await refreshNoteIndex(context.profileId, resolveContextRoot(context));
+      if (vaultContextRef.current === context) setIndex(next);
     } catch (e: unknown) {
       // A failed rebuild previously just stopped the spinner and showed
       // stale results with no signal (and escaped as an unhandled rejection).
       const msg = e instanceof Error ? e.message : String(e);
-      setRefreshError(`Refresh failed — showing cached results: ${msg}`);
+      if (vaultContextRef.current) setRefreshError(`Refresh failed — showing cached results: ${msg}`);
     } finally {
       setRefreshing(false);
     }
@@ -211,8 +247,15 @@ export default function SearchScreen({ route, navigation }: Props) {
 
   const openNote = useCallback(
     async (uri: string) => {
+      const context = vaultContextRef.current;
+      if (!context) return;
       const entry = await resolveNoteEntry(uri);
-      if (entry) navigation.navigate("RecentDetail", { entry });
+      // Do not open an entry resolved from the old vault after a profile
+      // switch happened during the read.
+      if (entry && vaultContextRef.current === context) navigation.navigate("RecentDetail", {
+        entry,
+        vaultContext: context,
+      });
     },
     [navigation],
   );
@@ -270,7 +313,11 @@ export default function SearchScreen({ route, navigation }: Props) {
   // Holds the question/candidates chosen at press time, across the async
   // explainer check and (if shown) the dialog round-trip. A ref, not state:
   // nothing here needs to trigger a re-render while it's pending.
-  const pendingAskRef = useRef<{ question: string; candidates: RetrievalCandidate[] } | null>(
+  const pendingAskRef = useRef<{
+    question: string;
+    candidates: RetrievalCandidate[];
+    vaultContext: VaultContext;
+  } | null>(
     null,
   );
   const [explainerVisible, setExplainerVisible] = useState(false);
@@ -284,7 +331,9 @@ export default function SearchScreen({ route, navigation }: Props) {
     // This is the only place the params are built — the explainer path
     // re-navigates from pendingAskRef, not from `query` — so trimming at this
     // call site covers both routes into AskScreen.
-    const params = { question: query.trim(), candidates };
+    const vaultContext = vaultContextRef.current;
+    if (!vaultContext) return;
+    const params = { question: query.trim(), candidates, vaultContext };
     let showExplainer: boolean;
     try {
       showExplainer = await shouldShowAskExplainer();
@@ -300,6 +349,10 @@ export default function SearchScreen({ route, navigation }: Props) {
       setAskError(`Couldn't check your Ask settings — showing the notice to be safe: ${msg}`);
       showExplainer = true;
     }
+    // The disclosure check is asynchronous. If the active vault changed
+    // while it ran, discard these candidates rather than carrying old-vault
+    // bodies forward to Ask.
+    if (vaultContextRef.current !== vaultContext) return;
     if (showExplainer) {
       pendingAskRef.current = params;
       setExplainerVisible(true);
@@ -321,7 +374,9 @@ export default function SearchScreen({ route, navigation }: Props) {
       if (dontShowAgain) {
         void markAskExplainerSeen();
       }
-      if (params) navigation.navigate("Ask", params);
+      if (params && vaultContextRef.current === params.vaultContext) {
+        navigation.navigate("Ask", params);
+      }
     },
     [navigation],
   );

@@ -26,7 +26,8 @@ const mockWriteImage = vi.mocked(writeCapturedVaultImage);
 
 const NOTE = "---\ncreated: 2026-08-13\n---\n# Walk\n\nSaw the heron again.\n";
 
-const INPUT = { filepath: "f.md", base64: "AAAA", mime: "image/jpeg" };
+const ROOT = { uri: "file:///pinned-vault", fs: {} } as never;
+const INPUT = { filepath: "f.md", base64: "AAAA", mime: "image/jpeg", rootOverride: ROOT };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -49,6 +50,12 @@ describe("attachPhotoToNote", () => {
     expect(written.startsWith("---\ncreated: 2026-08-13\n---\n")).toBe(true);
     expect(written.endsWith("![](../Photos/photo.jpg)\n")).toBe(true);
     expect(written).toContain("Saw the heron again.");
+    expect(mockWriteImage).toHaveBeenCalledWith(
+      "AAAA",
+      "image/jpeg",
+      undefined,
+      ROOT,
+    );
   });
 
   it("separates the embed cleanly on a note with no trailing newline", async () => {

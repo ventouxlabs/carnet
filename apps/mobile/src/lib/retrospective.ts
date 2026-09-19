@@ -80,13 +80,37 @@ export function packBodies(
 
 /** One run of answer text. `linkUri` present ⇒ render as a tappable link. */
 export interface AnswerSegment {
+  /** Display text. Citation labels may be shortened for readable prose. */
   text: string;
   linkUri?: string;
+  /** Full selected-note title, retained for assistive technology. */
+  accessibilityLabel?: string;
 }
 
 const WIKILINK = /\[\[([^\]]+)\]\]/g;
 
 const normalizeTitle = (s: string): string => s.trim().toLowerCase();
+
+/** A citation is prose, not a Sources list: a whole-sentence note title must
+ * not consume the line. The full title remains available to the resolver,
+ * accessibility service, and saved Sources section. */
+export const MAX_CITATION_LABEL_CHARS = 56;
+
+/**
+ * Produce a compact inline citation label without changing its identity.
+ * Prefer a word boundary, but never emit an empty label for a single long
+ * Unicode token. Terminal sentence punctuation is presentation noise when the
+ * surrounding generated sentence supplies its own punctuation.
+ */
+export function citationLabel(title: string, limit = MAX_CITATION_LABEL_CHARS): string {
+  const withoutTerminalPunctuation = title.trim().replace(/[.!?…]+$/u, "").trimEnd();
+  const display = withoutTerminalPunctuation || title.trim();
+  if (display.length <= limit) return display;
+
+  const boundary = display.lastIndexOf(" ", limit);
+  const end = boundary > 0 ? boundary : limit;
+  return `${display.slice(0, end).trimEnd()}…`;
+}
 
 /**
  * Split an answer into renderable segments, linkifying `[[title]]` ONLY when
@@ -101,14 +125,20 @@ export function resolveCitations(
   answer: string,
   retrievalSet: readonly SelectedNote[],
 ): AnswerSegment[] {
-  const byTitle = new Map(retrievalSet.map((n) => [normalizeTitle(n.title), n.uri]));
+  const byTitle = new Map(retrievalSet.map((n) => [normalizeTitle(n.title), n]));
   const out: AnswerSegment[] = [];
   let last = 0;
   for (const m of answer.matchAll(WIKILINK)) {
     const start = m.index ?? 0;
-    const uri = byTitle.get(normalizeTitle(m[1]));
+    const note = byTitle.get(normalizeTitle(m[1]));
     if (start > last) out.push({ text: answer.slice(last, start) });
-    if (uri) out.push({ text: m[1].trim(), linkUri: uri });
+    if (note) {
+      out.push({
+        text: citationLabel(note.title),
+        linkUri: note.uri,
+        accessibilityLabel: note.title,
+      });
+    }
     else out.push({ text: m[0] }); // inert: keep the literal [[…]]
     last = start + m[0].length;
   }

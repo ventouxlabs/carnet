@@ -12,6 +12,7 @@
 import { pickAttachment } from "./attachments";
 import { extFromMime, slugify, writeBinary } from "./writer";
 import { MAX_EDITOR_IMAGE_BASE64, toDataUri } from "./editorImages";
+import type { Root } from "./vaultRoot";
 
 export interface VaultImageInsert {
   /** The `../Photos/<finalName>` embed link for the written image. */
@@ -27,17 +28,16 @@ export interface VaultImageInsert {
  * URI. Returns null when the user cancels the picker (nothing is written).
  * Throws on a pick/write failure — the caller surfaces it as an edit error.
  */
-export async function pickAndWriteVaultImage(): Promise<VaultImageInsert | null> {
+export async function pickAndWriteVaultImage(
+  rootOverride?: Root,
+): Promise<VaultImageInsert | null> {
   const picked = await pickAttachment({ imagesOnly: true });
   if (!picked) return null;
   const ext = extFromMime(picked.mime);
   const base = slugify(picked.filename.replace(/\.[^.]+$/, "")) || "image";
-  const { finalName } = await writeBinary(
-    "Photos",
-    `${base}.${ext}`,
-    picked.base64,
-    picked.mime,
-  );
+  const { finalName } = rootOverride
+    ? await writeBinary("Photos", `${base}.${ext}`, picked.base64, picked.mime, rootOverride)
+    : await writeBinary("Photos", `${base}.${ext}`, picked.base64, picked.mime);
   const rel = `../Photos/${finalName}`;
   const dataUri =
     picked.base64.length <= MAX_EDITOR_IMAGE_BASE64
@@ -69,11 +69,14 @@ export async function writeCapturedVaultImage(
   base64: string,
   mime: string,
   basename?: string,
+  rootOverride?: Root,
 ): Promise<VaultImageInsert> {
   const ext = extFromMime(mime);
   const base =
     slugify((basename ?? `photo-${Date.now()}`).replace(/\.[^.]+$/, "")) || "photo";
-  const { finalName } = await writeBinary("Photos", `${base}.${ext}`, base64, mime);
+  const { finalName } = rootOverride
+    ? await writeBinary("Photos", `${base}.${ext}`, base64, mime, rootOverride)
+    : await writeBinary("Photos", `${base}.${ext}`, base64, mime);
   const rel = `../Photos/${finalName}`;
   const dataUri =
     base64.length <= MAX_EDITOR_IMAGE_BASE64 ? toDataUri(mime, base64) : null;

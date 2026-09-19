@@ -9,7 +9,7 @@
  * The index is read cache-first (instant); pull-to-refresh forces a rebuild so
  * tags added since the last scan show up.
  */
-import { useCallback, useLayoutEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Divider, List, Snackbar, Text, useTheme } from "react-native-paper";
 import { useFocusEffect } from "@react-navigation/native";
@@ -17,7 +17,18 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import type { RootStackParamList } from "../../App";
 import type { CaptureEntry, CaptureMode } from "../lib/storage";
-import { getTagIndex, notesForTag, refreshTagIndex, type TagIndexEntry } from "../lib/vault";
+import {
+  deriveTagIndex,
+  getTagIndex,
+  notesForTag,
+  refreshTagIndex,
+  type TagIndexEntry,
+} from "../lib/vault";
+import { refreshActiveVault } from "../lib/vaultRefreshService";
+import { getSettings } from "../lib/settings";
+import { captureVaultContext, type VaultContext } from "../lib/vaultContext";
+import { DEFAULT_VAULT_PROFILE_ID } from "../lib/vaultProfiles";
+import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "TagBrowser">;
 
@@ -41,6 +52,7 @@ export default function TagBrowserScreen({ route, navigation }: Props) {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [tagEntries, setTagEntries] = useState<TagIndexEntry[]>([]);
   const [notes, setNotes] = useState<CaptureEntry[]>([]);
+  const vaultContextRef = useRef<VaultContext | null>(null);
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: tag ? `#${tag}` : "Tags" });
@@ -58,8 +70,13 @@ export default function TagBrowserScreen({ route, navigation }: Props) {
     useCallback(() => {
       let active = true;
       setLoading(true);
-      void getTagIndex()
-        .then((index) => (active ? apply(index) : undefined))
+      void getSettings().then((settings) => captureVaultContext(settings)).then((context) => {
+        vaultContextRef.current = context;
+        return getTagIndex(context.profileId, resolveContextRoot(context))
+          .then((index) => (active ? apply(index) : undefined))
+          .then(() => refreshActiveVault(context))
+          .then((index) => (active && index ? apply(deriveTagIndex(index)) : undefined));
+      })
         .finally(() => {
           if (active) setLoading(false);
         });
@@ -73,7 +90,12 @@ export default function TagBrowserScreen({ route, navigation }: Props) {
     setRefreshing(true);
     setRefreshError(null);
     try {
-      await apply(await refreshTagIndex());
+      const context = vaultContextRef.current;
+      await apply(
+        await (context
+          ? refreshTagIndex(context.profileId, resolveContextRoot(context))
+          : refreshTagIndex(DEFAULT_VAULT_PROFILE_ID)),
+      );
     } catch (e: unknown) {
       // A failed rebuild previously just stopped the spinner and showed
       // stale tags with no signal (and escaped as an unhandled rejection).
@@ -131,7 +153,15 @@ export default function TagBrowserScreen({ route, navigation }: Props) {
             <List.Item
               title={entry.title}
               description={modeLabel(entry.mode)}
-              onPress={() => navigation.navigate("RecentDetail", { entry })}
+              onPress={() =>
+                navigation.navigate("RecentDetail", {
+                  entry,
+                  vaultContext: vaultContextRef.current ?? {
+                    profileId: DEFAULT_VAULT_PROFILE_ID,
+                    rootUri: "",
+                  },
+                })
+              }
               left={(props) => <List.Icon {...props} icon={modeIcon(entry.mode)} />}
             />
           </View>

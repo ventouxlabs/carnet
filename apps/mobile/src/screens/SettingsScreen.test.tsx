@@ -27,6 +27,7 @@
 // AsyncStorage/expo-clipboard/on-device STT probes that are irrelevant here.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Platform } from "react-native";
 import { PaperProvider } from "react-native-paper";
 
 import { carnetLight } from "../lib/theme";
@@ -92,6 +93,16 @@ const hasKarakeepApiKey = vi.fn(async () => false);
 const shouldShowMigrationBanner = vi.fn(async () => false);
 const dismissMigrationBanner = vi.fn(async () => undefined);
 const setKarakeepApiKey = vi.fn(async (_key: string) => undefined);
+const { requestDirectoryPermissionsAsync } = vi.hoisted(() => ({
+  requestDirectoryPermissionsAsync: vi.fn(async () => ({
+    granted: true,
+    directoryUri: "content://com.android.externalstorage.documents/tree/primary%3ACarnet",
+  })),
+}));
+
+vi.mock("expo-file-system/legacy", () => ({
+  StorageAccessFramework: { requestDirectoryPermissionsAsync },
+}));
 
 vi.mock("../lib/settings", () => ({
   DEFAULT_OMNIROUTE_MODEL: "openrouter/openai/gpt-4o-mini",
@@ -103,6 +114,12 @@ vi.mock("../lib/settings", () => ({
   shouldShowMigrationBanner: () => shouldShowMigrationBanner(),
   dismissMigrationBanner: () => dismissMigrationBanner(),
   setKarakeepApiKey: (key: string) => setKarakeepApiKey(key),
+  withVaultProfileState: (settings: Settings, state: { profiles: unknown[]; activeProfileId: string }) => ({
+    ...settings,
+    vaultProfiles: state.profiles,
+    activeVaultProfileId: state.activeProfileId,
+    captureFolderPath: (state.profiles.find((p: any) => p.id === state.activeProfileId) as any)?.rootUri ?? settings.captureFolderPath,
+  }),
 }));
 
 const listModels = vi.fn(async (_url: string, _key: string) => [
@@ -185,6 +202,10 @@ beforeEach(() => {
   isEnabled.mockResolvedValue(false);
   permissionIsGranted.mockResolvedValue(true);
   migratePreVaultNotes.mockResolvedValue({ migrated: 0, failed: 0, failures: [] });
+  requestDirectoryPermissionsAsync.mockResolvedValue({
+    granted: true,
+    directoryUri: "content://com.android.externalstorage.documents/tree/primary%3ACarnet",
+  });
 });
 
 // RTL's automatic cleanup needs vitest globals (this repo runs without
@@ -232,6 +253,74 @@ describe("SettingsScreen", () => {
 
     const switches = screen.getAllByRole("switch") as HTMLInputElement[];
     expect(switches[3].checked).toBe(true);
+  });
+
+  describe("vault profiles", () => {
+    it("switches the active registration without changing either registered root", async () => {
+      getSettings.mockResolvedValue(baseSettings({
+        vaultProfiles: [
+          { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+          { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+        ],
+        activeVaultProfileId: "default",
+        captureFolderPath: "file:///personal",
+      }));
+
+      renderScreen();
+      fireEvent.click(await screen.findByText("Work"));
+
+      await waitFor(() =>
+        expect(savePersistedOnly).toHaveBeenCalledWith(
+          expect.objectContaining({
+            activeVaultProfileId: "work",
+            captureFolderPath: "file:///work",
+            vaultProfiles: expect.arrayContaining([
+              expect.objectContaining({ id: "default", rootUri: "file:///personal" }),
+              expect.objectContaining({ id: "work", rootUri: "file:///work" }),
+            ]),
+          }),
+        ),
+      );
+    });
+
+    it("registers the raw SAF URI returned by the new-profile picker", async () => {
+      getSettings.mockResolvedValue(baseSettings({
+        vaultProfiles: [
+          { id: "default", name: "Personal", rootUri: "", createdAt: 0 },
+        ],
+        activeVaultProfileId: "default",
+      }));
+      const safUri = "content://com.android.externalstorage.documents/tree/primary%3AAgent-Test";
+      requestDirectoryPermissionsAsync.mockResolvedValue({ granted: true, directoryUri: safUri });
+      const originalOs = Platform.OS;
+      Object.defineProperty(Platform, "OS", { configurable: true, value: "android" });
+
+      try {
+        renderScreen();
+
+        fireEvent.change(await screen.findByLabelText("New vault name"), {
+          target: { value: "Agent test" },
+        });
+        fireEvent.click(screen.getByText("Pick new vault folder"));
+        await waitFor(() => expect(requestDirectoryPermissionsAsync).toHaveBeenCalledOnce());
+        await waitFor(() =>
+          expect((screen.getByLabelText("New vault folder") as HTMLInputElement).value).toBe(safUri),
+        );
+        fireEvent.click(screen.getByText("Add vault profile"));
+
+        await waitFor(() =>
+          expect(savePersistedOnly).toHaveBeenCalledWith(
+            expect.objectContaining({
+              vaultProfiles: expect.arrayContaining([
+                expect.objectContaining({ name: "Agent test", rootUri: safUri }),
+              ]),
+            }),
+          ),
+        );
+      } finally {
+        Object.defineProperty(Platform, "OS", { configurable: true, value: originalOs });
+      }
+    });
   });
 
   describe("vault tag reuse toggle", () => {

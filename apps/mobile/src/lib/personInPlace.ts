@@ -26,6 +26,7 @@ import {
 import { preserveFrontmatterFields, upsertFrontmatterField } from "./frontmatter";
 import { mergeUserTags } from "./tags";
 import { injectAttachments, updateNoteIfUnchanged, type AttachmentRef } from "./writer";
+import type { VaultContext } from "./vaultContext";
 
 /**
  * Outcome of an in-place Person enrichment. Same shape and same `kind`
@@ -52,6 +53,8 @@ export interface EnrichPersonInPlaceInput {
   tags: string[];
   location?: string;
   attachments?: AttachmentRef[];
+  /** Context frozen by the note route so vault tag hints stay in this vault. */
+  vaultContext?: VaultContext;
 }
 
 /**
@@ -68,10 +71,10 @@ export async function enrichPersonInPlace(
 ): Promise<EnrichInPlaceOutcome> {
   let enriched: string;
   try {
-    const result = await enrichPerson({
-      ocrResult: input.ocrResult,
-      context: input.context,
-    });
+    const result = await enrichPerson(
+      { ocrResult: input.ocrResult, context: input.context },
+      { vaultContext: input.vaultContext },
+    );
     enriched = result.markdown;
   } catch (e: unknown) {
     const reason = e instanceof Error ? e.message : String(e);

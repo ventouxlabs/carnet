@@ -17,12 +17,17 @@ const _unreadable: Set<string> = new Set();
 
 vi.mock("./writer", () => ({
   listNoteFiles: vi.fn(async () => _listRefs),
+  listNoteFilesInRoot: vi.fn(async () => _listRefs),
   readNote: vi.fn(async (uri: string) => {
     if (_unreadable.has(uri)) throw new Error(`unreadable: ${uri}`);
     const md = _notes.get(uri);
     if (md === undefined) throw new Error(`not found: ${uri}`);
     return md;
   }),
+}));
+
+vi.mock("./settings", () => ({
+  getSettings: vi.fn(async () => ({ captureFolderPath: "" })),
 }));
 
 const _store: Map<string, string> = new Map();
@@ -55,6 +60,7 @@ import {
   type NoteIndexEntry,
 } from "./vault";
 import { listNoteFiles, readNote } from "./writer";
+import { getSettings } from "./settings";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -69,6 +75,7 @@ function reset(): void {
   _unreadable.clear();
   _listRefs = [];
   vi.clearAllMocks();
+  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
 }
 
 beforeEach(reset);
@@ -193,6 +200,64 @@ describe("upsertNoteInIndex", () => {
     await upsertNoteInIndex("file:///v/Ideas/a.md", "---\ntags: [x]\n---\n# A\n");
     expect(listNoteFiles).not.toHaveBeenCalled();
     expect(await loadCachedNoteIndex()).toBeNull();
+  });
+
+  it("does not let a refresh that started first erase a concurrent upsert", async () => {
+    addNote("file:///v/Ideas/a.md", "Ideas", "---\ntags: [old]\n---\n# Existing\n");
+    await refreshNoteIndex();
+
+    let finishScan!: (markdown: string) => void;
+    vi.mocked(readNote).mockImplementationOnce(
+      () => new Promise<string>((resolve) => { finishScan = resolve; }),
+    );
+    const refresh = refreshNoteIndex();
+    await Promise.resolve();
+
+    await upsertNoteInIndex(
+      "file:///v/Ideas/captured-during-refresh.md",
+      "---\ntags: [fresh]\n---\n# Fresh capture\n",
+    );
+    finishScan("---\ntags: [old]\n---\n# Existing\n");
+
+    const rebuilt = await refresh;
+    expect(entryByUri(rebuilt, "file:///v/Ideas/captured-during-refresh.md").title).toBe(
+      "Fresh capture",
+    );
+    expect(
+      entryByUri((await loadCachedNoteIndex())!, "file:///v/Ideas/captured-during-refresh.md").tags,
+    ).toEqual(["fresh"]);
+  });
+
+  it("keeps a concurrent upsert for every overlapping refresh that began at the same revision", async () => {
+    addNote("file:///v/Ideas/a.md", "Ideas", "---\n---\n# Existing\n");
+    await refreshNoteIndex();
+    vi.clearAllMocks();
+
+    let finishFirst!: (markdown: string) => void;
+    let finishSecond!: (markdown: string) => void;
+    vi.mocked(readNote)
+      .mockImplementationOnce(
+        () => new Promise<string>((resolve) => { finishFirst = resolve; }),
+      )
+      .mockImplementationOnce(
+        () => new Promise<string>((resolve) => { finishSecond = resolve; }),
+      );
+    const firstRefresh = refreshNoteIndex();
+    const secondRefresh = refreshNoteIndex();
+    await vi.waitFor(() => expect(readNote).toHaveBeenCalledTimes(2));
+
+    await upsertNoteInIndex(
+      "file:///v/Ideas/captured-during-both-refreshes.md",
+      "---\ntags: [fresh]\n---\n# Fresh capture\n",
+    );
+    finishFirst("---\n---\n# Existing\n");
+    await firstRefresh;
+    finishSecond("---\n---\n# Existing\n");
+    const secondResult = await secondRefresh;
+
+    expect(entryByUri(secondResult, "file:///v/Ideas/captured-during-both-refreshes.md").title).toBe(
+      "Fresh capture",
+    );
   });
 });
 

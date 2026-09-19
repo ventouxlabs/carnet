@@ -12,6 +12,13 @@ import { PaperProvider } from "react-native-paper";
 
 import { carnetLight } from "../lib/theme";
 import type { NoteIndex } from "../lib/vault";
+import type { CaptureEntry } from "../lib/storage";
+
+vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
+vi.mock("../lib/settings", () => ({ getSettings: vi.fn(async () => ({ captureFolderPath: "" })) }));
+vi.mock("../lib/vaultRoot", () => ({
+  resolveContextRoot: vi.fn(() => ({ uri: "file:///vault", fs: {} })),
+}));
 
 vi.mock("@react-navigation/native", async () => {
   const { useEffect } = await import("react");
@@ -53,7 +60,7 @@ const SEEDED_INDEX: NoteIndex = {
 
 const getNoteIndex = vi.fn(async () => SEEDED_INDEX);
 const refreshNoteIndex = vi.fn(async () => SEEDED_INDEX);
-const resolveNoteEntry = vi.fn(async () => null);
+const resolveNoteEntry = vi.fn<() => Promise<CaptureEntry | null>>(async () => null);
 const upsertNoteInIndex = vi.fn(async () => undefined);
 
 vi.mock("../lib/vault", async (importOriginal) => {
@@ -79,6 +86,7 @@ vi.mock("../lib/writer", () => ({
 
 import TodosScreen, { flipInIndex } from "./TodosScreen";
 import type { AggregatedTodo } from "../lib/vault";
+import { getSettings } from "../lib/settings";
 
 type ScreenProps = Parameters<typeof TodosScreen>[0];
 
@@ -95,7 +103,7 @@ function makeNavigation() {
 
 function renderScreen() {
   const navigation = makeNavigation();
-  render(
+  const rendered = render(
     <PaperProvider theme={carnetLight}>
       <TodosScreen
         navigation={navigation as unknown as ScreenProps["navigation"]}
@@ -103,7 +111,7 @@ function renderScreen() {
       />
     </PaperProvider>,
   );
-  return { navigation };
+  return { navigation, ...rendered };
 }
 
 beforeEach(() => {
@@ -136,7 +144,51 @@ describe("TodosScreen", () => {
     await waitFor(() =>
       expect(updateChecklistItem).toHaveBeenCalledWith("file:///v/Ideas/a.md", "Buy milk", false),
     );
-    await waitFor(() => expect(upsertNoteInIndex).toHaveBeenCalledWith("file:///v/Ideas/a.md", expect.any(String)));
+    await waitFor(() =>
+      expect(upsertNoteInIndex).toHaveBeenCalledWith(
+        "file:///v/Ideas/a.md",
+        expect.any(String),
+        "default",
+      ),
+    );
+  });
+
+  it("uses the profile captured when the toggle began for its cache repair", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///work",
+      vaultProfiles: [{ id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 }],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    renderScreen();
+    fireEvent.click(await screen.findByLabelText("Mark as done: Buy milk"));
+
+    await waitFor(() =>
+      expect(upsertNoteInIndex).toHaveBeenCalledWith(
+        "file:///v/Ideas/a.md",
+        expect.any(String),
+        "work",
+      ),
+    );
+  });
+
+  it("does not navigate an old todo after its vault context is cleared during entry lookup", async () => {
+    let release: ((value: CaptureEntry | null) => void) | undefined;
+    resolveNoteEntry.mockImplementationOnce(() => new Promise<CaptureEntry | null>((resolve) => {
+      release = resolve;
+    }));
+    const { navigation, unmount } = renderScreen();
+    fireEvent.click(await screen.findByLabelText("Open note Note A"));
+
+    // Simulate leaving/refocusing under another profile while SAF is still
+    // resolving the old URI. Focus cleanup clears the paired context ref.
+    unmount();
+    release?.({
+      id: "a", mode: "idea", title: "Note A",
+      filepath: "file:///v/Ideas/a.md", createdAt: 200,
+    });
+    await Promise.resolve();
+
+    expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
   it("reverts the optimistic flip and shows the Snackbar on an ambiguous result", async () => {

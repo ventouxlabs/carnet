@@ -155,8 +155,12 @@ canonicalizer is needed.
 
 - [ ] **Auto-capture surfaces** — Android Quick Settings tile dropped from the roadmap
   (2026-07-04 decision): the persistent notification (shipped) + B5's inline-reply cover
-  the same latency profile. iOS share extension and Android Auto remain open; Android
-  share sheet is already shipped.
+  the same latency profile. Android share sheet is shipped. iOS share extension is
+  preparation-only until a macOS/Xcode/signing environment is available. Android Auto
+  is an approved **Drive Inbox self-messaging pilot**, never a media claim or general
+  vault browser; implementation/distribution gate:
+  `docs/android-auto-eligibility.md`. Delivery plan:
+  `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
 - [x] **Browse/search Phase 3 — SHIPPED 2026-09-08** (PR #207) — the retrospective query
   ("What have I been thinking about regarding X?"). **This closes the browse/search axis:
   Phases 1, 2 and 3 are all done.** Ask from Search over the notes currently on screen;
@@ -184,33 +188,34 @@ canonicalizer is needed.
   meets the sentence's. Truncate the link label (keep the full title as the resolution
   key, and keep `## Sources` unabbreviated). Small; touches `lib/retrospective.ts` +
   `AskScreen`. Not a correctness bug — the links resolve and the guard holds.
-- [ ] **Bidirectional sync awareness** — Mostly works via Syncthing. A mobile file watcher to detect workstation edits is a v0.3 enhancement.
-- [ ] **Card auto-detection** — Current button-press OCR flow works. Auto-detect when camera sees a business card is polish.
+- [ ] **Bidirectional sync awareness** — Mostly works via Syncthing. Reconcile on app
+  foreground/focus and explicit refresh with a throttled, vault-safe scan; SAF has no
+  dependable portable filesystem watcher. Planned in
+  `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
+- [ ] **Card auto-detection** — Current button-press OCR flow works. After an explicitly
+  captured photo, classify `card`/`not-card`/`uncertain` and require confirmation before
+  OCR or durable writes; no continuous-camera surveillance. Planned in
+  `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
 - [ ] **Cross-capture linking — largely superseded, narrow remainder.** The "you've thought
   about this before" intent is now served by `lib/relatedNotes.ts` (lexical scoring over the
   cached note index — shared tags + term overlap, no embeddings, no network), surfaced in
   `RecentDetailScreen` with wikilink insertion into a Related section. What remains of the
-  original framing is specifically **Person ↔ journal associations via prompt-side
-  linking** — i.e. having enrichment itself emit the link when a journal entry names a
-  person, rather than the reader-side lexical surfacing that exists today. Re-scope before
-  picking this up; it may not be worth doing separately.
-- [ ] **Multi-vault support** — Single-vault solves the actual problem. Premature to add vault switching now.
+  original framing is now **explicit Person ↔ journal linking**: a Person detail view
+  finds bounded active-vault journal matches and offers an idempotent wikilink action;
+  enrichment never silently rewrites notes. Planned in
+  `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
+- [ ] **Multi-vault support** — Approved for delivery: named profiles with one active
+  vault at a time, non-destructive legacy migration, and operation pinning so a slow
+  capture or queued job never crosses vaults after a switch. Planned in
+  `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
 - [x] **Desktop app fate** — Decided 2026-07-25: deprecate. `apps/desktop` (Tauri v2 stub,
   zero commits since 2026-06-04, zero tests, no usage signal) removed entirely, along with
   its CI job. See `.claude/PRPs/plans/completed/desktop-fate.plan.md` for the full
   rationale if desktop-capture demand ever resurfaces.
-- [ ] **On-device Gemma backend, native phases — NEEDS A DECISION, not just execution.**
-  This item's original framing is obsolete. It said the remaining work was "add a
-  `localLlm.ts` sibling behind the seam"; that file now exists (PR #105, above), but as an
-  **HTTP client to a local server** rather than an in-process native model. So
-  disconnected/no-internet enrichment — the actual goal — is already solved via Relais on
-  the same device. What's genuinely unstarted is only the native module + bundled model
-  download (~1.5GB model file, ~3-8s first token on phone, battery cost).
-  **Before building any of it, decide whether it's still worth it**: Relais already
-  delivers the user-visible benefit with none of the app-size or native-maintenance cost,
-  and it is a separate app with its own repo (`~/Documents/vibe-code/relais`) that can be
-  updated independently. Skip the workstation Ollama variant regardless: it re-introduces
-  the daemon dependency v0.2 deliberately removed.
+- [x] **On-device Gemma backend, native phases — NOT PLANNED.** User decision
+  2026-09-13: use Relais for local/offline inference; do not add a bundled native Gemma
+  runtime/model download. Relais already provides the user-visible disconnected benefit
+  through the provider seam without the app-size and native-maintenance cost.
 - [x] **Encrypt offline queue payloads at rest** (PR #111) — `carnet:queue:v1` and
   capture drafts (`captureDraft.ts`, found in review to carry the same PII classes and
   brought into scope) are now sealed with AES-256-CBC + encrypt-then-MAC (HMAC-SHA256,

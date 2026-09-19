@@ -76,6 +76,8 @@ export function composeSettingsForSave(
     useExistingTagsForAutoTag: form.useExistingTagsForAutoTag,
     richEditorEnabled: form.richEditorEnabled,
     previewBeforeSave: form.previewBeforeSave,
+    vaultProfiles: currentSettings.vaultProfiles,
+    activeVaultProfileId: currentSettings.activeVaultProfileId,
     omniRouteApiKey: existing.omniRouteApiKey,
     captureFolderPath: form.captureFolderPath,
     promptOverrides: form.promptOverrides,

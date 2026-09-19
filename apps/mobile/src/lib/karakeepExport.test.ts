@@ -61,6 +61,15 @@ beforeEach(() => {
 });
 
 describe("pushNoteAttachments", () => {
+  it("resolves attachments under the route's frozen root", async () => {
+    const root = { uri: "file:///vault-a", fs: {} } as never;
+    mockList.mockReturnValue([link("Photos", "a.jpg")]);
+
+    await pushNoteAttachments("bk_1", "body", root);
+
+    expect(mockResolve).toHaveBeenCalledWith("Photos", "a.jpg", root);
+  });
+
   it("uploads + attaches each non-Audio attachment; returns no error and the image URL map", async () => {
     mockList.mockReturnValue([link("Photos", "a.jpg"), link("Files", "b.pdf")]);
 

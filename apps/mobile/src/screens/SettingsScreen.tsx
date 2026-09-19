@@ -21,7 +21,16 @@ import {
   savePersistedOnly,
   setKarakeepApiKey,
   shouldShowMigrationBanner,
+  withVaultProfileState,
 } from "../lib/settings";
+import {
+  activeVaultProfile,
+  addVaultProfile,
+  normaliseVaultProfileState,
+  removeVaultProfile,
+  setActiveVaultProfile,
+  type VaultProfileState,
+} from "../lib/vaultProfiles";
 import {
   apiKeyFieldLabel,
   apiKeyFieldPlaceholder,
@@ -75,6 +84,9 @@ export default function SettingsScreen() {
   const [migrationMessage, setMigrationMessage] = useState<string | null>(
     null,
   );
+  const [vaultProfiles, setVaultProfiles] = useState<VaultProfileState | null>(null);
+  const [newVaultName, setNewVaultName] = useState("");
+  const [newVaultRoot, setNewVaultRoot] = useState("");
 
   useEffect(() => {
     void (async () => {
@@ -116,6 +128,11 @@ export default function SettingsScreen() {
         }
       }
       setForm(formStateFromSettings(s, initialNotificationEnabled));
+      setVaultProfiles(normaliseVaultProfileState({
+        profiles: s.vaultProfiles,
+        activeProfileId: s.activeVaultProfileId,
+        legacyCaptureFolderPath: s.captureFolderPath,
+      }));
       setKarakeepKeyConfigured(hasKkKey);
       setShowBanner(banner);
     })();
@@ -260,6 +277,72 @@ export default function SettingsScreen() {
     }
   };
 
+  /** New profiles need their own SAF picker: their root must be the granted
+   * tree URI, not the display-only label shown by captureFolderLabel(). */
+  const pickNewVaultFolder = async () => {
+    if (Platform.OS !== "android") return;
+    try {
+      const res = await StorageAccessFramework.requestDirectoryPermissionsAsync();
+      if (res.granted && res.directoryUri) {
+        setNewVaultRoot(res.directoryUri);
+      }
+    } catch (e: unknown) {
+      setPickerError(errorMessage(e, "Folder picker failed"));
+    }
+  };
+
+  const persistVaultProfiles = async (next: VaultProfileState) => {
+    const settings = await getSettings();
+    await savePersistedOnly(withVaultProfileState(settings, next));
+    setVaultProfiles(next);
+    const active = activeVaultProfile(next);
+    setForm((current) => current ? { ...current, captureFolderPath: active.rootUri } : current);
+  };
+
+  const switchVault = async (profileId: string) => {
+    if (!vaultProfiles) return;
+    try {
+      await persistVaultProfiles(setActiveVaultProfile(vaultProfiles, profileId));
+      setSaved(true);
+    } catch (e: unknown) {
+      setPickerError(errorMessage(e, "Couldn't switch vault"));
+    }
+  };
+
+  const addVault = async () => {
+    if (!vaultProfiles) return;
+    const name = newVaultName.trim();
+    if (!name) {
+      setPickerError("Give the new vault a name.");
+      return;
+    }
+    try {
+      const id = `vault-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const next = addVaultProfile(vaultProfiles, {
+        id,
+        name,
+        rootUri: newVaultRoot.trim(),
+        createdAt: Date.now(),
+      });
+      await persistVaultProfiles(next);
+      setNewVaultName("");
+      setNewVaultRoot("");
+      setSaved(true);
+    } catch (e: unknown) {
+      setPickerError(errorMessage(e, "Couldn't add vault"));
+    }
+  };
+
+  const removeVault = async (profileId: string) => {
+    if (!vaultProfiles) return;
+    try {
+      await persistVaultProfiles(removeVaultProfile(vaultProfiles, profileId));
+      setSaved(true);
+    } catch (e: unknown) {
+      setPickerError(errorMessage(e, "Couldn't remove vault"));
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <Banner
@@ -298,6 +381,63 @@ export default function SettingsScreen() {
       <Text variant="titleMedium" style={styles.sectionTitle}>
         Storage
       </Text>
+      {vaultProfiles && (
+        <>
+          <HelperText type="info" visible>
+            Vault profiles only register folders in Carnet. Removing one never deletes or moves its files.
+          </HelperText>
+          {vaultProfiles.profiles.map((profile) => (
+            <List.Item
+              key={profile.id}
+              title={profile.name}
+              description={captureFolderLabel(profile.rootUri) || "App sandbox folder"}
+              onPress={() => void switchVault(profile.id)}
+              right={() => profile.id === vaultProfiles.activeProfileId ? <Text>Active</Text> : null}
+            />
+          ))}
+          {vaultProfiles.profiles.length > 1 && (
+            <Button
+              mode="text"
+              compact
+              onPress={() => void removeVault(vaultProfiles.activeProfileId)}
+            >
+              Remove active profile
+            </Button>
+          )}
+          <TextInput
+            {...caretProps(theme)}
+            label="New vault name"
+            accessibilityLabel="New vault name"
+            mode="outlined"
+            value={newVaultName}
+            onChangeText={setNewVaultName}
+          />
+          <TextInput
+            {...caretProps(theme)}
+            label="New vault folder"
+            accessibilityLabel="New vault folder"
+            mode="outlined"
+            autoCapitalize="none"
+            autoCorrect={false}
+            value={newVaultRoot}
+            onChangeText={setNewVaultRoot}
+            placeholder="(app sandbox folder by default)"
+          />
+          {Platform.OS === "android" && (
+            <Button
+              mode="text"
+              icon="folder-open"
+              compact
+              onPress={() => void pickNewVaultFolder()}
+            >
+              Pick new vault folder
+            </Button>
+          )}
+          <Button mode="text" compact onPress={() => void addVault()}>
+            Add vault profile
+          </Button>
+        </>
+      )}
       <HelperText type="info" visible>
         Where notes are saved — point this at your Syncthing-watched vault
         folder so captures sync to your workstation.

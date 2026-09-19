@@ -93,6 +93,11 @@ vi.mock("./settings", () => ({
   DEFAULT_OMNIROUTE_MODEL: "openrouter/openai/gpt-4o-mini",
 }));
 
+const { resolveContextRoot } = vi.hoisted(() => ({
+  resolveContextRoot: vi.fn(() => ({ uri: "file:///carnet", fs: {} })),
+}));
+vi.mock("./vaultRoot", () => ({ resolveContextRoot }));
+
 // providerKeys.ts (dispatcher's per-provider SecureStore lookup) is not
 // mocked directly — it reads through the real expo-secure-store mock above,
 // which is fine since no test here asserts on a specific key value.
@@ -184,6 +189,7 @@ import {
   drainQueue,
   listQueueRows,
 } from "./queue";
+import { getSettings } from "./settings";
 
 /** Current persisted queue rows (parsed from the AsyncStorage mock). */
 function rows(): Row[] {
@@ -228,6 +234,7 @@ describe("listQueueRows", () => {
 beforeEach(() => {
   _store.clear();
   vi.clearAllMocks();
+  resolveContextRoot.mockReturnValue({ uri: "file:///carnet", fs: {} });
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -254,6 +261,18 @@ describe("enqueue", () => {
     const depth = await getQueueDepth();
     expect(depth).toBe(3);
   });
+
+  it("persists the operation's immutable vault context", async () => {
+    await enqueue({
+      mode: "idea",
+      text: "work capture",
+      vaultContext: { profileId: "work", rootUri: "file:///work" },
+    });
+    const [decrypted] = await listQueueRows();
+    expect(JSON.parse(decrypted.payload_json)).toMatchObject({
+      vaultContext: { profileId: "work", rootUri: "file:///work" },
+    });
+  });
 });
 
 describe("drainQueue", () => {
@@ -268,6 +287,54 @@ describe("drainQueue", () => {
 
     await drainQueue();
     expect(rows().length).toBe(0);
+  });
+
+  it("drains through the stored vault root, not the currently active one", async () => {
+    const { writeIdea } = await import("./writer");
+    const workRoot = { uri: "file:///work", fs: {} };
+    resolveContextRoot.mockReturnValue(workRoot);
+    await enqueue({
+      mode: "idea",
+      text: "keep me in work",
+      vaultContext: { profileId: "work", rootUri: "file:///work" },
+    });
+
+    await drainQueue();
+
+    expect(resolveContextRoot).toHaveBeenCalledWith({
+      profileId: "work",
+      rootUri: "file:///work",
+    });
+    expect(writeIdea).toHaveBeenCalledWith(
+      "test-idea",
+      expect.any(String),
+      workRoot,
+    );
+  });
+
+  it("migrates a legacy contextless row to the default profile, not a later active profile", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      ...(await getSettings()),
+      vaultProfiles: [
+        { id: "default", name: "Default vault", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+      captureFolderPath: "file:///work",
+    });
+    seed([
+      {
+        id: "legacy", mode: "idea", payload_json: JSON.stringify({ mode: "idea", text: "old" }),
+        created_at: 1, attempts: 0, last_error: null,
+      },
+    ]);
+
+    await drainQueue();
+
+    expect(resolveContextRoot).toHaveBeenCalledWith({
+      profileId: "default",
+      rootUri: "file:///personal",
+    });
   });
 
   it("removes a corrupt payload_json row during drain", async () => {

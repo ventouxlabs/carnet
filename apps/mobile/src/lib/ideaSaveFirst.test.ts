@@ -39,6 +39,7 @@ vi.mock("./settings", () => ({
     captureFolderPath: "",
     persistentNotificationEnabled: false,
     autoTranscribeOnSave: false,
+    useExistingTagsForAutoTag: true,
     richEditorEnabled: false,
     previewBeforeSave: false,
     promptOverrides: {},
@@ -57,6 +58,10 @@ vi.mock("./providerKeys", () => ({
   getKey: vi.fn().mockResolvedValue(""),
   setKey: vi.fn(),
   deleteKey: vi.fn(),
+}));
+
+vi.mock("./vaultTagHint", () => ({
+  getVaultTagStrings: vi.fn(async () => []),
 }));
 
 vi.mock("expo-file-system/legacy", () => ({
@@ -146,6 +151,7 @@ import {
 } from "./ideaSaveFirst";
 import { getModificationTime, updateNoteIfUnchanged, readNote } from "./writer";
 import { extractFrontmatterField } from "./frontmatter";
+import { getVaultTagStrings } from "./vaultTagHint";
 
 function clearFiles(): void {
   _files.clear();
@@ -155,6 +161,7 @@ function clearFiles(): void {
 beforeEach(() => {
   clearFiles();
   enrichIdeaMock.mockReset();
+  vi.mocked(getVaultTagStrings).mockReset().mockResolvedValue([]);
   isPermanentErrorMock.mockReturnValue(false);
   isNotConfiguredErrorMock.mockReturnValue(false);
   isInsecureTransportErrorMock.mockReturnValue(false);
@@ -386,6 +393,28 @@ describe("enrichIdeaInPlace", () => {
     expect(fileExistedAtEnrichTime).toBe(true);
     expect(outcome.kind).toBe("updated");
     expect(_files.get(filepath)!.content).toContain("# Enriched");
+  });
+
+  it("uses the raw note's captured profile tags after the active profile changes", async () => {
+    const { filepath, mtime } = await writeRawIdea({ text: "personal capture", tags: [] });
+    vi.mocked(getVaultTagStrings).mockImplementation(async (profileIdOrLimit?: string | number) =>
+      typeof profileIdOrLimit === "string" && profileIdOrLimit === "personal"
+        ? ["personal-only"]
+        : ["work-secret"],
+    );
+    enrichIdeaMock.mockResolvedValue({ markdown: "# Enriched\n", model: "test" });
+
+    await enrichIdeaInPlace({
+      filepath,
+      expectedMtime: mtime,
+      text: "personal capture",
+      tags: [],
+      vaultContext: { profileId: "personal", rootUri: "file:///personal" },
+    });
+
+    expect(getVaultTagStrings).toHaveBeenCalledWith("personal");
+    expect(enrichIdeaMock.mock.calls[0]?.[0]).toBe("personal capture");
+    expect(enrichIdeaMock.mock.calls[0]?.[3]).toEqual(["personal-only"]);
   });
 
   it("classifies a network failure as transient (caller should queue)", async () => {

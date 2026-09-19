@@ -28,6 +28,7 @@ import {
   writeIdea,
   type AttachmentRef,
 } from "./writer";
+import type { Root } from "./vaultRoot";
 import { preserveFrontmatterFields, upsertFrontmatterField } from "./frontmatter";
 import { mergeUserTags } from "./tags";
 import {
@@ -36,6 +37,7 @@ import {
   isNotConfiguredError,
   isPermanentError,
 } from "./dispatcher";
+import type { VaultContext } from "./vaultContext";
 
 /** Frontmatter `status` value stamped on the raw note before enrichment lands.
  * Enrichment overwrites the whole note (including this) with the LLM result. */
@@ -153,10 +155,13 @@ export interface WriteRawIdeaResult {
 export async function writeRawIdea(
   input: RawIdeaInput,
   now?: Date,
+  root?: Root,
 ): Promise<WriteRawIdeaResult> {
   const slug = deriveRawIdeaSlug(input.text);
   const markdown = buildRawIdeaMarkdown(input, now);
-  const { filepath } = await writeIdea(slug, markdown);
+  const { filepath } = root
+    ? await writeIdea(slug, markdown, root)
+    : await writeIdea(slug, markdown);
   const mtime = await getModificationTime(filepath);
   return { filepath, slug, mtime, markdown };
 }
@@ -267,6 +272,9 @@ export interface EnrichIdeaInPlaceInput {
   tags: string[];
   location?: string;
   attachments?: AttachmentRef[];
+  /** Vault selected for the raw write; its cached tags must accompany the
+   * delayed enrichment even when another profile becomes active meanwhile. */
+  vaultContext?: VaultContext;
 }
 
 /**
@@ -295,7 +303,7 @@ export async function enrichIdeaInPlace(
 ): Promise<EnrichIdeaOutcome> {
   let enriched: string;
   try {
-    const result = await enrichIdea(input.text);
+    const result = await enrichIdea(input.text, { vaultContext: input.vaultContext });
     enriched = result.markdown;
   } catch (e: unknown) {
     const reason = e instanceof Error ? e.message : String(e);

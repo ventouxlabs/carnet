@@ -141,7 +141,8 @@ describe("cardScanPreflightHint", () => {
 
   it("does not claim the image was saved — nothing has been captured yet", () => {
     const hint = cardScanPreflightHint({ kind: "notConfigured", message: "no url" });
-    expect(hint).not.toMatch(/was saved/i);
+    expect(hint).not.toMatch(/is saved for later/i);
+    expect(hint).toMatch(/no image is saved/i);
   });
 
   it("stays silent for outcomes that are not knowable before a call", () => {

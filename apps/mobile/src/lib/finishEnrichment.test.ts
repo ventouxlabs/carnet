@@ -81,6 +81,12 @@ describe("isPendingEnrich", () => {
 });
 
 describe("finishPendingEnrichment", () => {
+  it("passes the detail route's frozen vault context to deferred enrichment", async () => {
+    const vaultContext = { profileId: "a", rootUri: "file:///vault-a" };
+    await finishPendingEnrichment({ body: PENDING, filepath: "f.md", vaultContext });
+    expect(mockEnrich.mock.calls[0][0].vaultContext).toEqual(vaultContext);
+  });
+
   it("enriches the raw text and returns the new markdown", async () => {
     const out = await finishPendingEnrichment({ body: PENDING, filepath: "f.md" });
     expect(out).toEqual({ kind: "updated", markdown: "# Enriched\n\nbody\n" });
@@ -228,6 +234,17 @@ describe("isReEnrichableMode", () => {
 });
 
 describe("reEnrichNoteInPlace", () => {
+  it("threads the frozen context to Person re-enrichment", async () => {
+    const vaultContext = { profileId: "a", rootUri: "file:///vault-a" };
+    await reEnrichNoteInPlace({
+      body: ENRICHED,
+      filepath: "p.md",
+      mode: "person",
+      vaultContext,
+    });
+    expect(mockPerson.mock.calls[0][0].vaultContext).toEqual(vaultContext);
+  });
+
   beforeEach(() => {
     mockReadNote.mockResolvedValue(ENRICHED);
   });

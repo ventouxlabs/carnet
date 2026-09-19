@@ -45,6 +45,9 @@ vi.mock("../lib/dispatcher", () => ({
 }));
 
 vi.mock("../lib/writer", () => ({ writeSynthesis }));
+vi.mock("../lib/vaultRoot", () => ({
+  resolveContextRoot: vi.fn(() => ({ uri: "file:///vault", fs: {} })),
+}));
 
 vi.mock("../lib/vault", () => ({ upsertNoteInIndex, resolveNoteEntry, readNoteBodies }));
 
@@ -62,6 +65,7 @@ function renderScreen(params?: Partial<AskScreenProps["route"]["params"]>) {
           params: {
             question: "what about A?",
             candidates: [CANDIDATE_A],
+            vaultContext: { profileId: "default", rootUri: "file:///vault" },
             ...params,
           },
         }}
@@ -110,6 +114,7 @@ describe("AskScreen", () => {
       expect(upsertNoteInIndex).toHaveBeenCalledWith(
         "file:///v/Notes/q.md",
         expect.stringContaining("tags: [synthesis]"),
+        "default",
       );
     });
   });
@@ -144,8 +149,29 @@ describe("AskScreen", () => {
 
     await waitFor(() => expect(resolveNoteEntry).toHaveBeenCalledWith(CANDIDATE_A.uri));
     await waitFor(() =>
-      expect(navigation.navigate).toHaveBeenCalledWith("RecentDetail", { entry }),
+      expect(navigation.navigate).toHaveBeenCalledWith("RecentDetail", {
+        entry,
+        vaultContext: { profileId: "default", rootUri: "file:///vault" },
+      }),
     );
+  });
+
+  it("keeps a long citation's full title in its accessible tap target", async () => {
+    const longTitle = "My family traveled to France via Strasbourg after arriving from the US.";
+    askVault.mockResolvedValue({
+      result: { markdown: `See [[${longTitle}]].`, model: "m" },
+      usedFallback: false,
+      fallbackProviderId: null,
+      providerLabel: "Test",
+    });
+    const candidate = { uri: CANDIDATE_A.uri, title: longTitle, fromBodyMatch: false };
+    const { navigation } = renderScreen({ candidates: [candidate] });
+
+    const link = await screen.findByLabelText(`Open note ${longTitle}`);
+    expect(link.textContent).toContain("…");
+    fireEvent.click(link);
+    await waitFor(() => expect(resolveNoteEntry).toHaveBeenCalledWith(CANDIDATE_A.uri));
+    expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
   it("does not navigate when the cited note no longer resolves", async () => {

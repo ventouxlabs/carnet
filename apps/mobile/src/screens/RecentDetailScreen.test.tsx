@@ -186,7 +186,7 @@ vi.mock("expo-sharing", () => ({
 }));
 
 import RecentDetailScreen from "./RecentDetailScreen";
-import { readNote, updateNote } from "../lib/writer";
+import { readNote, updateNoteIfUnchanged } from "../lib/writer";
 import { finishPendingEnrichment, reEnrichNoteInPlace } from "../lib/finishEnrichment";
 import { removeFromHistory, updateCaptureTitleByFilepath } from "../lib/storage";
 import { attachPhotoToNote } from "../lib/attachPhotoToNote";
@@ -226,7 +226,7 @@ function renderScreen(entry: CaptureEntry = ENTRY) {
           {
             key: "d",
             name: "RecentDetail",
-            params: { entry },
+            params: { entry, vaultContext: { profileId: "default", rootUri: "file:///vault" } },
           } as ScreenProps["route"]
         }
       />
@@ -248,6 +248,7 @@ function openActionsSheet(navigation: ReturnType<typeof makeNavigation>): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(readNote).mockResolvedValue(NOTE_MD);
 });
 
 afterEach(cleanup);
@@ -296,6 +297,7 @@ describe("RecentDetailScreen", () => {
     await waitFor(() =>
       expect(navigation.push).toHaveBeenCalledWith("RecentDetail", {
         entry: target,
+        vaultContext: { profileId: "default", rootUri: "file:///vault" },
       }),
     );
   });
@@ -321,13 +323,76 @@ describe("RecentDetailScreen", () => {
       screen.getByLabelText("Link Other QA note into this note"),
     );
 
-    await waitFor(() => expect(updateNote).toHaveBeenCalledTimes(1));
-    const written = vi.mocked(updateNote).mock.calls[0][1];
+    await waitFor(() => expect(updateNoteIfUnchanged).toHaveBeenCalledTimes(1));
+    const written = vi.mocked(updateNoteIfUnchanged).mock.calls[0][1];
     expect(written).toContain("## Related");
     expect(written).toContain("- [[Other QA note]]");
+    expect(vi.mocked(updateNoteIfUnchanged).mock.calls[0]).toEqual([
+      ENTRY.filepath,
+      written,
+      null,
+      NOTE_MD,
+    ]);
     expect(
       await screen.findByText("Linked [[Other QA note]] under Related"),
     ).toBeTruthy();
+  });
+
+  it("shows full-name journal mentions for a Person and links a selected date into that one note", async () => {
+    const person = { ...ENTRY, mode: "person" as const, title: "Ada Lovelace", filepath: "file:///v/People/ada-lovelace.md" };
+    vi.mocked(readNote).mockImplementation(async (uri: string) =>
+      uri.includes("Journal/2026-09-14")
+        ? "# Journal\n\nMet Ada Lovelace after lunch."
+        : "---\nname: Ada Lovelace\n---\n# Ada Lovelace\n",
+    );
+    vi.mocked(loadCachedNoteIndex).mockResolvedValue({
+      builtAt: 1,
+      notes: [{
+        uri: "file:///v/Journal/2026-09-14.md",
+        subdir: "Journal",
+        title: "Journal",
+        createdOrDate: 1,
+        tags: [],
+        mode: "journal",
+        excerpt: "",
+      }],
+    } as Awaited<ReturnType<typeof loadCachedNoteIndex>>);
+
+    renderScreen(person);
+    expect(await screen.findByText("Journal mentions")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Link journal 2026-09-14 into this person"));
+
+    await waitFor(() => expect(updateNoteIfUnchanged).toHaveBeenCalledWith(
+      person.filepath,
+      expect.stringContaining("[[Journal/2026-09-14]]"),
+      null,
+      expect.stringContaining("# Ada Lovelace"),
+    ));
+  });
+
+  it("refuses a related-link write when the displayed note is stale", async () => {
+    const relatedEntry = {
+      uri: "file:///v/Ideas/other-qa-note.md",
+      subdir: "Ideas" as const,
+      title: "Other QA note",
+      createdOrDate: 5,
+      tags: ["qa-test"],
+      mode: "idea" as const,
+      excerpt: "",
+    };
+    vi.mocked(loadCachedNoteIndex).mockResolvedValue({
+      builtAt: 1,
+      notes: [relatedEntry],
+    } as Awaited<ReturnType<typeof loadCachedNoteIndex>>);
+    vi.mocked(updateNoteIfUnchanged).mockResolvedValueOnce({ ok: false, reason: "conflict" });
+
+    renderScreen();
+    await screen.findByText("Related");
+    fireEvent.click(screen.getByLabelText("Link Other QA note into this note"));
+
+    await waitFor(() => expect(updateNoteIfUnchanged).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Save failed: The note changed before the link could be saved/)).toBeTruthy();
+    expect(screen.queryByText("Linked [[Other QA note]] under Related")).toBeNull();
   });
 
   it("tag stamp opens pre-filtered Search", async () => {
@@ -392,6 +457,7 @@ describe("RecentDetailScreen", () => {
         base64: "AAAA",
         mime: "image/jpeg",
         basename: undefined,
+        rootOverride: expect.any(Object),
       }),
     );
     // The refreshed body comes back from the lib module, not a local splice.
@@ -430,7 +496,7 @@ describe("RecentDetailScreen", () => {
     expect(screen.queryByLabelText("Edit note")).toBeNull();
 
     fireEvent.click(screen.getByText("Remove from list"));
-    await waitFor(() => expect(removeFromHistory).toHaveBeenCalledWith("r1"));
+    await waitFor(() => expect(removeFromHistory).toHaveBeenCalledWith("r1", "default"));
     await waitFor(() => expect(navigation.goBack).toHaveBeenCalled());
   });
 
@@ -506,6 +572,7 @@ describe("RecentDetailScreen — re-enrich family", () => {
         body: ENRICHED_MD,
         filepath: ENTRY.filepath,
         mode: "idea",
+        vaultContext: expect.objectContaining({ profileId: "default" }),
       }),
     );
     expect(await screen.findByText(/Re-enriched body\./)).toBeTruthy();
@@ -525,10 +592,15 @@ describe("RecentDetailScreen — re-enrich family", () => {
       expect(upsertNoteInIndex).toHaveBeenCalledWith(
         ENTRY.filepath,
         "---\n---\n# Re-enriched\n\nRe-enriched body.\n",
+        "default",
       ),
     );
     await waitFor(() =>
-      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(ENTRY.filepath, "Re-enriched"),
+      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "Re-enriched",
+        "default",
+      ),
     );
   });
 

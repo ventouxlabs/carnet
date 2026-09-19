@@ -32,6 +32,9 @@ import {
 import { recordCapture } from "./storage";
 import { invalidateTagIndex } from "./vault";
 import { enqueue } from "./queue";
+import { getSettings } from "./settings";
+import { captureVaultContext, type VaultContext } from "./vaultContext";
+import { resolveContextRoot } from "./vaultRoot";
 
 /**
  * Outcome of handling a RemoteInput quick-idea submission. Every non-`empty`
@@ -69,6 +72,16 @@ export async function handleQuickIdeaCapture(rawText: string): Promise<QuickIdea
   }
 
   const ctx: RawIdeaInput = { text, tags: [] };
+  // The headless task can overlap a foreground profile switch. Capture the
+  // root before any write or network await so its raw note, history, index
+  // invalidation, and possible queued retry remain one coherent vault.
+  let vaultContext: VaultContext | undefined;
+  try {
+    vaultContext = captureVaultContext(await getSettings());
+  } catch {
+    // Keep the notification capture available if local settings is transiently
+    // unreadable; writer/enqueue retain their existing default fallbacks.
+  }
 
   // Save-first write: the raw note lands on disk immediately, before any
   // enrichment is attempted. A failure here means nothing was saved.
@@ -79,7 +92,11 @@ export async function handleQuickIdeaCapture(rawText: string): Promise<QuickIdea
   // conflict guard can compare — see writer.ts's updateNoteIfUnchanged.
   let rawMarkdown: string;
   try {
-    const res = await writeRawIdea(ctx);
+    const res = await writeRawIdea(
+      ctx,
+      undefined,
+      vaultContext ? resolveContextRoot(vaultContext) : undefined,
+    );
     filepath = res.filepath;
     mtime = res.mtime;
     rawMarkdown = res.markdown;
@@ -91,17 +108,20 @@ export async function handleQuickIdeaCapture(rawText: string): Promise<QuickIdea
   // save-first path. The note is on disk regardless, so a failure here must not
   // mask the successful capture.
   try {
-    await recordCapture({
-      id: localId(),
-      mode: "idea",
-      title: deriveTitle(ctx.text) || "Idea",
-      filepath,
-      createdAt: Date.now(),
-    });
+    await recordCapture(
+      {
+        id: localId(),
+        mode: "idea",
+        title: deriveTitle(ctx.text) || "Idea",
+        filepath,
+        createdAt: Date.now(),
+      },
+      vaultContext?.profileId,
+    );
   } catch {
     // ignore — recents is a convenience surface, not the source of truth.
   }
-  void invalidateTagIndex().catch(() => undefined);
+  void invalidateTagIndex(vaultContext?.profileId).catch(() => undefined);
 
   // Async enrichment, updating the note in place under the mtime guard.
   const outcome = await enrichIdeaInPlace({
@@ -112,8 +132,9 @@ export async function handleQuickIdeaCapture(rawText: string): Promise<QuickIdea
     tags: ctx.tags,
     location: ctx.location,
     attachments: ctx.attachments,
+    vaultContext,
   });
-  return finishQuickIdea(outcome, ctx, filepath, mtime, rawMarkdown);
+  return finishQuickIdea(outcome, ctx, filepath, mtime, rawMarkdown, vaultContext);
 }
 
 /**
@@ -130,6 +151,7 @@ async function finishQuickIdea(
   /** The raw note's bytes at the `mtime` baseline. Has to survive into the queue
    * row: the drain can run hours later, and on SAF it is the only guard there. */
   baselineContent: string,
+  vaultContext?: VaultContext,
 ): Promise<QuickIdeaResult> {
   if (outcome.kind === "updated") return { kind: "enriched" };
   if (outcome.kind === "conflict") return { kind: "conflict" };
@@ -147,6 +169,7 @@ async function finishQuickIdea(
         filepath,
         baselineMtime: mtime,
         baselineContent,
+        vaultContext,
       });
       return { kind: "queued" };
     } catch {

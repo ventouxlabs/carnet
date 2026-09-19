@@ -36,6 +36,7 @@ import SearchScreen from "./src/screens/SearchScreen";
 import TodosScreen from "./src/screens/TodosScreen";
 import AskScreen, { type AskRouteParams } from "./src/screens/AskScreen";
 import type { CaptureEntry, CaptureMode } from "./src/lib/storage";
+import type { VaultContext } from "./src/lib/vaultContext";
 import { carnetDark, carnetLight } from "./src/lib/theme";
 import {
   getThemePreference,
@@ -49,6 +50,7 @@ import {
   createForegroundDrainTrigger,
   type ForegroundDrainTrigger,
 } from "./src/lib/foregroundDrainTrigger";
+import { refreshActiveVault } from "./src/lib/vaultRefreshService";
 
 // Installed once at module load, as early as possible — chains onto RN's
 // default handler so every uncaught JS exception lands in the local crash
@@ -63,7 +65,9 @@ export type RootStackParamList = {
   ShareReceive: undefined;
   PhotoCapture: undefined;
   AudioCapture: undefined;
-  RecentDetail: { entry: CaptureEntry };
+  /** `profileId` is a navigation-time snapshot: history actions must never
+   * follow a profile switch that happens after a note card was tapped. */
+  RecentDetail: { entry: CaptureEntry; vaultContext: VaultContext };
   TagBrowser: { tag?: string } | undefined;
   /** `tag` pre-applies a tag filter — how "tap a tag anywhere" lands here. */
   Search: { tag?: string } | undefined;
@@ -233,6 +237,19 @@ export default function App() {
     });
     return () => sub.remove();
   }, [queueDrainTrigger]);
+
+  // Syncthing has no portable SAF watcher. Reconcile lazily on foreground,
+  // never on the capture path; cached UI remains available while the scan runs.
+  useEffect(() => {
+    const kickVaultRefresh = () => {
+      void refreshActiveVault().catch(() => undefined);
+    };
+    kickVaultRefresh();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") kickVaultRefresh();
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     // Load the persisted theme override before first paint so the app

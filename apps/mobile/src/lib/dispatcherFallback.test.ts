@@ -86,6 +86,7 @@ const fetchMock = vi.fn();
 globalThis.fetch = fetchMock as unknown as typeof fetch;
 
 import {
+  classifyBusinessCardViaVision,
   enrichIdea,
   enrichSharedImage,
   ocrCardViaVision,
@@ -249,6 +250,18 @@ describe("offline fallback chain (Phase 3)", () => {
 // enrichSharedImage is the representative call site here — ocrCardViaVision
 // shares the same resolveVisionProviderId() helper in dispatcher.ts.
 describe("vision routing (Phase 3)", () => {
+  it("routes card classification through the configured vision provider before OCR", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("card"));
+
+    await expect(
+      classifyBusinessCardViaVision({ base64: "abc", mimeType: "image/jpeg" }),
+    ).resolves.toEqual({ classification: "card" });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { messages: Array<{ content: Array<{ text?: string }> }> };
+    expect(body.messages[0].content[0].text).toContain("exactly one label");
+  });
+
   it("prefers the active entry's own vision model (today's behavior, unchanged)", async () => {
     // BASE_SETTINGS' omniroute entry already has visionModel set — the
     // common case, and the one every OTHER test in this file relies on.

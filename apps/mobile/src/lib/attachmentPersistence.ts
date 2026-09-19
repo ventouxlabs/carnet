@@ -15,6 +15,7 @@
  */
 
 import { slugify, writeBinary, extFromMime, type AttachmentRef } from "./writer";
+import type { Root } from "./vaultRoot";
 import type { PickedAttachment } from "./attachments";
 
 /**
@@ -25,6 +26,7 @@ import type { PickedAttachment } from "./attachments";
 export async function persistAttachments(
   pending: readonly PickedAttachment[],
   cache: WeakMap<PickedAttachment, AttachmentRef>,
+  root?: Root,
 ): Promise<AttachmentRef[]> {
   const refs: AttachmentRef[] = [];
   for (const p of pending) {
@@ -36,7 +38,9 @@ export async function persistAttachments(
     const subdir = p.kind === "image" ? "Photos" : "Files";
     const ext = extFromMime(p.mime);
     const base = slugify(p.filename.replace(/\.[^.]+$/, "")) || "attachment";
-    const { finalName } = await writeBinary(subdir, `${base}.${ext}`, p.base64, p.mime);
+    const { finalName } = root
+      ? await writeBinary(subdir, `${base}.${ext}`, p.base64, p.mime, root)
+      : await writeBinary(subdir, `${base}.${ext}`, p.base64, p.mime);
     const ref: AttachmentRef = {
       kind: p.kind,
       rel: `../${subdir}/${finalName}`,

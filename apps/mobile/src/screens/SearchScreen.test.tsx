@@ -12,11 +12,33 @@ import { PaperProvider } from "react-native-paper";
 import { carnetLight } from "../lib/theme";
 import type { NoteIndexEntry } from "../lib/vault";
 
+const focusHarness = vi.hoisted(() => ({
+  callback: null as (() => void | (() => void)) | null,
+  cleanup: null as (() => void) | null,
+}));
+
+vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
+vi.mock("../lib/settings", () => ({ getSettings: vi.fn(async () => ({ captureFolderPath: "" })) }));
+vi.mock("../lib/vaultRoot", () => ({
+  resolveContextRoot: vi.fn((context: { rootUri: string }) => ({
+    uri: context.rootUri || "file:///vault",
+    fs: {},
+  })),
+}));
+
 vi.mock("@react-navigation/native", async () => {
   const { useEffect } = await import("react");
   return {
     useFocusEffect: (cb: () => void | (() => void)) => {
-      useEffect(cb, [cb]);
+      useEffect(() => {
+        focusHarness.callback = cb;
+        const cleanup = cb();
+        focusHarness.cleanup = cleanup ?? null;
+        return () => {
+          cleanup?.();
+          if (focusHarness.cleanup === cleanup) focusHarness.cleanup = null;
+        };
+      }, [cb]);
     },
   };
 });
@@ -72,6 +94,7 @@ vi.mock("../lib/askExplainer", () => ({
 import SearchScreen from "./SearchScreen";
 import { resolveNoteEntry, searchNoteBodies, getNoteIndex } from "../lib/vault";
 import { shouldShowAskExplainer, markAskExplainerSeen } from "../lib/askExplainer";
+import { getSettings } from "../lib/settings";
 
 type ScreenProps = Parameters<typeof SearchScreen>[0];
 
@@ -99,6 +122,8 @@ function renderScreen(params?: { tag?: string }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  focusHarness.callback = null;
+  focusHarness.cleanup = null;
 });
 
 afterEach(cleanup);
@@ -145,6 +170,7 @@ describe("SearchScreen", () => {
     await waitFor(() =>
       expect(navigation.navigate).toHaveBeenCalledWith("RecentDetail", {
         entry: expect.objectContaining({ filepath: "file:///v/Ideas/first.md" }),
+        vaultContext: { profileId: "default", rootUri: "" },
       }),
     );
     expect(resolveNoteEntry).toHaveBeenCalledWith("file:///v/Ideas/first.md");
@@ -219,6 +245,63 @@ describe("body search", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
 
     expect(abortSpy).toHaveBeenCalled();
+  });
+
+  it("pins a body scan to its captured profile and ignores late A-vault callbacks after focus switches to B", async () => {
+    let onMatchA!: (m: { uri: string; snippet: string }) => void;
+    const abortSpy = vi.fn();
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///vault-a",
+      vaultProfiles: [
+        { id: "a", name: "Vault A", rootUri: "file:///vault-a", createdAt: 1 },
+        { id: "b", name: "Vault B", rootUri: "file:///vault-b", createdAt: 2 },
+      ],
+      activeVaultProfileId: "a",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    vi.mocked(searchNoteBodies).mockImplementation(
+      (_query, onMatch, _onProgress, signal) =>
+        new Promise(() => {
+          onMatchA = onMatch;
+          signal.addEventListener("abort", abortSpy);
+        }),
+    );
+
+    renderScreen();
+    await screen.findByText("First idea");
+    const input = screen.getByPlaceholderText("Search notes") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "hello" } });
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => expect(screen.getByText("Search note contents")).toBeTruthy());
+    fireEvent.click(screen.getByText("Search note contents"));
+    await waitFor(() => expect(searchNoteBodies).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(searchNoteBodies).mock.calls[0][4]).toEqual(
+      expect.objectContaining({ uri: "file:///vault-a" }),
+    );
+
+    act(() => onMatchA({ uri: "file:///vault-a/Ideas/a.md", snippet: "A_MATCH" }));
+    expect(await screen.findByText("A_MATCH")).toBeTruthy();
+
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///vault-b",
+      vaultProfiles: [
+        { id: "a", name: "Vault A", rootUri: "file:///vault-a", createdAt: 1 },
+        { id: "b", name: "Vault B", rootUri: "file:///vault-b", createdAt: 2 },
+      ],
+      activeVaultProfileId: "b",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    act(() => {
+      focusHarness.cleanup?.();
+      const next = focusHarness.callback?.();
+      focusHarness.cleanup = next ?? null;
+    });
+    await waitFor(() => expect(getNoteIndex).toHaveBeenCalledTimes(2));
+    expect(abortSpy).toHaveBeenCalled();
+    expect(screen.queryByText("A_MATCH")).toBeNull();
+
+    // SAF reads already issued before abort can still deliver late. They must
+    // not re-populate the B-vault screen or become Ask candidates.
+    act(() => onMatchA({ uri: "file:///vault-a/Ideas/a.md", snippet: "A_LATE_MATCH" }));
+    expect(screen.queryByText("A_LATE_MATCH")).toBeNull();
   });
 
   it("ignores a superseded scan's callbacks after a new scan has started", async () => {

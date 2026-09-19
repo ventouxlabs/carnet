@@ -42,7 +42,9 @@ import { assertBase64UnderLimit } from "../lib/llmClient";
 import { caretProps, useCarnetTheme } from "../lib/theme";
 import { deriveTitle } from "@carnet/shared";
 import { getSettings } from "../lib/settings";
+import { captureVaultContext, type VaultContext } from "../lib/vaultContext";
 import { resolveActiveProvider, UNKNOWN_PROVIDER_LABEL } from "../lib/llmProviders";
+import { captureVaultSnapshot } from "../lib/captureVaultSnapshot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "PhotoCapture">;
 
@@ -81,6 +83,9 @@ export default function PhotoCaptureScreen({ navigation }: Props) {
    * saved-phase Re-enrich can rebuild the correct `../Photos/{name}` embed
    * — the .md may have been collision-bumped independently of the .jpg. */
   const [savedImageName, setSavedImageName] = useState<string | null>(null);
+  /** Frozen at Send so a profile switch during vision enrichment cannot make
+   * another vault's cached tag vocabulary part of this capture's prompt. */
+  const [enrichmentVaultContext, setEnrichmentVaultContext] = useState<VaultContext | undefined>();
   /** Surfaced as a banner on the saved screen when AI enrichment failed and
    * we fell back to a stub note. */
   const [degradedReason, setDegradedReason] = useState<string | null>(null);
@@ -162,6 +167,7 @@ export default function PhotoCaptureScreen({ navigation }: Props) {
     setEnrichedMd("");
     setDegradedReason(null);
     setError(null);
+    setEnrichmentVaultContext(undefined);
     setPhase("input");
   };
 
@@ -172,12 +178,19 @@ export default function PhotoCaptureScreen({ navigation }: Props) {
     setPhase("submitting");
     const slugFallback = timestampSlug();
     const ctx = combinedContext;
+    let vaultContext: VaultContext | undefined;
     try {
-      const result = await enrichSharedImage({
-        base64,
-        mimeType: "image/jpeg",
-        context: ctx,
-      });
+      vaultContext = captureVaultContext(await getSettings());
+      setEnrichmentVaultContext(vaultContext);
+    } catch {
+      // Enrichment stays available when settings are transiently unreadable;
+      // dispatcher falls back to its ordinary active-cache lookup.
+    }
+    try {
+      const result = await enrichSharedImage(
+        { base64, mimeType: "image/jpeg", context: ctx },
+        { vaultContext },
+      );
       setEnrichedMd(result.markdown);
     } catch (e: unknown) {
       const reason = e instanceof Error ? e.message : String(e);
@@ -196,6 +209,8 @@ export default function PhotoCaptureScreen({ navigation }: Props) {
     setError(null);
     setPhase("submitting");
     try {
+      const vault = await captureVaultSnapshot();
+      const root = vault?.root;
       const slugFallback = timestampSlug();
       const title = deriveTitle(enrichedMd) || `Photo ${slugFallback}`;
       const desiredSlug = slugify(title) || `photo-${slugFallback}`;
@@ -205,25 +220,23 @@ export default function PhotoCaptureScreen({ navigation }: Props) {
         `${desiredSlug}.jpg`,
         base64,
         "image/jpeg",
+        root,
       );
 
       // Share the collision-bumped stem so .jpg and .md stay paired.
       const sharedStem = finalName.replace(/\.[^.]+$/, "");
       const withImage = injectImageEmbed(enrichedMd, `../Photos/${finalName}`);
-      const { filepath } = await writeIdea(sharedStem, withImage);
+      const { filepath } = await writeIdea(sharedStem, withImage, root);
 
       // Recents history is best-effort. If AsyncStorage fails after the
       // files are already on disk, surface a console warning but still
       // transition to "saved" — retrying would write `slug-2.jpg` +
       // `slug-2.md` as duplicates.
       try {
-        await recordCapture({
-          id: localId(),
-          mode: "photo",
-          title,
-          filepath,
-          createdAt: Date.now(),
-        });
+        await recordCapture(
+          { id: localId(), mode: "photo", title, filepath, createdAt: Date.now() },
+          vault?.context.profileId,
+        );
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         console.warn("[PhotoCapture] recordCapture failed (files saved):", msg);
@@ -251,11 +264,10 @@ export default function PhotoCaptureScreen({ navigation }: Props) {
     setError(null);
     setPhase("submitting");
     try {
-      const result = await enrichSharedImage({
-        base64,
-        mimeType: "image/jpeg",
-        context: combinedContext,
-      });
+      const result = await enrichSharedImage(
+        { base64, mimeType: "image/jpeg", context: combinedContext },
+        { vaultContext: enrichmentVaultContext },
+      );
       const withImage = injectImageEmbed(
         result.markdown,
         `../Photos/${savedImageName}`,

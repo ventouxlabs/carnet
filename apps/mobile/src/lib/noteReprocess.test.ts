@@ -56,12 +56,14 @@ describe("reEnrichNote", () => {
     mockRead.mockResolvedValue({ base64: "AAA", mime: "image/jpeg" });
     mockEnrich.mockResolvedValue({ markdown: "# Fresh\n\nNew text.\n" } as never);
     const body = "# Old\n\n![](../Photos/pic.jpg)\n";
-    const out = await reEnrichNote({ body, filepath: "f.md" });
-    expect(mockEnrich).toHaveBeenCalledWith({
-      base64: "AAA",
-      mimeType: "image/jpeg",
-      context: "",
-    });
+    const root = { uri: "file:///vault-a", fs: {} } as never;
+    const vaultContext = { profileId: "a", rootUri: "file:///vault-a" };
+    const out = await reEnrichNote({ body, filepath: "f.md", rootOverride: root, vaultContext });
+    expect(mockRead).toHaveBeenCalledWith(body, root);
+    expect(mockEnrich).toHaveBeenCalledWith(
+      { base64: "AAA", mimeType: "image/jpeg", context: "" },
+      { vaultContext },
+    );
     expect(out).toEqual({
       kind: "updated",
       nextBody: "![](../Photos/pic.jpg)\n\n# Fresh\n\nNew text.\n",
@@ -95,7 +97,9 @@ describe("transcribeNote", () => {
     mockRead.mockResolvedValue({ base64: "BBB", mime: "audio/m4a" });
     mockTranscribe.mockResolvedValue({ text: "hello world", model: "on-device" });
     const body = "# Voice\n\n[audio](../Audio/rec.m4a)\n";
-    const out = await transcribeNote({ body, filepath: "f.md" });
+    const root = { uri: "file:///vault-a", fs: {} } as never;
+    const out = await transcribeNote({ body, filepath: "f.md", rootOverride: root });
+    expect(mockRead).toHaveBeenCalledWith(body, root);
     expect(mockTranscribe).toHaveBeenCalledWith({
       base64: "BBB",
       mimeType: "audio/m4a",

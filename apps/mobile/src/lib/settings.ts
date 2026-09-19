@@ -5,21 +5,30 @@ import {
   isValidProviderList,
   type LlmProvider,
 } from "./llmProviders";
+import {
+  activeVaultProfile,
+  defaultVaultProfile,
+  normaliseVaultProfileState,
+  type VaultProfile,
+} from "./vaultProfiles";
 
 /**
- * v3 — bumped from v2 by the LLM provider list (Phase 2). `main` and this
+ * v4 — bumped from v3 by named vault profiles. `main` and this
  * branch's `writePersisted` each enumerate their OWN fields explicitly and
  * write the whole blob, so as long as both branches wrote the same
- * `carnet:settings:v2` key, alternating between a main build and a
+ * `carnet:settings:v3` key, alternating between a main build and a
  * provider-list build (this repo ships sideloaded APKs, so a downgrade is
  * one install away) made each save silently drop the other branch's fields
  * — up to and including losing the OmniRoute URL permanently. Moving to a
  * DISTINCT key means the two shapes never alias: this code only ever WRITES
- * v3; v2 is read-only here, exactly like the v1 fallback below, so an
+ * v4; v3 is read-only here, exactly like the v1 fallback below, so an
  * upgrading install's existing config still migrates in, but a subsequent
  * downgrade to a v2-writing build finds its own v2 blob untouched.
  */
-const SETTINGS_KEY = "carnet:settings:v3";
+const SETTINGS_KEY = "carnet:settings:v4";
+/** Pre-vault-profile key — read once for migration when no v4 blob exists
+ * yet, then never written. */
+const SETTINGS_KEY_V3 = "carnet:settings:v3";
 /** Pre-provider-list key (main, and this branch before this fix) — read
  * once for migration when no v3 blob exists yet, then never written. */
 const SETTINGS_KEY_V2 = "carnet:settings:v2";
@@ -159,9 +168,16 @@ export interface Settings {
    * stays on the deferred-write model this branch does not change).
    */
   previewBeforeSave: boolean;
+  /** Named registrations for user-owned vault roots. Removing one never moves
+   * or deletes files below its root. */
+  vaultProfiles?: VaultProfile[];
+  /** The only profile ordinary UI reads/writes by default. In-flight work pins
+   * a profile snapshot rather than rereading this field after an await. */
+  activeVaultProfileId?: string;
   /**
-   * Root folder for captured notes. Defaults to the app sandbox carnet/ dir.
-   * Set to a Syncthing-watched folder for automatic sync to workstation.
+   * Compatibility mirror of the active profile root. New routing must use
+   * `vaultProfiles` + `activeVaultProfileId`; this field keeps old form and
+   * transfer callers source-compatible during the staged migration.
    */
   captureFolderPath: string;
   promptOverrides: PromptOverrides;
@@ -186,6 +202,8 @@ interface PersistedSettings {
   useExistingTagsForAutoTag: boolean;
   richEditorEnabled: boolean;
   previewBeforeSave: boolean;
+  vaultProfiles: VaultProfile[];
+  activeVaultProfileId: string;
   captureFolderPath: string;
   promptOverrides: PromptOverrides;
   karakeepUrl: string;
@@ -222,6 +240,8 @@ const DEFAULT_PERSISTED: PersistedSettings = {
   useExistingTagsForAutoTag: true,
   richEditorEnabled: true,
   previewBeforeSave: false,
+  vaultProfiles: [defaultVaultProfile()],
+  activeVaultProfileId: "default",
   captureFolderPath: "",
   promptOverrides: {},
   karakeepUrl: "",
@@ -340,10 +360,22 @@ function parseModernBlob(raw: string): PersistedSettings | null {
             activeProviderId:
               parsed.activeProviderId ?? DEFAULT_PERSISTED.activeProviderId,
           };
+    const vaultState = normaliseVaultProfileState({
+      profiles: parsed.vaultProfiles,
+      activeProfileId: parsed.activeVaultProfileId,
+      legacyCaptureFolderPath:
+        typeof parsed.captureFolderPath === "string" ? parsed.captureFolderPath : "",
+    });
+    const activeVault = activeVaultProfile(vaultState);
     return {
       ...DEFAULT_PERSISTED,
       ...parsed,
       ...llmFields,
+      vaultProfiles: vaultState.profiles,
+      activeVaultProfileId: vaultState.activeProfileId,
+      // The legacy field follows the active registration rather than being a
+      // second mutable routing source.
+      captureFolderPath: activeVault.rootUri,
       nextCustomSeq:
         typeof parsed.nextCustomSeq === "number"
           ? parsed.nextCustomSeq
@@ -387,9 +419,14 @@ async function readPersisted(): Promise<PersistedSettings> {
     return { ...DEFAULT_PERSISTED, llmProviders: buildDefaultProviders() };
   }
 
-  // Fall back to the pre-v3 blob (written by `main`, or by this branch
-  // before the v3 bump) — read once for migration, exactly like the v1
+  // Fall back to the pre-v4 blob — read once for migration, exactly like the v1
   // fallback below. Never written here; see the SETTINGS_KEY comment.
+  const rawV3 = await AsyncStorage.getItem(SETTINGS_KEY_V3);
+  if (rawV3) {
+    const parsed = parseModernBlob(rawV3);
+    if (parsed) return parsed;
+  }
+
   const rawV2 = await AsyncStorage.getItem(SETTINGS_KEY_V2);
   if (rawV2) {
     const parsed = parseModernBlob(rawV2);
@@ -414,7 +451,9 @@ async function readPersisted(): Promise<PersistedSettings> {
         useExistingTagsForAutoTag: true,
         richEditorEnabled: true,
         previewBeforeSave: false,
-        captureFolderPath: legacy.captureFolderPath ?? "",
+        vaultProfiles: [defaultVaultProfile(legacy.captureFolderPath ?? "")],
+        activeVaultProfileId: "default",
+        captureFolderPath: (legacy.captureFolderPath ?? "").trim(),
         promptOverrides: {},
         karakeepUrl: "",
       };
@@ -427,6 +466,25 @@ async function readPersisted(): Promise<PersistedSettings> {
 }
 
 async function writePersisted(settings: PersistedSettings): Promise<void> {
+  // `captureFolderPath` remains the Settings form's editable compatibility
+  // field during this migration. Fold its current value into the active
+  // registration before normalization; no other profile can be changed by a
+  // one-vault form save.
+  const existingProfiles = settings.vaultProfiles ?? [defaultVaultProfile(settings.captureFolderPath)];
+  const activeProfileId = settings.activeVaultProfileId ?? existingProfiles[0].id;
+  const profilesWithActiveRoot = existingProfiles.map((profile) =>
+    profile.id === activeProfileId
+      ? { ...profile, rootUri: settings.captureFolderPath }
+      : profile,
+  );
+  const vaultState = normaliseVaultProfileState({
+    profiles: profilesWithActiveRoot,
+    activeProfileId,
+    // A legacy form caller updates captureFolderPath; use it only when the
+    // active profile has not been updated by a profile-aware caller.
+    legacyCaptureFolderPath: settings.captureFolderPath,
+  });
+  const activeVault = activeVaultProfile(vaultState);
   const sanitised: PersistedSettings = {
     llmProviders: settings.llmProviders,
     activeProviderId: settings.activeProviderId,
@@ -440,7 +498,9 @@ async function writePersisted(settings: PersistedSettings): Promise<void> {
     useExistingTagsForAutoTag: settings.useExistingTagsForAutoTag,
     richEditorEnabled: settings.richEditorEnabled,
     previewBeforeSave: settings.previewBeforeSave,
-    captureFolderPath: settings.captureFolderPath,
+    vaultProfiles: vaultState.profiles,
+    activeVaultProfileId: vaultState.activeProfileId,
+    captureFolderPath: activeVault.rootUri,
     promptOverrides: sanitisePromptOverrides(settings.promptOverrides),
     karakeepUrl: settings.karakeepUrl,
   };
@@ -489,10 +549,32 @@ export async function getSettings(): Promise<Settings> {
     useExistingTagsForAutoTag: persisted.useExistingTagsForAutoTag,
     richEditorEnabled: persisted.richEditorEnabled,
     previewBeforeSave: persisted.previewBeforeSave,
+    vaultProfiles: persisted.vaultProfiles,
+    activeVaultProfileId: persisted.activeVaultProfileId,
     captureFolderPath: persisted.captureFolderPath,
     promptOverrides: persisted.promptOverrides,
     karakeepUrl: persisted.karakeepUrl,
     karakeepApiKey,
+  };
+}
+
+/** Apply a validated profile state to Settings without changing credentials or
+ * any unrelated preference. The legacy folder field always mirrors the newly
+ * active registration, so older callers cannot route somewhere different. */
+export function withVaultProfileState(
+  settings: Settings,
+  state: { profiles: VaultProfile[]; activeProfileId: string },
+): Settings {
+  const normalized = normaliseVaultProfileState({
+    profiles: state.profiles,
+    activeProfileId: state.activeProfileId,
+    legacyCaptureFolderPath: settings.captureFolderPath,
+  });
+  return {
+    ...settings,
+    vaultProfiles: normalized.profiles,
+    activeVaultProfileId: normalized.activeProfileId,
+    captureFolderPath: activeVaultProfile(normalized).rootUri,
   };
 }
 
@@ -528,6 +610,8 @@ export async function savePersistedOnly(settings: Settings): Promise<void> {
     useExistingTagsForAutoTag: settings.useExistingTagsForAutoTag,
     richEditorEnabled: settings.richEditorEnabled,
     previewBeforeSave: settings.previewBeforeSave,
+    vaultProfiles: settings.vaultProfiles ?? [defaultVaultProfile(settings.captureFolderPath)],
+    activeVaultProfileId: settings.activeVaultProfileId ?? "default",
     captureFolderPath: settings.captureFolderPath,
     promptOverrides: settings.promptOverrides,
     karakeepUrl: settings.karakeepUrl,

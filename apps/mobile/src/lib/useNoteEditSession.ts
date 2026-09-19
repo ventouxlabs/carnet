@@ -34,6 +34,7 @@ import { pickAndWriteVaultImage } from "./vaultImageInsert";
 import type { WysiwygEditorRef } from "../components/WysiwygEditor";
 import { planWysiwygSave } from "./wysiwygSave";
 import { splitFrontmatter, updateNote } from "./writer";
+import type { Root } from "./vaultRoot";
 
 export interface UseNoteEditSessionArgs {
   /** The note's full on-disk markdown, including frontmatter. */
@@ -41,6 +42,10 @@ export interface UseNoteEditSessionArgs {
   filepath: string;
   entryId: string;
   entryTitle: string;
+  /** Profile frozen by the route for profile-scoped index and recents writes. */
+  profileId?: string;
+  /** Immutable root captured by the route, never the currently active profile. */
+  rootOverride: Root;
   /** Rich (WYSIWYG) editor vs the raw markdown textarea. */
   richEditorEnabled: boolean;
   /** Adopt the newly-written markdown after a successful save. */
@@ -93,6 +98,8 @@ export function useNoteEditSession({
   filepath,
   entryId,
   entryTitle,
+  profileId,
+  rootOverride,
   richEditorEnabled,
   onBodyChange,
 }: UseNoteEditSessionArgs): NoteEditSession {
@@ -140,7 +147,7 @@ export function useNoteEditSession({
   // best-effort — a failure just means no suggestions).
   useEffect(() => {
     let active = true;
-    getTagIndex()
+    getTagIndex(profileId, rootOverride)
       .then((index) => {
         if (active) setKnownTags(index.tags.map((e) => e.tag));
       })
@@ -148,7 +155,7 @@ export function useNoteEditSession({
     return () => {
       active = false;
     };
-  }, []);
+  }, [profileId, rootOverride]);
 
   // The WYSIWYG editor holds its content inside the WebView; diffing it per
   // keystroke would cost a bridge round-trip each time, so we conservatively
@@ -208,7 +215,7 @@ export function useNoteEditSession({
     insertingImageRef.current = true;
     setEditError(null);
     try {
-      const written = await pickAndWriteVaultImage();
+      const written = await pickAndWriteVaultImage(rootOverride);
       if (!written) return;
       const r = insertAtCursor(draft, selection, `![](${written.rel})`);
       setDraft(r.text);
@@ -219,7 +226,7 @@ export function useNoteEditSession({
     } finally {
       insertingImageRef.current = false;
     }
-  }, [draft, selection]);
+  }, [draft, rootOverride, selection]);
 
   /** Rich-editor image button: pick → write to the vault → insert the embed at
    * the cursor inside the WYSIWYG editor. The picked bytes are reused to build
@@ -232,7 +239,7 @@ export function useNoteEditSession({
     insertingImageRef.current = true;
     setEditError(null);
     try {
-      const written = await pickAndWriteVaultImage();
+      const written = await pickAndWriteVaultImage(rootOverride);
       if (!written) return;
       wysiwygRef.current?.insertImage(written.rel, written.dataUri);
     } catch (e: unknown) {
@@ -240,7 +247,7 @@ export function useNoteEditSession({
     } finally {
       insertingImageRef.current = false;
     }
-  }, []);
+  }, [rootOverride]);
 
   const showDiscardPrompt = useCallback((replay: (() => void) | null) => {
     pendingReplayRef.current = replay;
@@ -276,13 +283,13 @@ export function useNoteEditSession({
       const newTitle = deriveTitle(savedMarkdown) || entryTitle;
       if (newTitle === entryTitle) return;
       try {
-        await updateCaptureTitle(entryId, newTitle);
+        await updateCaptureTitle(entryId, newTitle, profileId);
       } catch (e: unknown) {
         const reason = e instanceof Error ? e.message : String(e);
         console.warn("[RecentDetail] title update failed:", reason);
       }
     },
-    [entryId, entryTitle],
+    [entryId, entryTitle, profileId],
   );
 
   const handleSaveEdit = useCallback(async () => {
@@ -369,7 +376,7 @@ export function useNoteEditSession({
       onBodyChange(next);
       // A tag change makes the vault index stale — drop the cache so the
       // browser counts + capture autocomplete rebuild on next read.
-      if (tagsChanged) void invalidateNoteIndex().catch(() => undefined);
+      if (tagsChanged) void invalidateNoteIndex(profileId).catch(() => undefined);
     } catch (e: unknown) {
       const reason = e instanceof Error ? e.message : String(e);
       console.warn("[RecentDetail] save (rich) failed:", reason);
@@ -388,7 +395,7 @@ export function useNoteEditSession({
       setSaving(false);
     }
     savingEditRef.current = false;
-  }, [body, editTags, filepath, onBodyChange, refreshRecentsTitle]);
+  }, [body, editTags, filepath, onBodyChange, profileId, refreshRecentsTitle]);
 
   const clearForceSelection = useCallback(() => setForceSelection(null), []);
   const togglePreview = useCallback(() => setPreview((v) => !v), []);

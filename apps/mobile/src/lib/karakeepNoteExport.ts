@@ -30,6 +30,7 @@ import {
   KarakeepError,
 } from "./karakeep";
 import { pushNoteAttachments } from "./karakeepExport";
+import type { Root } from "./vaultRoot";
 import { rewriteImageEmbedsToAssetUrls } from "./karakeepInlineImages";
 import { clearPushedAssets } from "./karakeepAssetSync";
 
@@ -134,6 +135,8 @@ export async function exportNoteToKarakeep(input: {
   body: string;
   filepath: string;
   entryTitle: string;
+  /** Route/queue root frozen with the note; attachments must never resolve via a later active profile. */
+  rootOverride?: Root;
 }): Promise<KarakeepExportOutcome> {
   try {
     const { title, tags, createdAt, header, noteBody, existingId } =
@@ -174,7 +177,7 @@ export async function exportNoteToKarakeep(input: {
       error: assetError,
       imageUrlByRel,
       unsupportedFilenames,
-    } = await pushNoteAttachments(id, noteBody);
+    } = await pushNoteAttachments(id, noteBody, input.rootOverride);
 
     // Inline the note's images into the Karakeep bookmark BODY: rewrite each
     // ../Photos embed to its uploaded asset URL so the images render in-content.

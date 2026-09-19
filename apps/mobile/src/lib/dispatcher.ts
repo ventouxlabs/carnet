@@ -47,6 +47,8 @@
 
 import { getSettings, getPromptOverrides, DEFAULT_OMNIROUTE_MODEL, type Settings } from "./settings";
 import { getVaultTagStrings } from "./vaultTagHint";
+import type { VaultContext } from "./vaultContext";
+import type { Root } from "./vaultRoot";
 import {
   resolveActiveProvider,
   resolveEnhanceProvider,
@@ -287,7 +289,18 @@ function resolveVisionProviderId(settings: Settings): string {
   return resolved?.id ?? settings.activeProviderId;
 }
 
-export async function enrichIdea(text: string): Promise<EnrichResult> {
+/** Immutable vault routing captured by the caller before an async capture.
+ * Provider selection intentionally remains live; only vault-derived tag hints
+ * use this context, preventing one profile's vocabulary reaching another's
+ * enrichment request after a profile switch. */
+export interface EnrichmentOptions {
+  vaultContext?: VaultContext;
+}
+
+export async function enrichIdea(
+  text: string,
+  options?: EnrichmentOptions,
+): Promise<EnrichResult> {
   // vaultTags is fetched in the SAME Promise.all rather than after the
   // settings read: it is a cached AsyncStorage read that never scans the
   // vault, so resolving it in parallel keeps capture latency flat, and the
@@ -295,7 +308,7 @@ export async function enrichIdea(text: string): Promise<EnrichResult> {
   const [settings, overrides, vaultTags] = await Promise.all([
     getSettings(),
     getPromptOverrides(),
-    getVaultTagStrings(),
+    getVaultTagStrings(options?.vaultContext?.profileId),
   ]);
   const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
@@ -304,10 +317,10 @@ export async function enrichIdea(text: string): Promise<EnrichResult> {
   return withFallbackMarker(outcome);
 }
 
-export async function enrichJournal(input: {
-  transcript: string;
-  notes: string;
-}): Promise<EnrichResult> {
+export async function enrichJournal(
+  input: { transcript: string; notes: string },
+  options?: EnrichmentOptions,
+): Promise<EnrichResult> {
   // vaultTags is fetched in the SAME Promise.all rather than after the
   // settings read: it is a cached AsyncStorage read that never scans the
   // vault, so resolving it in parallel keeps capture latency flat, and the
@@ -315,7 +328,7 @@ export async function enrichJournal(input: {
   const [settings, overrides, vaultTags] = await Promise.all([
     getSettings(),
     getPromptOverrides(),
-    getVaultTagStrings(),
+    getVaultTagStrings(options?.vaultContext?.profileId),
   ]);
   const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
@@ -324,10 +337,10 @@ export async function enrichJournal(input: {
   return withFallbackMarker(outcome);
 }
 
-export async function enrichPerson(input: {
-  ocrResult: string;
-  context: string;
-}): Promise<EnrichResult> {
+export async function enrichPerson(
+  input: { ocrResult: string; context: string },
+  options?: EnrichmentOptions,
+): Promise<EnrichResult> {
   // vaultTags is fetched in the SAME Promise.all rather than after the
   // settings read: it is a cached AsyncStorage read that never scans the
   // vault, so resolving it in parallel keeps capture latency flat, and the
@@ -335,7 +348,7 @@ export async function enrichPerson(input: {
   const [settings, overrides, vaultTags] = await Promise.all([
     getSettings(),
     getPromptOverrides(),
-    getVaultTagStrings(),
+    getVaultTagStrings(options?.vaultContext?.profileId),
   ]);
   const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
@@ -344,11 +357,10 @@ export async function enrichPerson(input: {
   return withFallbackMarker(outcome);
 }
 
-export async function enrichSharedImage(input: {
-  base64: string;
-  mimeType: string;
-  context: string;
-}): Promise<EnrichResult> {
+export async function enrichSharedImage(
+  input: { base64: string; mimeType: string; context: string },
+  options?: EnrichmentOptions,
+): Promise<EnrichResult> {
   // vaultTags is fetched in the SAME Promise.all rather than after the
   // settings read: it is a cached AsyncStorage read that never scans the
   // vault, so resolving it in parallel keeps capture latency flat, and the
@@ -356,7 +368,7 @@ export async function enrichSharedImage(input: {
   const [settings, overrides, vaultTags] = await Promise.all([
     getSettings(),
     getPromptOverrides(),
-    getVaultTagStrings(),
+    getVaultTagStrings(options?.vaultContext?.profileId),
   ]);
   const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
   const primaryId = resolveVisionProviderId(settings);
@@ -366,12 +378,15 @@ export async function enrichSharedImage(input: {
   return withFallbackMarker(outcome);
 }
 
-export async function enrichSharedLink(input: {
-  url: string;
-  text: string;
-  context: string;
-  onPreviewSettled?: () => void;
-}): Promise<EnrichResult> {
+export async function enrichSharedLink(
+  input: {
+    url: string;
+    text: string;
+    context: string;
+    onPreviewSettled?: () => void;
+  },
+  options?: EnrichmentOptions,
+): Promise<EnrichResult> {
   // vaultTags is fetched in the SAME Promise.all rather than after the
   // settings read: it is a cached AsyncStorage read that never scans the
   // vault, so resolving it in parallel keeps capture latency flat, and the
@@ -379,7 +394,7 @@ export async function enrichSharedLink(input: {
   const [settings, overrides, vaultTags] = await Promise.all([
     getSettings(),
     getPromptOverrides(),
-    getVaultTagStrings(),
+    getVaultTagStrings(options?.vaultContext?.profileId),
   ]);
   const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
@@ -567,6 +582,23 @@ export async function ocrCardViaVision(input: {
   return result;
 }
 
+/**
+ * Use the same vision-provider routing and offline fallback policy as OCR,
+ * but return only the fail-closed preflight classification. The caller must
+ * receive `card` before it may persist the image or request OCR.
+ */
+export async function classifyBusinessCardViaVision(input: {
+  base64: string;
+  mimeType: string;
+}): Promise<{ classification: import("./cardClassification").CardClassification }> {
+  const settings = await getSettings();
+  const primaryId = resolveVisionProviderId(settings);
+  const { result } = await withFallbackChain(settings, primaryId, (config) =>
+    llmClient.classifyBusinessCardViaVision(input, config),
+  );
+  return result;
+}
+
 // ── On-device speech recognition (backend-agnostic) ─────────────────────────
 
 /** Hard cap for the audio payload sent to on-device transcription. Pre-check
@@ -642,6 +674,7 @@ export async function transcribeAudio(input: {
  */
 export async function autoTranscribeIfEnabled(
   filepath: string,
+  root: Root,
 ): Promise<string | null> {
   try {
     const settings = await getSettings();
@@ -652,7 +685,10 @@ export async function autoTranscribeIfEnabled(
     if (!linkMatch) return "Note has no Audio/ link";
     const filename = linkMatch[1];
 
-    const { base64, mime } = await readPairedBinaryFromNote(body);
+    // The capture's root is frozen before its asynchronous save begins. Do
+    // not re-resolve the active root here: the user may have switched vaults
+    // while this best-effort job was waiting to run.
+    const { base64, mime } = await readPairedBinaryFromNote(body, root);
     const { text } = await transcribeAudio({
       base64,
       mimeType: mime,

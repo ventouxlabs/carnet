@@ -12,7 +12,7 @@
  */
 
 import { fsForUri } from "./vaultFs";
-import { resolveRoot } from "./vaultRoot";
+import { resolveRoot, type Root } from "./vaultRoot";
 import { mimeFromFilename } from "./mimeTypes";
 
 // The MIME<->extension mapping lives in ./mimeTypes — pure, shared beyond the
@@ -69,8 +69,9 @@ export function listPairedBinaries(body: string): PairedBinary[] {
 export async function resolvePairedUri(
   subdir: string,
   filename: string,
+  rootOverride?: Root,
 ): Promise<{ uri: string; mime: string } | null> {
-  const root = await resolveRoot();
+  const root = rootOverride ?? await resolveRoot();
   const subdirUri = await root.fs.findSubdir(root.uri, subdir);
   if (!subdirUri) return null; // subdir absent — broken link, don't create it
   const binaryUri = await root.fs.findChild(subdirUri, filename);
@@ -153,6 +154,7 @@ export function stripPairedBinaryLinks(
  */
 export async function readPairedBinaryUri(
   body: string,
+  rootOverride?: Root,
 ): Promise<{ uri: string; mime: string; filename: string }> {
   const linkMatch = body.match(PAIRED_BINARY_LINK_ONE);
   if (!linkMatch) {
@@ -160,7 +162,7 @@ export async function readPairedBinaryUri(
   }
   const subdir = linkMatch[1];
   const filename = linkMatch[2];
-  const resolved = await resolvePairedUri(subdir, filename);
+  const resolved = await resolvePairedUri(subdir, filename, rootOverride);
   if (!resolved) {
     throw new Error(`Paired binary not found: ${subdir}/${filename}`);
   }
@@ -188,6 +190,7 @@ export async function readPairedBinaryUri(
  */
 export async function readPairedBinaryFromNote(
   body: string,
+  rootOverride?: Root,
 ): Promise<{ base64: string; mime: string }> {
   const linkMatch = body.match(PAIRED_BINARY_LINK_ONE);
   if (!linkMatch) {
@@ -195,7 +198,7 @@ export async function readPairedBinaryFromNote(
   }
   const subdir = linkMatch[1];
   const filename = linkMatch[2];
-  const resolved = await resolvePairedUri(subdir, filename);
+  const resolved = await resolvePairedUri(subdir, filename, rootOverride);
   if (!resolved) {
     throw new Error(`Paired binary not found: ${subdir}/${filename}`);
   }

@@ -52,18 +52,20 @@ beforeEach(() => {
 
 describe("enrichPersonInPlace", () => {
   it("overwrites the given filepath under the mtime guard", async () => {
+    const vaultContext = { profileId: "a", rootUri: "file:///vault-a" };
     const out = await enrichPersonInPlace({
       filepath: "p.md",
       expectedMtime: 2000,
       ocrResult: "Ada Lovelace, Analyst",
       context: "met at a conference",
       tags: [],
+      vaultContext,
     });
     expect(out.kind).toBe("updated");
-    expect(mockPerson).toHaveBeenCalledWith({
-      ocrResult: "Ada Lovelace, Analyst",
-      context: "met at a conference",
-    });
+    expect(mockPerson).toHaveBeenCalledWith(
+      { ocrResult: "Ada Lovelace, Analyst", context: "met at a conference" },
+      { vaultContext },
+    );
     expect(mockUpdate).toHaveBeenCalledWith("p.md", expect.any(String), 2000, undefined);
   });
 

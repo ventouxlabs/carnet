@@ -19,6 +19,7 @@ import { writeBinary } from "./writer";
 
 const mockPick = vi.mocked(pickAttachment);
 const mockWrite = vi.mocked(writeBinary);
+const ROOT = { uri: "file:///pinned-vault", fs: {} } as never;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -45,6 +46,26 @@ describe("pickAndWriteVaultImage", () => {
       rel: "../Photos/my-photo.jpg",
       dataUri: "data:image/jpeg;base64,AB",
     });
+  });
+
+  it("uses the caller's frozen vault root instead of resolving the active profile", async () => {
+    mockPick.mockResolvedValue({
+      base64: "AB",
+      mime: "image/jpeg",
+      filename: "Pinned Photo.jpeg",
+      kind: "image",
+    });
+    mockWrite.mockResolvedValue({ filepath: "x", finalName: "pinned-photo.jpg" });
+
+    await pickAndWriteVaultImage(ROOT);
+
+    expect(mockWrite).toHaveBeenCalledWith(
+      "Photos",
+      "pinned-photo.jpg",
+      "AB",
+      "image/jpeg",
+      ROOT,
+    );
   });
 
   it("returns a null data URI when the image is over the inline cap", async () => {
@@ -90,6 +111,14 @@ describe("writeCapturedVaultImage", () => {
     });
     // The camera never opens the picker on this path.
     expect(mockPick).not.toHaveBeenCalled();
+  });
+
+  it("writes a camera image under the caller's frozen vault root", async () => {
+    mockWrite.mockResolvedValue({ filepath: "x", finalName: "photo.jpg" });
+
+    await writeCapturedVaultImage("AB", "image/jpeg", undefined, ROOT);
+
+    expect(mockWrite).toHaveBeenCalledWith("Photos", expect.any(String), "AB", "image/jpeg", ROOT);
   });
 
   it("gives two basename-less captures distinct filenames", async () => {
