@@ -9,7 +9,11 @@ function mockReactNative(opts: {
   osPlatform: "android" | "ios";
   hasNative: boolean;
   permGranted?: boolean;
-}): void {
+}) {
+  const setVaultContext = vi.fn().mockResolvedValue(true);
+  const clearVaultContext = vi.fn().mockResolvedValue(true);
+  const completeDriveInboxReceipt = vi.fn().mockResolvedValue(true);
+  const releaseDriveInboxReceiptForRetry = vi.fn().mockResolvedValue(true);
   vi.doMock("react-native", () => {
     const PermissionsAndroid = {
       PERMISSIONS: { POST_NOTIFICATIONS: "android.permission.POST_NOTIFICATIONS" },
@@ -23,6 +27,10 @@ function mockReactNative(opts: {
             start: vi.fn().mockResolvedValue(true),
             stop: vi.fn().mockResolvedValue(true),
             isEnabled: vi.fn().mockResolvedValue(false),
+            setVaultContext,
+            clearVaultContext,
+            completeDriveInboxReceipt,
+            releaseDriveInboxReceiptForRetry,
           },
         }
       : {};
@@ -32,6 +40,7 @@ function mockReactNative(opts: {
       Platform: { OS: opts.osPlatform, Version: 33 },
     };
   });
+  return { setVaultContext, clearVaultContext, completeDriveInboxReceipt, releaseDriveInboxReceiptForRetry };
 }
 
 beforeEach(() => {
@@ -73,6 +82,59 @@ describe("captureNotification facade", () => {
     mockReactNative({ osPlatform: "android", hasNative: false });
     const mod = await import("./captureNotification");
     await expect(mod.isEnabled()).resolves.toBe(false);
+  });
+
+  it("persists a non-secret vault context through the Android bridge", async () => {
+    const native = mockReactNative({ osPlatform: "android", hasNative: true });
+    const mod = await import("./captureNotification");
+
+    await mod.setVaultContext("work", "content://provider/tree/work");
+
+    expect(native.setVaultContext).toHaveBeenCalledWith(
+      "work",
+      "content://provider/tree/work",
+    );
+  });
+
+  it("does not need a bridge to synchronize context outside a native Android build", async () => {
+    mockReactNative({ osPlatform: "ios", hasNative: false });
+    const mod = await import("./captureNotification");
+
+    await expect(mod.setVaultContext("default", "")).resolves.toBeUndefined();
+    await expect(mod.clearVaultContext()).resolves.toBeUndefined();
+  });
+
+  it("clears native routing before a vault transition", async () => {
+    const native = mockReactNative({ osPlatform: "android", hasNative: true });
+    const mod = await import("./captureNotification");
+
+    await mod.clearVaultContext();
+
+    expect(native.clearVaultContext).toHaveBeenCalledOnce();
+  });
+
+  it("returns native Drive Inbox completion status", async () => {
+    const native = mockReactNative({ osPlatform: "android", hasNative: true });
+    const mod = await import("./captureNotification");
+
+    await expect(mod.completeDriveInboxReceipt("receipt-1234567890")).resolves.toBe(true);
+    expect(native.completeDriveInboxReceipt).toHaveBeenCalledWith("receipt-1234567890");
+  });
+
+  it("releases only a receipt's native retry latch", async () => {
+    const native = mockReactNative({ osPlatform: "android", hasNative: true });
+    const mod = await import("./captureNotification");
+
+    await expect(mod.releaseDriveInboxReceiptForRetry("receipt-1234567890")).resolves.toBe(true);
+    expect(native.releaseDriveInboxReceiptForRetry).toHaveBeenCalledWith("receipt-1234567890");
+  });
+
+  it("rejects a missing profile id without mutating native state", async () => {
+    const native = mockReactNative({ osPlatform: "android", hasNative: true });
+    const mod = await import("./captureNotification");
+
+    await expect(mod.setVaultContext("   ", "file:///vault")).rejects.toThrow(/profile id/i);
+    expect(native.setVaultContext).not.toHaveBeenCalled();
   });
 
   it("requestPermission() returns false on iOS without prompting", async () => {

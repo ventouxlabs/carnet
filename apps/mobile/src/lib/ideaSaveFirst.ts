@@ -48,6 +48,12 @@ export const PENDING_ENRICH_STATUS = "pending-enrich";
  * frontmatter block with the model's own, so it never reaches an enriched note. */
 export const RAW_REV_FIELD = "rev";
 
+/** Short-lived receipt marker for a Drive Inbox raw note. It makes a restarted
+ * headless task locate the already-written raw capture instead of creating a
+ * collision-suffixed duplicate. Completion occurs before enrichment, whose
+ * replacement frontmatter deliberately removes this field. */
+export const DRIVE_INBOX_RECEIPT_FIELD = "carnet_drive_inbox_receipt";
+
 /**
  * A fresh revision token, regenerated on EVERY raw write.
  *
@@ -80,6 +86,8 @@ export interface RawIdeaInput {
   /** User-selected `lat,lon`, injected into frontmatter when set. */
   location?: string;
   attachments?: AttachmentRef[];
+  /** Native Android Auto receipt; omitted for normal in-app/notification ideas. */
+  receiptId?: string;
 }
 
 /**
@@ -127,7 +135,9 @@ export function buildRawIdeaMarkdown(
   rev: string = newRevToken(),
 ): string {
   const body = input.text.trim();
-  let md = `---\ncreated: ${now.toISOString()}\nstatus: ${PENDING_ENRICH_STATUS}\n${RAW_REV_FIELD}: ${rev}\n---\n${body}\n`;
+  const receipt = input.receiptId?.trim();
+  const receiptLine = receipt ? `${DRIVE_INBOX_RECEIPT_FIELD}: ${receipt}\n` : "";
+  let md = `---\ncreated: ${now.toISOString()}\nstatus: ${PENDING_ENRICH_STATUS}\n${RAW_REV_FIELD}: ${rev}\n${receiptLine}---\n${body}\n`;
   // Order matches confirmSave: attachments first (so the tag/location merges see
   // the final body), then user tags, then location.
   md = injectAttachments(md, input.attachments ?? []);
@@ -228,7 +238,7 @@ export interface ApplyEnrichedIdeaInput {
  * `tags` belongs to mergeUserTags, which runs after this and merges the model's
  * tags with the user's. Preserving it first would overwrite the model's own
  * (block-form) tag list before that merge ever sees it. */
-const NEVER_PRESERVED_FIELDS = [RAW_REV_FIELD, "status", "tags"] as const;
+const NEVER_PRESERVED_FIELDS = [RAW_REV_FIELD, DRIVE_INBOX_RECEIPT_FIELD, "status", "tags"] as const;
 
 /**
  * Overwrite the raw Idea note in place with the enriched result, preserving the

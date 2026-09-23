@@ -61,14 +61,14 @@ function settings(overrides: Partial<Settings> = {}): Settings {
 }
 
 function renderSection() {
-  const onImported = vi.fn(async () => undefined);
+  const onImportSettings = vi.fn(async () => undefined);
   const onError = vi.fn();
   render(
     <PaperProvider theme={carnetLight}>
-      <SettingsTransferSection onImported={onImported} onError={onError} />
+      <SettingsTransferSection onImportSettings={onImportSettings} onError={onError} />
     </PaperProvider>,
   );
-  return { onImported, onError };
+  return { onImportSettings, onError };
 }
 
 beforeEach(() => {
@@ -116,24 +116,24 @@ describe("SettingsTransferSection", () => {
     expect(screen.queryByText("Replace settings?")).toBeNull();
   });
 
-  it("clears this device's API keys BEFORE persisting imported endpoints", async () => {
-    const { onImported } = renderSection();
+  it("clears this device's API keys BEFORE delegating imported settings persistence", async () => {
+    const { onImportSettings } = renderSection();
     vi.mocked(pickSettingsTransfer).mockResolvedValueOnce(serializeSettingsTransfer(settings(), "dark"));
 
     fireEvent.click(screen.getByText("Import settings"));
     await waitFor(() => expect(screen.getByText("Replace settings?")).toBeTruthy());
 
     fireEvent.click(screen.getByText("Import"));
-    await waitFor(() => expect(savePersistedOnly).toHaveBeenCalled());
+    await waitFor(() => expect(onImportSettings).toHaveBeenCalled());
 
-    // Every credential wipe must be ordered strictly before the write that
-    // installs the imported baseUrls.
-    const saveOrder = vi.mocked(savePersistedOnly).mock.invocationCallOrder[0]!;
-    expect(vi.mocked(deleteKey).mock.invocationCallOrder.every((order) => order < saveOrder)).toBe(true);
-    expect(vi.mocked(setKarakeepApiKey).mock.invocationCallOrder[0]!).toBeLessThan(saveOrder);
+    // Every credential wipe must be ordered strictly before the parent-owned
+    // transaction that installs the imported endpoints and vault route.
+    const importOrder = onImportSettings.mock.invocationCallOrder[0]!;
+    expect(vi.mocked(deleteKey).mock.invocationCallOrder.every((order) => order < importOrder)).toBe(true);
+    expect(vi.mocked(setKarakeepApiKey).mock.invocationCallOrder[0]!).toBeLessThan(importOrder);
     expect(setKarakeepApiKey).toHaveBeenCalledWith("");
 
     expect(setPreference).toHaveBeenCalledWith("dark");
-    await waitFor(() => expect(onImported).toHaveBeenCalled());
+    expect(savePersistedOnly).not.toHaveBeenCalled();
   });
 });

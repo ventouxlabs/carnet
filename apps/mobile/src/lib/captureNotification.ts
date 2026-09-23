@@ -18,6 +18,10 @@ interface CaptureNotificationNative {
   start: () => Promise<boolean>;
   stop: () => Promise<boolean>;
   isEnabled: () => Promise<boolean>;
+  setVaultContext: (profileId: string, rootUri: string) => Promise<boolean>;
+  clearVaultContext: () => Promise<boolean>;
+  completeDriveInboxReceipt: (receiptId: string) => Promise<boolean>;
+  releaseDriveInboxReceiptForRetry: (receiptId: string) => Promise<boolean>;
 }
 
 function getNative(): CaptureNotificationNative | null {
@@ -75,6 +79,48 @@ export async function isEnabled(): Promise<boolean> {
   const native = getNative();
   if (!native) return false;
   return native.isEnabled();
+}
+
+/**
+ * Persist the active vault routing snapshot for native, headless Drive Inbox
+ * replies. This contains no secret material. An empty root URI is valid for
+ * Carnet's app-sandbox vault; an empty profile id is not.
+ */
+export async function setVaultContext(profileId: string, rootUri: string): Promise<void> {
+  const native = getNative();
+  if (!native) return;
+  const normalizedProfileId = profileId.trim();
+  if (!normalizedProfileId) {
+    throw new Error("A vault profile id is required for Drive Inbox capture.");
+  }
+  await native.setVaultContext(normalizedProfileId, rootUri);
+}
+
+/** Invalidate native Drive Inbox routing before AsyncStorage commits a new
+ * active profile/root. Until setVaultContext succeeds, native replies fail
+ * closed instead of writing into the prior vault. */
+export async function clearVaultContext(): Promise<void> {
+  const native = getNative();
+  if (!native) return;
+  await native.clearVaultContext();
+}
+
+/** A Drive Inbox raw note carrying this receipt is durably on disk. Native may
+ * now consume its pending handoff and render the next prompt. False means the
+ * receipt is no longer current, so callers leave the on-disk note untouched. */
+export async function completeDriveInboxReceipt(receiptId: string): Promise<boolean> {
+  const native = getNative();
+  if (!native || !receiptId.trim()) return false;
+  return native.completeDriveInboxReceipt(receiptId.trim());
+}
+
+/** Release only this still-current receipt's native dispatch latch after JS
+ * could not write its raw note. The durable frozen payload remains intact for
+ * a later retry; a stale/missing receipt is deliberately a no-op. */
+export async function releaseDriveInboxReceiptForRetry(receiptId: string): Promise<boolean> {
+  const native = getNative();
+  if (!native || !receiptId.trim()) return false;
+  return native.releaseDriveInboxReceiptForRetry(receiptId.trim());
 }
 
 /**

@@ -13,8 +13,27 @@ const writeRawIdeaMock = vi.fn();
 const enrichIdeaInPlaceMock = vi.fn();
 
 vi.mock("./ideaSaveFirst", () => ({
+  DRIVE_INBOX_RECEIPT_FIELD: "carnet_drive_inbox_receipt",
   writeRawIdea: (...args: unknown[]) => writeRawIdeaMock(...args),
   enrichIdeaInPlace: (...args: unknown[]) => enrichIdeaInPlaceMock(...args),
+}));
+
+const listNoteFilesInRootMock = vi.fn(async (_root: unknown) => []);
+const readNoteMock = vi.fn();
+const getModificationTimeMock = vi.fn(async (_filepath: string) => null);
+vi.mock("./writer", () => ({
+  listNoteFilesInRoot: (root: unknown) => listNoteFilesInRootMock(root),
+  readNote: (...args: unknown[]) => readNoteMock(...args),
+  getModificationTime: (filepath: string) => getModificationTimeMock(filepath),
+}));
+vi.mock("./frontmatter", () => ({
+  extractFrontmatterField: vi.fn(() => null),
+}));
+const completeDriveInboxReceiptMock = vi.fn(async (_receiptId: string) => true);
+const releaseDriveInboxReceiptForRetryMock = vi.fn(async (_receiptId: string) => true);
+vi.mock("./captureNotification", () => ({
+  completeDriveInboxReceipt: (receiptId: string) => completeDriveInboxReceiptMock(receiptId),
+  releaseDriveInboxReceiptForRetry: (receiptId: string) => releaseDriveInboxReceiptForRetryMock(receiptId),
 }));
 
 // ── Mock recents / index / queue side effects ────────────────────────────────
@@ -55,6 +74,11 @@ beforeEach(() => {
   recordCaptureMock.mockReset().mockResolvedValue(undefined);
   invalidateTagIndexMock.mockReset().mockResolvedValue(undefined);
   enqueueMock.mockReset().mockResolvedValue(undefined);
+  listNoteFilesInRootMock.mockReset().mockResolvedValue([]);
+  readNoteMock.mockReset();
+  getModificationTimeMock.mockReset();
+  completeDriveInboxReceiptMock.mockReset().mockResolvedValue(true);
+  releaseDriveInboxReceiptForRetryMock.mockReset().mockResolvedValue(true);
   vi.mocked(getSettings).mockReset();
   vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
 });
@@ -171,6 +195,129 @@ describe("handleQuickIdeaCapture — save-first ordering", () => {
     );
     expect(recordCaptureMock).toHaveBeenCalledWith(expect.anything(), "work");
     expect(invalidateTagIndexMock).toHaveBeenCalledWith("work");
+  });
+
+  it("uses a valid receipt-time context instead of rereading the now-active profile", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///later-active",
+      vaultProfiles: [
+        { id: "later", name: "Later active", rootUri: "file:///later-active", createdAt: 0 },
+      ],
+      activeVaultProfileId: "later",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    happyPath();
+
+    const receiptId = "33333333-3333-3333-3333-333333333333";
+    await handleQuickIdeaCapture(
+      "car reply",
+      {
+        profileId: "receipt-profile",
+        rootUri: "content://provider/tree/receipt-vault",
+      },
+      receiptId,
+    );
+
+    expect(getSettings).not.toHaveBeenCalled();
+    expect(writeRawIdeaMock).toHaveBeenCalledWith(
+      { text: "car reply", tags: [], receiptId },
+      undefined,
+      { uri: "content://provider/tree/receipt-vault" },
+    );
+    expect(recordCaptureMock).toHaveBeenCalledWith(expect.anything(), "receipt-profile");
+    expect(invalidateTagIndexMock).toHaveBeenCalledWith("receipt-profile");
+    expect(enrichIdeaInPlaceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vaultContext: {
+          profileId: "receipt-profile",
+          rootUri: "content://provider/tree/receipt-vault",
+        },
+      }),
+    );
+    expect(completeDriveInboxReceiptMock).toHaveBeenCalledWith(receiptId);
+    expect(releaseDriveInboxReceiptForRetryMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a valid receipt-time context on a transient retry queue row", async () => {
+    writeRawIdeaMock.mockResolvedValue({
+      filepath: "content://provider/tree/receipt-vault/document/Ideas%2Fcar.md",
+      slug: "car",
+      mtime: null,
+      markdown: RAW_MD,
+    });
+    enrichIdeaInPlaceMock.mockResolvedValue({
+      kind: "failed",
+      transient: true,
+      reason: "network down",
+    });
+    const receiptContext = {
+      profileId: "receipt-profile",
+      rootUri: "content://provider/tree/receipt-vault",
+    };
+
+    const result = await handleQuickIdeaCapture(
+      "queue car reply",
+      receiptContext,
+      "44444444-4444-4444-4444-444444444444",
+    );
+
+    expect(result).toEqual({ kind: "queued" });
+    expect(getSettings).not.toHaveBeenCalled();
+    expect(enqueueMock).toHaveBeenCalledWith(
+      expect.objectContaining({ vaultContext: receiptContext }),
+    );
+  });
+
+  it("falls back to the generic quick-idea Settings snapshot for malformed receipt context", async () => {
+    happyPath();
+
+    await handleQuickIdeaCapture("generic fallback", {
+      profileId: "not a valid profile id",
+      rootUri: "file:///ignored",
+    });
+
+    expect(getSettings).toHaveBeenCalledTimes(1);
+    expect(writeRawIdeaMock).toHaveBeenCalledWith(
+      { text: "generic fallback", tags: [] },
+      undefined,
+      { uri: "" },
+    );
+  });
+
+  it("fails closed for a Drive Inbox receipt with malformed context", async () => {
+    happyPath();
+
+    const result = await handleQuickIdeaCapture(
+      "never route this to the active vault",
+      { profileId: "bad id", rootUri: "file:///wrong-vault" },
+      "11111111-1111-1111-1111-111111111111",
+    );
+
+    expect(result).toEqual({ kind: "write-failed", reason: "Drive Inbox vault context missing" });
+    expect(getSettings).not.toHaveBeenCalled();
+    expect(writeRawIdeaMock).not.toHaveBeenCalled();
+    expect(recordCaptureMock).not.toHaveBeenCalled();
+    expect(invalidateTagIndexMock).not.toHaveBeenCalled();
+    expect(enrichIdeaInPlaceMock).not.toHaveBeenCalled();
+    expect(enqueueMock).not.toHaveBeenCalled();
+    expect(releaseDriveInboxReceiptForRetryMock).toHaveBeenCalledWith(
+      "11111111-1111-1111-1111-111111111111",
+    );
+  });
+
+  it("releases a Drive Inbox receipt for retry when the handler throws", async () => {
+    happyPath();
+    completeDriveInboxReceiptMock.mockRejectedValueOnce(new Error("native bridge unavailable"));
+    const receiptId = "22222222-2222-2222-2222-222222222222";
+
+    await expect(
+      handleQuickIdeaCapture(
+        "retry this receipt",
+        { profileId: "receipt-profile", rootUri: "file:///receipt-vault" },
+        receiptId,
+      ),
+    ).rejects.toThrow("native bridge unavailable");
+
+    expect(releaseDriveInboxReceiptForRetryMock).toHaveBeenCalledWith(receiptId);
   });
 
   it("still reports success if recents bookkeeping throws (note is safe on disk)", async () => {

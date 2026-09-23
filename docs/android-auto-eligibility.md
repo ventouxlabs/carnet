@@ -31,8 +31,8 @@ Inbox*:
 
 1. Carnet exposes one conversation whose participant is the user themself.
 2. A user dictates a short message through Android Auto's reply action.
-3. Carnet receives the transcript through the notification reply receiver and
-   enqueues a durable capture in the selected vault context.
+3. Carnet receives the transcript through a private notification action service
+   and enqueues a durable capture in the selected vault context.
 4. Mark-as-read updates the local conversation state. Capture enrichment and
    note writing run asynchronously; neither is a car-screen operation.
 
@@ -49,8 +49,15 @@ communication.
   app-category declaration.
 - The car path is one self-conversation, with a reply action and a mark-as-read
   action; it cannot browse, edit, delete, or search vault content while driving.
-- A reply is accepted exactly once, persists the raw text before enrichment,
-  and pins the vault context selected when it was received.
+- Each rendered prompt has a durable receipt id. Reply and mark-read actions
+  accept only the current receipt; stale or duplicate deliveries are no-ops.
+  Mark-read records acknowledgement only, so Auto may still deliver the valid
+  reply for that receipt once.
+- A reply first persists its text and pinned vault context in native storage.
+  JS writes a receipt-marked raw note before native consumes/re-arms the prompt;
+  a start failure or process restart can resume that pending handoff without a
+  second note. If the native context is absent, the reply is dropped rather
+  than guessed into another vault.
 - Notification permission/disabled notifications, empty transcription, duplicate
   delivery, and receiver/process restart are recoverable and tested.
 - Android unit/instrumentation coverage and Desktop Head Unit validation precede

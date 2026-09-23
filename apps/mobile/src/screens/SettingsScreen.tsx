@@ -21,6 +21,7 @@ import {
   savePersistedOnly,
   setKarakeepApiKey,
   shouldShowMigrationBanner,
+  type Settings,
   withVaultProfileState,
 } from "../lib/settings";
 import {
@@ -31,6 +32,7 @@ import {
   setActiveVaultProfile,
   type VaultProfileState,
 } from "../lib/vaultProfiles";
+import { captureVaultContext } from "../lib/vaultContext";
 import {
   apiKeyFieldLabel,
   apiKeyFieldPlaceholder,
@@ -127,12 +129,25 @@ export default function SettingsScreen() {
           // Native module read failed — keep the JS-side value as the hint.
         }
       }
-      setForm(formStateFromSettings(s, initialNotificationEnabled));
-      setVaultProfiles(normaliseVaultProfileState({
+      const normalizedVaultProfiles = normaliseVaultProfileState({
         profiles: s.vaultProfiles,
         activeProfileId: s.activeVaultProfileId,
         legacyCaptureFolderPath: s.captureFolderPath,
-      }));
+      });
+      // A native notification reply may arrive while the JS runtime is cold.
+      // Mirror the selected routing context before rendering it as active so
+      // native receipt-time capture never has to guess a vault.
+      try {
+        const active = activeVaultProfile(normalizedVaultProfiles);
+        await captureNotification.clearVaultContext();
+        await captureNotification.setVaultContext(active.id, active.rootUri);
+      } catch {
+        // The regular UI can still use Settings/AsyncStorage. A later profile
+        // save retries this best-effort native mirror; Drive Inbox fails closed
+        // until that mirror is available.
+      }
+      setForm(formStateFromSettings(s, initialNotificationEnabled));
+      setVaultProfiles(normalizedVaultProfiles);
       setKarakeepKeyConfigured(hasKkKey);
       setShowBanner(banner);
     })();
@@ -156,6 +171,21 @@ export default function SettingsScreen() {
   // the guarded-end-to-end rationale (this is the ONLY way to enter config
   // in a no-.env app).
   const save = async () => {
+    // Native SharedPreferences and AsyncStorage cannot share a transaction.
+    // Invalidate native routing BEFORE this Save can change the active root;
+    // until the post-save snapshot commits, a Drive Inbox reply fails closed
+    // instead of using the old vault. This is intentionally done for every
+    // Save: the short no-route window is harmless even when only API settings
+    // changed, and eliminates a fragile field-by-field race decision.
+    try {
+      // Read first so a transient settings failure cannot clear a known-good
+      // native mirror without an authoritative snapshot to restore from.
+      captureVaultContext(await getSettings());
+      await captureNotification.clearVaultContext();
+    } catch (e: unknown) {
+      setPickerError(errorMessage(e, "Couldn't safely prepare Drive Inbox routing"));
+      return;
+    }
     const result = await saveSettingsWithKeys(
       form,
       { karakeep: pendingKarakeepKey },
@@ -169,8 +199,27 @@ export default function SettingsScreen() {
       setPendingKarakeepKey("");
       setKarakeepKeyConfigured(true);
     }
+    // Always read back after saveSettingsWithKeys, including its error path:
+    // a later key write can fail after the settings blob already committed. We
+    // may restore only the context that is CURRENTLY durable, never the prior
+    // one blindly.
+    let routingError: string | null = null;
+    try {
+      const persisted = await getSettings();
+      const vaultContext = captureVaultContext(persisted);
+      await captureNotification.setVaultContext(vaultContext.profileId, vaultContext.rootUri);
+    } catch (e: unknown) {
+      // Native context remains cleared. Do not restore priorVaultContext here:
+      // Settings may already point at a different root despite a later key
+      // write failure, and restoring it would misroute a car reply.
+      routingError = errorMessage(e, "Drive Inbox routing is unavailable until Settings can resync");
+    }
     if (!result.ok) {
-      setPickerError(result.error);
+      setPickerError(routingError ?? result.error);
+      return;
+    }
+    if (routingError) {
+      setPickerError(routingError);
       return;
     }
     setSaved(true);
@@ -223,11 +272,48 @@ export default function SettingsScreen() {
     }
   };
 
-  /** Reload the visible form after a confirmed settings-file import. Keys stay
-   * outside this form and are intentionally preserved by the import path. */
+  /** Reload the visible form after its import transaction has made settings
+   * durable. Native routing is published only from this read-back snapshot. */
   const reloadImportedSettings = async () => {
     const settings = await getSettings();
+    const vaultContext = captureVaultContext(settings);
     setForm(formStateFromSettings(settings, settings.persistentNotificationEnabled));
+    setVaultProfiles(normaliseVaultProfileState({
+      profiles: settings.vaultProfiles,
+      activeProfileId: settings.activeVaultProfileId,
+      legacyCaptureFolderPath: settings.captureFolderPath,
+    }));
+    await captureNotification.setVaultContext(vaultContext.profileId, vaultContext.rootUri);
+  };
+
+  /** The transfer section delegates its durable write here because a vault
+   * import has the same cross-store transaction boundary as profile switching:
+   * clear native routing before AsyncStorage can point at a new vault, restore
+   * only after a failed write proves the old snapshot remains durable, then
+   * publish the read-back imported snapshot. */
+  const importSettings = async (current: Settings, imported: Settings) => {
+    const priorContext = captureVaultContext(current);
+    // savePersistedOnly normalises a legacy `captureFolderPath` into the
+    // active profile root. That can change receipt routing even when the
+    // pre-write imported profile array appears unchanged, so every import
+    // must fail closed before it persists any imported settings.
+    await captureNotification.clearVaultContext();
+    try {
+      await savePersistedOnly(imported);
+    } catch (e: unknown) {
+      // The import write rejected, so `current` remains the only known
+      // durable routing snapshot. Restore it best-effort; never guess.
+      try {
+        await captureNotification.setVaultContext(priorContext.profileId, priorContext.rootUri);
+      } catch {
+        // Native remains fail-closed if restoration itself is unavailable.
+      }
+      throw e;
+    }
+    // A persistence success may still be followed by a failed read or native
+    // publish. In either case the imported root is durable, so leave native
+    // routing cleared rather than restoring the old vault.
+    await reloadImportedSettings();
   };
 
   /**
@@ -293,9 +379,41 @@ export default function SettingsScreen() {
 
   const persistVaultProfiles = async (next: VaultProfileState) => {
     const settings = await getSettings();
-    await savePersistedOnly(withVaultProfileState(settings, next));
-    setVaultProfiles(next);
+    const prior = captureVaultContext(settings);
     const active = activeVaultProfile(next);
+    const changesActiveContext = prior.profileId !== active.id || prior.rootUri !== active.rootUri;
+    if (changesActiveContext) {
+      // Clear first: after the following persistence succeeds no native reply
+      // can still carry the old profile while the new root is durable.
+      await captureNotification.clearVaultContext();
+    }
+    try {
+      await savePersistedOnly(withVaultProfileState(settings, next));
+    } catch (e: unknown) {
+      if (changesActiveContext) {
+        // Persistence failed, so the known old Settings snapshot remains the
+        // safe routing target. Best-effort restoration avoids needless drops.
+        try {
+          await captureNotification.setVaultContext(prior.profileId, prior.rootUri);
+        } catch {
+          // Leave native routing unavailable rather than guessing.
+        }
+      }
+      throw e;
+    }
+    if (changesActiveContext) {
+      try {
+        await captureNotification.setVaultContext(active.id, active.rootUri);
+      } catch (e: unknown) {
+        // The new settings are durable; restoring `prior` now would send a
+        // reply to the wrong vault. Keep the cleared native state and surface
+        // the failure instead.
+        throw new Error(errorMessage(e, "Vault changed, but Drive Inbox routing is unavailable"));
+      }
+    }
+    // This comes only after the durable native transition, so UI-active and
+    // receipt-time routing cannot disagree.
+    setVaultProfiles(next);
     setForm((current) => current ? { ...current, captureFolderPath: active.rootUri } : current);
   };
 
@@ -656,7 +774,7 @@ export default function SettingsScreen() {
       />
 
       <SettingsTransferSection
-        onImported={reloadImportedSettings}
+        onImportSettings={importSettings}
         onError={setPickerError}
       />
 
