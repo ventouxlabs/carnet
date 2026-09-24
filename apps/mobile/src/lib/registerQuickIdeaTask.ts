@@ -19,13 +19,39 @@
 
 import { AppRegistry } from "react-native";
 import { handleQuickIdeaCapture } from "./notificationQuickIdea";
+import { isVaultContext, type VaultContext } from "./vaultContext";
 
 /** Must match QuickIdeaTaskService.getTaskConfig() in withCaptureNotification.js. */
 export const QUICK_IDEA_TASK_NAME = "CarnetQuickIdea";
 
+/**
+ * Data accepted from QuickIdeaTaskService. Generic notification replies carry
+ * only `text`; Android Auto receipts additionally carry the immutable vault
+ * selected when the reply was accepted. `receiptId` remains native-owned
+ * duplicate protection, but is typed here so the bridge contract is explicit.
+ */
+export interface QuickIdeaTaskData {
+  text?: string;
+  receiptId?: string;
+  profileId?: string;
+  rootUri?: string;
+}
+
+function receiptVaultContext(data: QuickIdeaTaskData | undefined): VaultContext | undefined {
+  const candidate = {
+    profileId: data?.profileId,
+    rootUri: data?.rootUri,
+  };
+  return isVaultContext(candidate) ? candidate : undefined;
+}
+
 AppRegistry.registerHeadlessTask(
   QUICK_IDEA_TASK_NAME,
-  () => async (data: { text?: string }) => {
-    await handleQuickIdeaCapture(data?.text ?? "");
+  () => async (data: QuickIdeaTaskData) => {
+    await handleQuickIdeaCapture(
+      data?.text ?? "",
+      receiptVaultContext(data),
+      data?.receiptId,
+    );
   },
 );

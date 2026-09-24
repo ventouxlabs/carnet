@@ -24,17 +24,66 @@
 
 import { deriveTitle } from "@carnet/shared";
 import {
+  DRIVE_INBOX_RECEIPT_FIELD,
   enrichIdeaInPlace,
   writeRawIdea,
   type EnrichIdeaOutcome,
   type RawIdeaInput,
 } from "./ideaSaveFirst";
+import { getModificationTime, listNoteFilesInRoot, readNote } from "./writer";
+import { extractFrontmatterField } from "./frontmatter";
 import { recordCapture } from "./storage";
 import { invalidateTagIndex } from "./vault";
 import { enqueue } from "./queue";
 import { getSettings } from "./settings";
-import { captureVaultContext, type VaultContext } from "./vaultContext";
+import { captureVaultContext, isVaultContext, type VaultContext } from "./vaultContext";
 import { resolveContextRoot } from "./vaultRoot";
+import {
+  completeDriveInboxReceipt,
+  releaseDriveInboxReceiptForRetry,
+} from "./captureNotification";
+
+const DRIVE_INBOX_RECEIPT_RE = /^[a-f0-9-]{16,64}$/i;
+
+/** Headless tasks share one JS runtime. Keep a same-receipt restart from
+ * racing its marker scan and raw write while native resumes a pending handoff.
+ * A process restart cannot overlap the original task; its durable marker then
+ * supplies the cross-process idempotency boundary. */
+const driveInboxTasks = new Map<string, Promise<QuickIdeaResult>>();
+
+function isDriveInboxReceipt(value: unknown): value is string {
+  return typeof value === "string" && DRIVE_INBOX_RECEIPT_RE.test(value);
+}
+
+/** Best-effort latch release after a failed Drive Inbox dispatch. Never let a
+ * recovery call mask the write failure that caused it. */
+async function releaseDriveInboxReceiptAfterFailure(receiptId: string): Promise<void> {
+  try {
+    await releaseDriveInboxReceiptForRetry(receiptId);
+  } catch {
+    // Native retains the receipt even when the release call itself fails; a
+    // later service restart can retry it. The original error is more useful.
+  }
+}
+
+/** Scan only the frozen receipt vault for the short-lived raw marker. A failed
+ * scan is unsafe to treat as "not found": it would risk a duplicate note, so
+ * callers fail closed and leave native's pending handoff retryable. */
+async function findReceiptRawNote(receiptId: string, root: ReturnType<typeof resolveContextRoot>) {
+  const files = await listNoteFilesInRoot(root);
+  for (const file of files) {
+    if (file.subdir !== "Ideas") continue;
+    const markdown = await readNote(file.uri);
+    if (extractFrontmatterField(markdown, DRIVE_INBOX_RECEIPT_FIELD) === receiptId) {
+      return {
+        filepath: file.uri,
+        markdown,
+        mtime: await getModificationTime(file.uri),
+      };
+    }
+  }
+  return null;
+}
 
 /**
  * Outcome of handling a RemoteInput quick-idea submission. Every non-`empty`
@@ -64,7 +113,44 @@ function localId(): string {
  * receiver also guards this; this is the defense-in-depth JS guard so a direct
  * task invocation with empty text can never create an empty note).
  */
-export async function handleQuickIdeaCapture(rawText: string): Promise<QuickIdeaResult> {
+export async function handleQuickIdeaCapture(
+  rawText: string,
+  suppliedVaultContext?: unknown,
+  receiptId?: unknown,
+): Promise<QuickIdeaResult> {
+  const receipt = isDriveInboxReceipt(receiptId) ? receiptId : undefined;
+  if (!receipt) return handleQuickIdeaCaptureInner(rawText, suppliedVaultContext, receiptId);
+
+  const active = driveInboxTasks.get(receipt);
+  if (active) return active;
+
+  const task = handleQuickIdeaCaptureInner(rawText, suppliedVaultContext, receiptId);
+  driveInboxTasks.set(receipt, task);
+  try {
+    const result = await task;
+    if (result.kind === "write-failed") {
+      await releaseDriveInboxReceiptAfterFailure(receipt);
+    }
+    return result;
+  } catch (error) {
+    await releaseDriveInboxReceiptAfterFailure(receipt);
+    throw error;
+  } finally {
+    if (driveInboxTasks.get(receipt) === task) driveInboxTasks.delete(receipt);
+  }
+}
+
+async function handleQuickIdeaCaptureInner(
+  rawText: string,
+  /**
+   * A receipt-time vault snapshot supplied by the native Android Auto action.
+   * It is deliberately `unknown`: Headless JS task data crosses the native
+   * bridge untyped, so validate it before it can route a filesystem write.
+   */
+  suppliedVaultContext?: unknown,
+  /** Present only for native Drive Inbox pending handoffs. */
+  receiptId?: unknown,
+): Promise<QuickIdeaResult> {
   const text = (rawText ?? "").trim();
   if (text.length === 0) {
     // Empty-input no-op (required behavior): nothing written, nothing enriched.
@@ -75,12 +161,34 @@ export async function handleQuickIdeaCapture(rawText: string): Promise<QuickIdea
   // The headless task can overlap a foreground profile switch. Capture the
   // root before any write or network await so its raw note, history, index
   // invalidation, and possible queued retry remain one coherent vault.
+  const receiptWasSupplied = typeof receiptId === "string" && receiptId.trim().length > 0;
+  const driveInboxReceipt = isDriveInboxReceipt(receiptId) ? receiptId : undefined;
+  if (receiptWasSupplied && (!driveInboxReceipt || !isVaultContext(suppliedVaultContext))) {
+    // A Drive Inbox reply must retain its native receipt-time routing. Never
+    // substitute the currently active Settings profile for malformed bridge
+    // data: that would silently send the capture to a different vault.
+    return { kind: "write-failed", reason: "Drive Inbox vault context missing" };
+  }
+
   let vaultContext: VaultContext | undefined;
-  try {
-    vaultContext = captureVaultContext(await getSettings());
-  } catch {
-    // Keep the notification capture available if local settings is transiently
-    // unreadable; writer/enqueue retain their existing default fallbacks.
+  if (isVaultContext(suppliedVaultContext)) {
+    // Android Auto's action service captured these values at receipt time.
+    // Copy them instead of retaining the bridge payload, then use this one
+    // context for the raw write, recents, tags, enrichment, and retry queue.
+    // In particular, do NOT consult Settings here: the user may have switched
+    // profiles after replying from the car.
+    vaultContext = Object.freeze({
+      profileId: suppliedVaultContext.profileId,
+      rootUri: suppliedVaultContext.rootUri,
+    });
+  } else {
+    try {
+      vaultContext = captureVaultContext(await getSettings());
+    } catch {
+      // Keep generic quick-idea capture available if local settings is
+      // transiently unreadable; writer/enqueue retain their existing default
+      // fallbacks.
+    }
   }
 
   // Save-first write: the raw note lands on disk immediately, before any
@@ -92,16 +200,33 @@ export async function handleQuickIdeaCapture(rawText: string): Promise<QuickIdea
   // conflict guard can compare — see writer.ts's updateNoteIfUnchanged.
   let rawMarkdown: string;
   try {
-    const res = await writeRawIdea(
-      ctx,
-      undefined,
-      vaultContext ? resolveContextRoot(vaultContext) : undefined,
-    );
-    filepath = res.filepath;
-    mtime = res.mtime;
-    rawMarkdown = res.markdown;
+    const root = vaultContext ? resolveContextRoot(vaultContext) : undefined;
+    const existing = driveInboxReceipt && root
+      ? await findReceiptRawNote(driveInboxReceipt, root)
+      : null;
+    if (existing) {
+      filepath = existing.filepath;
+      mtime = existing.mtime;
+      rawMarkdown = existing.markdown;
+    } else {
+      const res = await writeRawIdea(
+        driveInboxReceipt ? { ...ctx, receiptId: driveInboxReceipt } : ctx,
+        undefined,
+        root,
+      );
+      filepath = res.filepath;
+      mtime = res.mtime;
+      rawMarkdown = res.markdown;
+    }
   } catch (e: unknown) {
     return { kind: "write-failed", reason: e instanceof Error ? e.message : String(e) };
+  }
+
+  if (driveInboxReceipt && !(await completeDriveInboxReceipt(driveInboxReceipt))) {
+    // The raw note carries its receipt marker, so a future native retry can
+    // find it and complete without a second write. Do not enrich yet: that
+    // would remove the marker before native acknowledged the handoff.
+    return { kind: "write-failed", reason: "Drive Inbox handoff not confirmed; retry pending" };
   }
 
   // Recents + tag-index bookkeeping — best-effort, mirrors CaptureScreen's

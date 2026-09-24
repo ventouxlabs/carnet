@@ -141,6 +141,11 @@ const start = vi.fn(async () => undefined);
 const stop = vi.fn(async () => undefined);
 const isEnabled = vi.fn(async () => false);
 const permissionIsGranted = vi.fn(async () => true);
+const setVaultContext = vi.fn(async (_profileId: string, _rootUri: string) => undefined);
+const clearVaultContext = vi.fn(async () => undefined);
+let importTransferredSettings:
+  | ((current: Settings, imported: Settings) => Promise<void>)
+  | null = null;
 vi.mock("../lib/captureNotification", () => ({
   isAvailable: () => isAvailable(),
   requestPermission: () => requestPermission(),
@@ -148,6 +153,8 @@ vi.mock("../lib/captureNotification", () => ({
   stop: () => stop(),
   isEnabled: () => isEnabled(),
   permissionIsGranted: () => permissionIsGranted(),
+  setVaultContext: (profileId: string, rootUri: string) => setVaultContext(profileId, rootUri),
+  clearVaultContext: () => clearVaultContext(),
 }));
 
 vi.mock("../components/DiagnosticsSection", () => ({
@@ -155,7 +162,12 @@ vi.mock("../components/DiagnosticsSection", () => ({
 }));
 
 vi.mock("../components/SettingsTransferSection", () => ({
-  SettingsTransferSection: () => null,
+  SettingsTransferSection: ({ onImportSettings }: {
+    onImportSettings: (current: Settings, imported: Settings) => Promise<void>;
+  }) => {
+    importTransferredSettings = onImportSettings;
+    return null;
+  },
 }));
 
 vi.mock("../voice/VoiceSetupCheck", () => ({
@@ -201,6 +213,9 @@ beforeEach(() => {
   stop.mockResolvedValue(undefined);
   isEnabled.mockResolvedValue(false);
   permissionIsGranted.mockResolvedValue(true);
+  setVaultContext.mockResolvedValue(undefined);
+  clearVaultContext.mockResolvedValue(undefined);
+  importTransferredSettings = null;
   migratePreVaultNotes.mockResolvedValue({ migrated: 0, failed: 0, failures: [] });
   requestDirectoryPermissionsAsync.mockResolvedValue({
     granted: true,
@@ -256,6 +271,90 @@ describe("SettingsScreen", () => {
   });
 
   describe("vault profiles", () => {
+    it("clears before legacy imported capture path is canonicalized into the active profile root", async () => {
+      const oldProfiles = [
+        { id: "default", name: "Personal", rootUri: "file:///before-import", createdAt: 0 },
+      ];
+      const prior = baseSettings({
+        vaultProfiles: oldProfiles,
+        activeVaultProfileId: "default",
+        captureFolderPath: "file:///before-import",
+      });
+      // Before savePersistedOnly canonicalizes it, the imported profiles still
+      // point at the old root. This is the comparison trap the transaction
+      // must not rely on.
+      const imported = baseSettings({
+        vaultProfiles: oldProfiles,
+        activeVaultProfileId: "default",
+        captureFolderPath: "file:///after-import",
+      });
+      const persisted = baseSettings({
+        vaultProfiles: [
+          { id: "default", name: "Personal", rootUri: "file:///after-import", createdAt: 0 },
+        ],
+        activeVaultProfileId: "default",
+        captureFolderPath: "file:///after-import",
+      });
+      getSettings.mockResolvedValue(prior);
+
+      renderScreen();
+      await waitFor(() => expect(importTransferredSettings).not.toBeNull());
+      await waitFor(() => expect(setVaultContext).toHaveBeenCalledWith("default", "file:///before-import"));
+      clearVaultContext.mockClear();
+      setVaultContext.mockClear();
+      savePersistedOnly.mockClear();
+      getSettings.mockResolvedValue(persisted);
+
+      await act(async () => {
+        await importTransferredSettings!(prior, imported);
+      });
+
+      const clearOrder = clearVaultContext.mock.invocationCallOrder[0]!;
+      const persistOrder = savePersistedOnly.mock.invocationCallOrder[0]!;
+      const publishOrder = setVaultContext.mock.invocationCallOrder[0]!;
+      expect(clearOrder).toBeLessThan(persistOrder);
+      expect(persistOrder).toBeLessThan(publishOrder);
+      expect(setVaultContext).toHaveBeenCalledWith("default", "file:///after-import");
+    });
+
+    it("restores only the old durable route when imported persistence fails", async () => {
+      const prior = baseSettings({ captureFolderPath: "file:///before-import" });
+      const imported = baseSettings({ captureFolderPath: "file:///after-import" });
+      getSettings.mockResolvedValue(prior);
+      savePersistedOnly.mockRejectedValueOnce(new Error("disk full"));
+
+      renderScreen();
+      await waitFor(() => expect(importTransferredSettings).not.toBeNull());
+      await waitFor(() => expect(setVaultContext).toHaveBeenCalledWith("default", "file:///before-import"));
+      clearVaultContext.mockClear();
+      setVaultContext.mockClear();
+
+      await expect(importTransferredSettings!(prior, imported)).rejects.toThrow("disk full");
+
+      expect(setVaultContext).toHaveBeenCalledWith("default", "file:///before-import");
+      expect(clearVaultContext.mock.invocationCallOrder[0]!).toBeLessThan(
+        setVaultContext.mock.invocationCallOrder[0]!,
+      );
+    });
+
+    it("mirrors the initially active vault into native receipt routing", async () => {
+      getSettings.mockResolvedValue(baseSettings({
+        vaultProfiles: [
+          { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+          { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+        ],
+        activeVaultProfileId: "work",
+        captureFolderPath: "file:///work",
+      }));
+
+      renderScreen();
+
+      await waitFor(() =>
+        expect(setVaultContext).toHaveBeenCalledWith("work", "file:///work"),
+      );
+      expect(await screen.findByText("Active")).toBeTruthy();
+    });
+
     it("switches the active registration without changing either registered root", async () => {
       getSettings.mockResolvedValue(baseSettings({
         vaultProfiles: [
@@ -280,6 +379,9 @@ describe("SettingsScreen", () => {
             ]),
           }),
         ),
+      );
+      await waitFor(() =>
+        expect(setVaultContext).toHaveBeenCalledWith("work", "file:///work"),
       );
     });
 

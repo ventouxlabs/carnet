@@ -92,6 +92,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
 import ${packageName}.R
+import java.util.UUID
 
 /**
  * Foreground service that hosts a persistent 4-button capture notification.
@@ -111,7 +112,32 @@ class CaptureForegroundService : Service() {
     const val ACTION_STOP = "${packageName}.CAPTURE_STOP"
     const val ACTION_REFRESH_DRIVE_INBOX = "${packageName}.REFRESH_DRIVE_INBOX"
     const val KEY_DRIVE_INBOX_PROMPT_AT = "drive_inbox_prompt_at"
+    const val KEY_DRIVE_INBOX_RECEIPT_ID = "drive_inbox_receipt_id"
     const val KEY_DRIVE_INBOX_LAST_READ_AT = "drive_inbox_last_read_at"
+    const val KEY_DRIVE_INBOX_PENDING_RECEIPT_ID = "drive_inbox_pending_receipt_id"
+    const val KEY_DRIVE_INBOX_PENDING_TEXT = "drive_inbox_pending_text"
+    const val KEY_DRIVE_INBOX_PENDING_PROFILE_ID = "drive_inbox_pending_profile_id"
+    const val KEY_DRIVE_INBOX_PENDING_ROOT_URI = "drive_inbox_pending_root_uri"
+    const val KEY_DRIVE_INBOX_PENDING_DISPATCHING = "drive_inbox_pending_dispatching"
+    /** Shared with the action service so receipt acceptance and rendering
+     * cannot interleave inside this process. */
+    val DRIVE_INBOX_LOCK = Any()
+  }
+
+  override fun onCreate() {
+    super.onCreate()
+    // The pending-dispatching flag means a Headless JS task was started in this app
+    // process. A recreated foreground service can only safely retry after that
+    // process has gone away; the receipt marker and JS in-process de-dupe make
+    // the normal restart path idempotent. Reset the persisted latch here, not
+    // on every notification refresh, so an already-running task is never
+    // redispatched by a routine render.
+    synchronized(DRIVE_INBOX_LOCK) {
+      getSharedPreferences(CaptureNotificationModule.PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(KEY_DRIVE_INBOX_PENDING_DISPATCHING, false)
+        .commit()
+    }
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
@@ -130,9 +156,11 @@ class CaptureForegroundService : Service() {
       // violates that contract. Calling it again for an already-running
       // foreground service is also the supported way to replace its content.
       startForeground(NOTIFICATION_ID, buildNotification())
+      resumePendingDriveInboxHandoff()
       return START_STICKY
     }
     startForeground(NOTIFICATION_ID, buildNotification())
+    resumePendingDriveInboxHandoff()
     // START_STICKY so the OS re-creates the service if it kills it for
     // resources — the user opted into "always available" by flipping the
     // toggle on, and the service costs nothing while idle.
@@ -151,6 +179,24 @@ class CaptureForegroundService : Service() {
       }
       val mgr = getSystemService(NotificationManager::class.java)
       mgr?.createNotificationChannel(channel)
+    }
+  }
+
+  /** A pending receipt is durable until JS confirms its raw write. A newly
+   * created foreground service clears the old process's dispatch latch before
+   * this asks the private action service to retry it. */
+  private fun resumePendingDriveInboxHandoff() {
+    val pending = getSharedPreferences(CaptureNotificationModule.PREFS_NAME, Context.MODE_PRIVATE)
+      .getString(KEY_DRIVE_INBOX_PENDING_RECEIPT_ID, null)
+      .orEmpty()
+    if (pending.isEmpty()) return
+    try {
+      startService(Intent(this, DriveInboxActionService::class.java).apply {
+        action = DriveInboxActionService.ACTION_DELIVER_PENDING
+        setPackage(packageName)
+      })
+    } catch (e: Exception) {
+      android.util.Log.w("CarnetDriveInbox", "Failed to resume pending handoff: \${e.message}")
     }
   }
 
@@ -197,20 +243,27 @@ class CaptureForegroundService : Service() {
   }
 
   /** Android Auto pilot: one self-conversation, not a vault browser. The reply
-   * reuses QuickIdeaReceiver's tested save-first headless capture path. */
-  private fun driveInboxReplyAction(): NotificationCompat.Action {
+   * is delivered directly to a private Service, as required by Android Auto's
+   * messaging notification contract. The service then starts the same
+   * save-first headless capture task as QuickIdeaReceiver. */
+  private fun driveInboxReplyAction(state: DriveInboxState): NotificationCompat.Action {
     val remoteInput = RemoteInput.Builder(QuickIdeaReceiver.KEY_QUICK_IDEA)
       .setLabel("Dictate a note")
       .build()
-    val intent = Intent(this, QuickIdeaReceiver::class.java).apply {
-      action = QuickIdeaReceiver.ACTION_QUICK_IDEA
+    val intent = Intent(this, DriveInboxActionService::class.java).apply {
+      action = DriveInboxActionService.ACTION_REPLY
       setPackage(packageName)
+      // PendingIntent identity includes data. Do not use UPDATE_CURRENT here:
+      // a car host may retain an old action, and replacing its extras would let
+      // that old action impersonate the newly rendered receipt.
+      data = Uri.parse("carnet://drive-inbox/\${state.receiptId}/reply")
+      putExtra(DriveInboxActionService.EXTRA_RECEIPT_ID, state.receiptId)
     }
-    val pi = PendingIntent.getBroadcast(
+    val pi = PendingIntent.getService(
       this,
       6,
       intent,
-      PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+      PendingIntent.FLAG_MUTABLE,
     )
     return NotificationCompat.Action.Builder(R.drawable.shortcut_idea, "Reply", pi)
       .addRemoteInput(remoteInput)
@@ -220,16 +273,18 @@ class CaptureForegroundService : Service() {
       .build()
   }
 
-  private fun driveInboxMarkReadAction(): NotificationCompat.Action {
-    val intent = Intent(this, DriveInboxReadReceiver::class.java).apply {
-      action = DriveInboxReadReceiver.ACTION_MARK_READ
+  private fun driveInboxMarkReadAction(state: DriveInboxState): NotificationCompat.Action {
+    val intent = Intent(this, DriveInboxActionService::class.java).apply {
+      action = DriveInboxActionService.ACTION_MARK_READ
       setPackage(packageName)
+      data = Uri.parse("carnet://drive-inbox/\${state.receiptId}/mark-read")
+      putExtra(DriveInboxActionService.EXTRA_RECEIPT_ID, state.receiptId)
     }
-    val pi = PendingIntent.getBroadcast(
+    val pi = PendingIntent.getService(
       this,
       7,
       intent,
-      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+      PendingIntent.FLAG_IMMUTABLE,
     )
     return NotificationCompat.Action.Builder(R.drawable.shortcut_idea, "Mark read", pi)
       .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
@@ -239,6 +294,7 @@ class CaptureForegroundService : Service() {
 
   private data class DriveInboxState(
     val promptAt: Long,
+    val receiptId: String,
     val unread: Boolean,
   )
 
@@ -250,13 +306,23 @@ class CaptureForegroundService : Service() {
    */
   private fun driveInboxState(): DriveInboxState {
     val prefs = getSharedPreferences(CaptureNotificationModule.PREFS_NAME, Context.MODE_PRIVATE)
-    var promptAt = prefs.getLong(KEY_DRIVE_INBOX_PROMPT_AT, 0L)
-    if (promptAt == 0L) {
-      promptAt = System.currentTimeMillis()
-      prefs.edit().putLong(KEY_DRIVE_INBOX_PROMPT_AT, promptAt).apply()
+    synchronized(DRIVE_INBOX_LOCK) {
+      var promptAt = prefs.getLong(KEY_DRIVE_INBOX_PROMPT_AT, 0L)
+      var receiptId = prefs.getString(KEY_DRIVE_INBOX_RECEIPT_ID, null).orEmpty()
+      // Older installs have a timestamp but no receipt. Treat that legacy
+      // prompt as spent and render a fresh, action-addressable prompt.
+      if (promptAt == 0L || receiptId.isEmpty()) {
+        promptAt = System.currentTimeMillis()
+        receiptId = UUID.randomUUID().toString()
+        prefs.edit()
+          .putLong(KEY_DRIVE_INBOX_PROMPT_AT, promptAt)
+          .putString(KEY_DRIVE_INBOX_RECEIPT_ID, receiptId)
+          .putLong(KEY_DRIVE_INBOX_LAST_READ_AT, 0L)
+          .commit()
+      }
+      val lastReadAt = prefs.getLong(KEY_DRIVE_INBOX_LAST_READ_AT, 0L)
+      return DriveInboxState(promptAt, receiptId, lastReadAt < promptAt)
     }
-    val lastReadAt = prefs.getLong(KEY_DRIVE_INBOX_LAST_READ_AT, 0L)
-    return DriveInboxState(promptAt, lastReadAt < promptAt)
   }
 
   private fun driveInboxStyle(state: DriveInboxState): NotificationCompat.MessagingStyle {
@@ -266,7 +332,7 @@ class CaptureForegroundService : Service() {
       .setConversationTitle("Drive Inbox")
       .setGroupConversation(false)
     // Once acknowledged, omit the prompt rather than re-creating it as an
-    // unread message. Reply remains available for a hands-free capture.
+    // unread message. Its actions are omitted too: their receipt is spent.
     if (state.unread) {
       style.addMessage(
         NotificationCompat.MessagingStyle.Message(
@@ -304,9 +370,11 @@ class CaptureForegroundService : Service() {
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       .setCategory(NotificationCompat.CATEGORY_MESSAGE)
       .setStyle(driveInboxStyle(driveInbox))
-      .addAction(driveInboxReplyAction())
       .apply {
-        if (driveInbox.unread) addAction(driveInboxMarkReadAction())
+        if (driveInbox.unread) {
+          addAction(driveInboxReplyAction(driveInbox))
+          addAction(driveInboxMarkReadAction(driveInbox))
+        }
       }
       .addAction(quickIdeaAction())
       .addAction(R.drawable.shortcut_idea, "Idea", captureIntent("carnet://capture/idea", 1))
@@ -344,6 +412,8 @@ class CaptureNotificationModule(reactContext: ReactApplicationContext) :
   companion object {
     const val PREFS_NAME = "carnet_native"
     const val KEY_ENABLED = "persistent_notification_enabled"
+    const val KEY_DRIVE_INBOX_PROFILE_ID = "drive_inbox_profile_id"
+    const val KEY_DRIVE_INBOX_ROOT_URI = "drive_inbox_root_uri"
   }
 
   override fun getName() = "CaptureNotification"
@@ -392,6 +462,124 @@ class CaptureNotificationModule(reactContext: ReactApplicationContext) :
       .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
       .getBoolean(KEY_ENABLED, false)
     promise.resolve(enabled)
+  }
+
+  /**
+   * Mirrors the active vault's non-secret routing context into native prefs.
+   * A headless notification reply cannot safely await AsyncStorage and must
+   * never guess a profile after a foreground switch. commit() makes a resolved
+   * JS promise mean that the next native receipt can read this exact context.
+   */
+  @ReactMethod
+  fun setVaultContext(profileId: String, rootUri: String, promise: Promise) {
+    val normalizedProfileId = profileId.trim()
+    if (normalizedProfileId.isEmpty()) {
+      promise.reject("E_VAULT_CONTEXT", "Vault profile id is required")
+      return
+    }
+    val committed = reactApplicationContext
+      .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .putString(KEY_DRIVE_INBOX_PROFILE_ID, normalizedProfileId)
+      // The default app-sandbox vault intentionally has an empty root URI;
+      // absence is represented by a null preference, not an empty string.
+      .putString(KEY_DRIVE_INBOX_ROOT_URI, rootUri)
+      .commit()
+    if (committed) {
+      promise.resolve(true)
+    } else {
+      promise.reject("E_VAULT_CONTEXT", "Failed to persist vault context")
+    }
+  }
+
+  /** Remove receipt routing before Settings persists a different active vault.
+   * This deliberately fails closed: a headless reply without both values is
+   * dropped rather than using the previous vault while AsyncStorage changes. */
+  @ReactMethod
+  fun clearVaultContext(promise: Promise) {
+    val committed = reactApplicationContext
+      .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .remove(KEY_DRIVE_INBOX_PROFILE_ID)
+      .remove(KEY_DRIVE_INBOX_ROOT_URI)
+      .commit()
+    if (committed) {
+      promise.resolve(true)
+    } else {
+      promise.reject("E_VAULT_CONTEXT", "Failed to clear vault context")
+    }
+  }
+
+  /** JS calls this immediately after the raw receipt-marked note is durable.
+   * Only then is the old receipt consumed and a new unread prompt rendered. */
+  @ReactMethod
+  fun completeDriveInboxReceipt(receiptId: String, promise: Promise) {
+    val normalizedReceiptId = receiptId.trim()
+    if (normalizedReceiptId.isEmpty()) {
+      promise.resolve(false)
+      return
+    }
+    val prefs = reactApplicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val committed = synchronized(CaptureForegroundService.DRIVE_INBOX_LOCK) {
+      val currentReceipt = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_RECEIPT_ID, null)
+      val pendingReceipt = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_RECEIPT_ID, null)
+      if (currentReceipt != normalizedReceiptId || pendingReceipt != normalizedReceiptId) {
+        false
+      } else {
+        prefs.edit()
+          .putLong(CaptureForegroundService.KEY_DRIVE_INBOX_PROMPT_AT, System.currentTimeMillis())
+          .putString(CaptureForegroundService.KEY_DRIVE_INBOX_RECEIPT_ID, java.util.UUID.randomUUID().toString())
+          .putLong(CaptureForegroundService.KEY_DRIVE_INBOX_LAST_READ_AT, 0L)
+          .remove(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_RECEIPT_ID)
+          .remove(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_TEXT)
+          .remove(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_PROFILE_ID)
+          .remove(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_ROOT_URI)
+          .remove(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_DISPATCHING)
+          .commit()
+      }
+    }
+    if (!committed) {
+      promise.resolve(false)
+      return
+    }
+    try {
+      val refresh = Intent(reactApplicationContext, CaptureForegroundService::class.java).apply {
+        action = CaptureForegroundService.ACTION_REFRESH_DRIVE_INBOX
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        reactApplicationContext.startForegroundService(refresh)
+      } else {
+        reactApplicationContext.startService(refresh)
+      }
+    } catch (e: Exception) {
+      android.util.Log.w("CarnetDriveInbox", "Completed receipt but refresh failed: \${e.message}")
+    }
+    promise.resolve(true)
+  }
+
+  /** JS calls this only when a pending receipt could not reach a durable raw
+   * write. It releases the in-process dispatch latch without changing the
+   * payload or prompt, so the exact same frozen handoff can retry. */
+  @ReactMethod
+  fun releaseDriveInboxReceiptForRetry(receiptId: String, promise: Promise) {
+    val normalizedReceiptId = receiptId.trim()
+    if (normalizedReceiptId.isEmpty()) {
+      promise.resolve(false)
+      return
+    }
+    val prefs = reactApplicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val released = synchronized(CaptureForegroundService.DRIVE_INBOX_LOCK) {
+      val currentReceipt = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_RECEIPT_ID, null)
+      val pendingReceipt = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_RECEIPT_ID, null)
+      if (currentReceipt != normalizedReceiptId || pendingReceipt != normalizedReceiptId) {
+        false
+      } else {
+        prefs.edit()
+          .putBoolean(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_DISPATCHING, false)
+          .commit()
+      }
+    }
+    promise.resolve(released)
   }
 }
 `;
@@ -552,44 +740,203 @@ class QuickIdeaTaskService : HeadlessJsTaskService() {
 `;
 }
 
-function driveInboxReadReceiverKt(packageName) {
+function driveInboxActionServiceKt(packageName) {
   return `package ${packageName}.notification
 
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.app.Service
+import android.os.IBinder
+import androidx.core.app.RemoteInput
+import com.facebook.react.HeadlessJsTaskService
 
 /**
- * Handles Android Auto's required mark-as-read action for Drive Inbox. It
- * records no note content and never starts JS, so acknowledgement cannot create
- * a capture or delay the car host.
+ * Handles Android Auto actions for the Drive Inbox self-conversation.
+ *
+ * Android Auto requires the reply and mark-as-read PendingIntents to target a
+ * Service, rather than a BroadcastReceiver. The reply keeps the established
+ * save-first path by forwarding RemoteInput text to QuickIdeaTaskService. A
+ * durable receipt makes old/duplicate PendingIntents inert, and the vault
+ * context comes from native preferences captured by Settings before the UI
+ * activates that profile. Mark read only records acknowledgement state and
+ * refreshes the foreground notification; it never starts JS or writes a note.
  */
-class DriveInboxReadReceiver : BroadcastReceiver() {
+class DriveInboxActionService : Service() {
   companion object {
+    const val ACTION_REPLY = "${packageName}.DRIVE_INBOX_REPLY"
     const val ACTION_MARK_READ = "${packageName}.DRIVE_INBOX_MARK_READ"
+    const val ACTION_DELIVER_PENDING = "${packageName}.DRIVE_INBOX_DELIVER_PENDING"
+    const val EXTRA_RECEIPT_ID = "drive_inbox_receipt_id"
+    const val EXTRA_PROFILE_ID = "profileId"
+    const val EXTRA_ROOT_URI = "rootUri"
   }
 
-  override fun onReceive(context: Context, intent: Intent) {
-    if (intent.action != ACTION_MARK_READ) return
-    context.getSharedPreferences(CaptureNotificationModule.PREFS_NAME, Context.MODE_PRIVATE)
-      .edit()
-      .putLong(CaptureForegroundService.KEY_DRIVE_INBOX_LAST_READ_AT, System.currentTimeMillis())
-      .apply()
+  private data class VaultContext(val profileId: String, val rootUri: String)
+  private data class PendingHandoff(
+    val receiptId: String,
+    val text: String,
+    val vaultContext: VaultContext,
+  )
+
+  override fun onBind(intent: Intent?): IBinder? = null
+
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    val actionIntent = intent ?: run {
+      stopSelf(startId)
+      return START_NOT_STICKY
+    }
+    when (actionIntent.action) {
+      ACTION_REPLY -> handleReply(actionIntent)
+      ACTION_MARK_READ -> handleMarkRead(actionIntent)
+      ACTION_DELIVER_PENDING -> deliverPending()
+    }
+    stopSelf(startId)
+    return START_NOT_STICKY
+  }
+
+  private fun handleReply(intent: Intent) {
+    val results = RemoteInput.getResultsFromIntent(intent) ?: return
+    val text = results.getCharSequence(QuickIdeaReceiver.KEY_QUICK_IDEA)
+      ?.toString()
+      ?.trim()
+      .orEmpty()
+    if (text.isEmpty()) return
+
+    val receiptId = intent.getStringExtra(EXTRA_RECEIPT_ID)?.trim().orEmpty()
+    if (receiptId.isEmpty()) return
+    // Persist the immutable handoff before JS starts. Receipt completion is
+    // deliberately deferred until JS confirms the raw receipt-marked note is
+    // durable, so a task-start/process failure remains retryable.
+    if (!storePendingReply(receiptId, text)) return
+    deliverPending()
+  }
+
+  private fun handleMarkRead(intent: Intent) {
+    val receiptId = intent.getStringExtra(EXTRA_RECEIPT_ID)?.trim().orEmpty()
+    if (receiptId.isEmpty() || !claimMarkRead(receiptId)) return
+    refreshDriveInbox()
+  }
+
+  /** Persist a current receipt's handoff exactly once. A duplicate action uses
+   * the original text/context and never overwrites it. */
+  private fun storePendingReply(receiptId: String, text: String): Boolean {
+    val prefs = getSharedPreferences(CaptureNotificationModule.PREFS_NAME, Context.MODE_PRIVATE)
+    synchronized(CaptureForegroundService.DRIVE_INBOX_LOCK) {
+      val promptAt = prefs.getLong(CaptureForegroundService.KEY_DRIVE_INBOX_PROMPT_AT, 0L)
+      val currentReceipt = prefs.getString(
+        CaptureForegroundService.KEY_DRIVE_INBOX_RECEIPT_ID,
+        null,
+      )
+      if (promptAt == 0L || currentReceipt != receiptId) return false
+      val pendingReceipt = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_RECEIPT_ID, null)
+      if (pendingReceipt != null) return pendingReceipt == receiptId
+
+      val profileId = prefs.getString(CaptureNotificationModule.KEY_DRIVE_INBOX_PROFILE_ID, null)
+        ?.trim()
+        .orEmpty()
+      val rootUri = prefs.getString(CaptureNotificationModule.KEY_DRIVE_INBOX_ROOT_URI, null)
+      if (profileId.isEmpty() || rootUri == null) {
+        android.util.Log.w("CarnetDriveInbox", "Dropped reply without a persisted vault context")
+        return false
+      }
+      return prefs.edit()
+        .putString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_RECEIPT_ID, receiptId)
+        // User text is short-lived app-private data, not a credential. It is
+        // removed in the same commit that consumes the receipt after raw write.
+        .putString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_TEXT, text)
+        .putString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_PROFILE_ID, profileId)
+        .putString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_ROOT_URI, rootUri)
+        .putBoolean(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_DISPATCHING, false)
+        .commit()
+    }
+  }
+
+  /** Dispatch the persisted handoff at most once per foreground-service run.
+   * CaptureForegroundService.onCreate resets a stale-process latch before a
+   * restart asks us to resume; completion remains the only operation that
+   * consumes this receipt. */
+  private fun deliverPending() {
+    val prefs = getSharedPreferences(CaptureNotificationModule.PREFS_NAME, Context.MODE_PRIVATE)
+    val handoff = synchronized(CaptureForegroundService.DRIVE_INBOX_LOCK) {
+      val receiptId = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_RECEIPT_ID, null)
+        .orEmpty()
+      val currentReceipt = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_RECEIPT_ID, null)
+      val text = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_TEXT, null)
+      val profileId = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_PROFILE_ID, null)
+      val rootUri = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_ROOT_URI, null)
+      if (receiptId.isEmpty() || currentReceipt != receiptId || text == null ||
+          profileId.isNullOrBlank() || rootUri == null) {
+        null
+      } else {
+        val dispatching = prefs.getBoolean(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_DISPATCHING, false)
+        if (dispatching) {
+          null
+        } else if (prefs.edit()
+            .putBoolean(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_DISPATCHING, true)
+            .commit()) {
+          PendingHandoff(receiptId, text, VaultContext(profileId, rootUri))
+        } else {
+          null
+        }
+      }
+    } ?: return
+
+    val taskIntent = Intent(this, QuickIdeaTaskService::class.java).apply {
+      putExtra(QuickIdeaReceiver.EXTRA_TEXT, handoff.text)
+      putExtra(EXTRA_RECEIPT_ID, handoff.receiptId)
+      putExtra(EXTRA_PROFILE_ID, handoff.vaultContext.profileId)
+      putExtra(EXTRA_ROOT_URI, handoff.vaultContext.rootUri)
+    }
     try {
-      val refreshIntent = Intent(context, CaptureForegroundService::class.java).apply {
+      startService(taskIntent)
+      HeadlessJsTaskService.acquireWakeLockNow(this)
+    } catch (e: Exception) {
+      // Keep the pending payload and make a later reply or FGS restart retry it.
+      synchronized(CaptureForegroundService.DRIVE_INBOX_LOCK) {
+        val currentPending = prefs.getString(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_RECEIPT_ID, null)
+        if (currentPending == handoff.receiptId) {
+          prefs.edit().putBoolean(CaptureForegroundService.KEY_DRIVE_INBOX_PENDING_DISPATCHING, false).commit()
+        }
+      }
+      android.util.Log.w("CarnetDriveInbox", "Failed to start pending reply capture: \${e.message}")
+    }
+  }
+
+  /** Mark-read consumes only the prompt that rendered its PendingIntent. It
+   * never creates a replacement prompt, so a delayed duplicate cannot mark the
+   * next receipt read. */
+  private fun claimMarkRead(receiptId: String): Boolean {
+    val prefs = getSharedPreferences(CaptureNotificationModule.PREFS_NAME, Context.MODE_PRIVATE)
+    synchronized(CaptureForegroundService.DRIVE_INBOX_LOCK) {
+      val promptAt = prefs.getLong(CaptureForegroundService.KEY_DRIVE_INBOX_PROMPT_AT, 0L)
+      val currentReceipt = prefs.getString(
+        CaptureForegroundService.KEY_DRIVE_INBOX_RECEIPT_ID,
+        null,
+      )
+      val lastReadAt = prefs.getLong(CaptureForegroundService.KEY_DRIVE_INBOX_LAST_READ_AT, 0L)
+      if (promptAt == 0L || currentReceipt != receiptId || lastReadAt >= promptAt) return false
+      return prefs.edit()
+        .putLong(CaptureForegroundService.KEY_DRIVE_INBOX_LAST_READ_AT, promptAt)
+        .commit()
+    }
+  }
+
+  private fun refreshDriveInbox() {
+    try {
+      val refreshIntent = Intent(this, CaptureForegroundService::class.java).apply {
         action = CaptureForegroundService.ACTION_REFRESH_DRIVE_INBOX
       }
       // The action may outlive the foreground service that rendered it. Start
-      // with the foreground API so that a stale action cannot trip Android's
-      // background-service restriction; the service refresh path immediately
-      // calls startForeground with the rebuilt notification.
+      // with the foreground API so a stale action cannot trip Android's
+      // background-service restriction; its refresh path immediately calls
+      // startForeground with the rebuilt notification.
       if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-        context.startForegroundService(refreshIntent)
+        startForegroundService(refreshIntent)
       } else {
-        context.startService(refreshIntent)
+        startService(refreshIntent)
       }
     } catch (e: Exception) {
-      android.util.Log.w("CarnetDriveInbox", "Failed to refresh after mark-read: \${e.message}")
+      android.util.Log.w("CarnetDriveInbox", "Failed to refresh Drive Inbox: \${e.message}")
     }
   }
 }
@@ -732,17 +1079,23 @@ module.exports = function withCaptureNotification(config) {
       });
     }
 
-    // Android Auto's required mark-as-read action for the Drive Inbox
-    // self-conversation. It is private and only reached by an explicit
-    // PendingIntent emitted by this package.
+    // Android Auto actions are delivered to a private Service (not a receiver)
+    // so the car host can execute both reply and mark-read without launching UI.
+    // Remove the pre-service receiver declaration during incremental prebuilds;
+    // clean prebuilds discard it with the rest of generated android/ output.
     const driveInboxReadReceiverName = `${packageName}.notification.DriveInboxReadReceiver`;
-    const hasDriveInboxReadReceiver = application.receiver.some(
-      (r) => r?.$?.['android:name'] === driveInboxReadReceiverName,
+    application.receiver = application.receiver.filter(
+      (r) => r?.$?.['android:name'] !== driveInboxReadReceiverName,
     );
-    if (!hasDriveInboxReadReceiver) {
-      application.receiver.push({
+
+    const driveInboxActionServiceName = `${packageName}.notification.DriveInboxActionService`;
+    const hasDriveInboxActionService = application.service.some(
+      (s) => s?.$?.['android:name'] === driveInboxActionServiceName,
+    );
+    if (!hasDriveInboxActionService) {
+      application.service.push({
         $: {
-          'android:name': driveInboxReadReceiverName,
+          'android:name': driveInboxActionServiceName,
           'android:exported': 'false',
         },
       });
@@ -891,10 +1244,15 @@ module.exports = function withCaptureNotification(config) {
         'utf8',
       );
       fs.writeFileSync(
-        path.join(javaDir, 'DriveInboxReadReceiver.kt'),
-        driveInboxReadReceiverKt(packageName),
+        path.join(javaDir, 'DriveInboxActionService.kt'),
+        driveInboxActionServiceKt(packageName),
         'utf8',
       );
+      // An incremental prebuild can start from native output generated before
+      // Drive Inbox actions moved from a receiver to a service. The old source
+      // is harmless once its manifest entry is gone, but remove it so the
+      // generated tree describes the current integration unambiguously.
+      fs.rmSync(path.join(javaDir, 'DriveInboxReadReceiver.kt'), { force: true });
 
       // shortcut_audio drawable — referenced by both this plugin and the
       // widget plugin. Both plugins emit it identically so removing one

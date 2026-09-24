@@ -46,6 +46,17 @@ check_file() {
   fi
 }
 
+check_file_absent() {
+  local relpath="$1"
+  local label="$2"
+  if [ ! -e "$ANDROID_DIR/$relpath" ]; then
+    echo "  ✓ $label"
+  else
+    echo "  ✗ UNEXPECTED generated file: $label ($relpath)"
+    EXIT=1
+  fi
+}
+
 check_manifest_contains() {
   local needle="$1"
   local label="$2"
@@ -82,7 +93,8 @@ check_file "app/src/main/java/$PKG_PATH/notification/CaptureNotificationPackage.
 check_file "app/src/main/java/$PKG_PATH/notification/BootReceiver.kt" "BootReceiver.kt"
 check_file "app/src/main/java/$PKG_PATH/notification/QuickIdeaReceiver.kt" "QuickIdeaReceiver.kt (B5 inline reply)"
 check_file "app/src/main/java/$PKG_PATH/notification/QuickIdeaTaskService.kt" "QuickIdeaTaskService.kt (B5 headless task)"
-check_file "app/src/main/java/$PKG_PATH/notification/DriveInboxReadReceiver.kt" "DriveInboxReadReceiver.kt (Android Auto mark-read)"
+check_file "app/src/main/java/$PKG_PATH/notification/DriveInboxActionService.kt" "DriveInboxActionService.kt (Android Auto actions)"
+check_file_absent "app/src/main/java/$PKG_PATH/notification/DriveInboxReadReceiver.kt" "legacy DriveInboxReadReceiver.kt removed"
 check_file "app/src/main/res/xml/automotive_app_desc.xml" "automotive_app_desc.xml (notification messaging only)"
 
 echo "→ Widget plugin — emitted Kotlin + resources:"
@@ -134,7 +146,7 @@ check_manifest_contains "PROPERTY_SPECIAL_USE_FGS_SUBTYPE" "subtype property"
 check_manifest_contains "BootReceiver" "receiver: BootReceiver"
 check_manifest_contains "QuickIdeaReceiver" "receiver: QuickIdeaReceiver (B5)"
 check_manifest_contains "QuickIdeaTaskService" "service: QuickIdeaTaskService (B5)"
-check_manifest_contains "DriveInboxReadReceiver" "receiver: DriveInboxReadReceiver (Android Auto mark-read)"
+check_manifest_contains "DriveInboxActionService" "service: DriveInboxActionService (Android Auto actions)"
 check_manifest_contains "com.google.android.gms.car.application" "Android Auto messaging declaration"
 check_manifest_contains "CaptureWidgetProvider" "receiver: CaptureWidgetProvider"
 check_manifest_contains "android.appwidget.action.APPWIDGET_UPDATE" "widget intent filter"
@@ -157,25 +169,45 @@ check_kt_source_contains() {
 }
 check_kt_source_contains "$NOTIF_SVC" "addRemoteInput" "quick-idea action has a RemoteInput"
 check_kt_source_contains "$NOTIF_SVC" "quickIdeaAction()" "quick-idea action wired into the notification"
-# RemoteInput requires a mutable PendingIntent on Android 12+. Each reply is
-# still explicit and targets a non-exported receiver, which prevents redirecting
-# it to another app component.
+# RemoteInput requires a mutable PendingIntent on Android 12+. The generic
+# quick-idea reply stays a private broadcast, while Android Auto's reply is a
+# private Service required by the car messaging notification contract.
 check_kt_source_contains "$NOTIF_SVC" "getBroadcast" "quick-idea uses a broadcast PendingIntent"
 check_kt_source_contains "$NOTIF_SVC" "FLAG_MUTABLE" "direct-reply PendingIntents are mutable"
+check_kt_source_contains "$NOTIF_SVC" "DriveInboxActionService::class.java" "Drive Inbox actions target their private service"
+check_kt_source_contains "$NOTIF_SVC" "PendingIntent.getService" "Drive Inbox actions use service PendingIntents"
 QUICK_RCV="$ANDROID_DIR/app/src/main/java/$PKG_PATH/notification/QuickIdeaReceiver.kt"
 check_kt_source_contains "$QUICK_RCV" "getResultsFromIntent" "receiver reads RemoteInput results"
 check_kt_source_contains "$QUICK_RCV" "isEmpty()" "receiver drops empty submissions (no-op guard)"
 check_kt_source_contains "$NOTIF_SVC" "MessagingStyle" "Drive Inbox uses messaging notification style"
 check_kt_source_contains "$NOTIF_SVC" "driveInboxMarkReadAction" "Drive Inbox supplies mark-as-read"
 check_kt_source_contains "$NOTIF_SVC" "KEY_DRIVE_INBOX_PROMPT_AT" "Drive Inbox persists its prompt timestamp"
+check_kt_source_contains "$NOTIF_SVC" "KEY_DRIVE_INBOX_RECEIPT_ID" "Drive Inbox persists a durable receipt id"
 check_kt_source_contains "$NOTIF_SVC" "KEY_DRIVE_INBOX_LAST_READ_AT" "Drive Inbox reads persisted acknowledgement state"
+check_kt_source_contains "$NOTIF_SVC" "drive-inbox/\${state.receiptId}/reply" "reply PendingIntent identity includes its receipt"
+check_kt_source_contains "$NOTIF_SVC" "drive-inbox/\${state.receiptId}/mark-read" "mark-read PendingIntent identity includes its receipt"
 check_kt_source_contains "$NOTIF_SVC" "if (state.unread)" "acknowledged prompts are omitted from MessagingStyle"
 check_kt_source_contains "$NOTIF_SVC" "setNumber(if (driveInbox.unread) 1 else 0)" "unread badge clears after acknowledgement"
 check_kt_source_contains "$NOTIF_SVC" "startForeground(NOTIFICATION_ID, buildNotification())" "refresh keeps foreground-service startup contract"
-DRIVE_READ_RCV="$ANDROID_DIR/app/src/main/java/$PKG_PATH/notification/DriveInboxReadReceiver.kt"
-check_kt_source_contains "$DRIVE_READ_RCV" "ACTION_MARK_READ" "mark-read receiver validates its action"
-check_kt_source_contains "$DRIVE_READ_RCV" "putLong" "mark-read is recorded without note writes"
-check_kt_source_contains "$DRIVE_READ_RCV" "startForegroundService" "stale mark-read action safely refreshes the foreground service"
+DRIVE_ACTION_SVC="$ANDROID_DIR/app/src/main/java/$PKG_PATH/notification/DriveInboxActionService.kt"
+CAPTURE_MODULE="$ANDROID_DIR/app/src/main/java/$PKG_PATH/notification/CaptureNotificationModule.kt"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "ACTION_REPLY" "Drive Inbox service validates reply action"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "ACTION_MARK_READ" "Drive Inbox service validates mark-read action"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "getResultsFromIntent" "Drive Inbox service reads reply RemoteInput"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "QuickIdeaTaskService::class.java" "Drive Inbox reply preserves save-first task path"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "EXTRA_RECEIPT_ID" "Drive Inbox action receives its receipt id"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "currentReceipt != receiptId" "stale Drive Inbox actions are rejected"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "currentReceipt != receiptId || lastReadAt >= promptAt" "mark-read accepts only the current receipt once"
+check_kt_source_contains "$DRIVE_ACTION_SVC" ".putLong(CaptureForegroundService.KEY_DRIVE_INBOX_LAST_READ_AT, promptAt)" "mark-read records acknowledgement without consuming the reply receipt"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "synchronized(CaptureForegroundService.DRIVE_INBOX_LOCK)" "receipt acceptance is atomic"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "KEY_DRIVE_INBOX_PROFILE_ID" "reply reads native vault profile context"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "EXTRA_ROOT_URI" "reply forwards receipt-time vault root"
+check_kt_source_contains "$DRIVE_ACTION_SVC" ".commit()" "receipt state is durably accepted before JS starts"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "putLong" "mark-read is recorded without note writes"
+check_kt_source_contains "$DRIVE_ACTION_SVC" "startForegroundService" "stale mark-read action safely refreshes the foreground service"
+check_kt_source_contains "$CAPTURE_MODULE" "releaseDriveInboxReceiptForRetry" "native bridge releases failed receipt retry latch"
+check_kt_source_contains "$CAPTURE_MODULE" "KEY_DRIVE_INBOX_PENDING_DISPATCHING, false" "retry release preserves pending payload while unlocking dispatch"
+check_kt_source_contains "$CAPTURE_MODULE" "currentReceipt != normalizedReceiptId || pendingReceipt != normalizedReceiptId" "retry release rejects stale or missing receipts"
 
 echo "→ MainApplication package registration:"
 check_main_app_contains "import ${PKG}.notification.CaptureNotificationPackage" "import line present"

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Button, Dialog, HelperText, Portal, Text } from "react-native-paper";
 
-import { getSettings, savePersistedOnly, setKarakeepApiKey } from "../lib/settings";
+import { getSettings, setKarakeepApiKey, type Settings } from "../lib/settings";
 import {
   parseSettingsTransfer,
   reissueImportedCustomProviderIds,
@@ -16,13 +16,16 @@ import {
 import { spacing } from "../lib/theme";
 
 interface SettingsTransferSectionProps {
-  onImported: () => Promise<void>;
+  /** Owns the durable import transaction. SettingsScreen uses this boundary
+   * to invalidate native Drive Inbox routing before a changed vault root can
+   * become durable, then reloads/publishes the imported route on success. */
+  onImportSettings: (current: Settings, imported: Settings) => Promise<void>;
   onError: (message: string) => void;
 }
 
 /** Import/export for portable, explicitly non-secret settings. */
 export function SettingsTransferSection({
-  onImported,
+  onImportSettings,
   onError,
 }: SettingsTransferSectionProps) {
   const [pendingImport, setPendingImport] = useState<ReturnType<
@@ -65,13 +68,12 @@ export function SettingsTransferSection({
         ...current.llmProviders.map((provider) => deleteKey(provider.id)),
         setKarakeepApiKey(""),
       ]);
-      await savePersistedOnly({
+      await onImportSettings(current, {
         ...current,
         ...reissueImportedCustomProviderIds(pendingImport, current.nextCustomSeq),
       });
       themePreference.setPreference(pendingImport.themePreference);
       setPendingImport(null);
-      await onImported();
     } catch (error: unknown) {
       onError(errorMessage(error, "Settings import failed."));
     } finally {
