@@ -11,7 +11,9 @@ import {
   splitFrontmatter,
   extractFrontmatterField,
   rewriteFrontmatterField,
+  isSynthesisNote,
 } from "./frontmatter";
+import { buildSynthesisNote } from "./retrospective";
 
 // ── parseFrontmatter ──────────────────────────────────────────────────────────
 
@@ -391,5 +393,42 @@ describe("preserveFrontmatterFields — YAML validity", () => {
     const out = preserveFrontmatterFields('---\nemail: ""\n---\n# Ada v2\n', original);
     expect(out.match(/^email:/gm)).toHaveLength(1);
     expect(parseStrict(out).email).toBe("ada@example.com");
+  });
+});
+
+// ── isSynthesisNote ───────────────────────────────────────────────────────────
+
+describe("isSynthesisNote", () => {
+  const captured =
+    "---\ncreated: 2026-09-27\ntags: [note, errands]\n---\n# Weekend errands\n\n- [ ] call the dentist\n";
+
+  it("identifies buildSynthesisNote's real output", () => {
+    expect(
+      isSynthesisNote(buildSynthesisNote("what about coffee", "You wrote about it.", [], "2026-09-27")),
+    ).toBe(true);
+  });
+
+  it("does not mistake a captured note for one", () => {
+    expect(isSynthesisNote(captured)).toBe(false);
+  });
+
+  it("is false with no frontmatter at all", () => {
+    expect(isSynthesisNote("# just a heading\n")).toBe(false);
+  });
+
+  it("still identifies it by question: after the user retags it in Obsidian", () => {
+    const retagged = buildSynthesisNote("q", "a", [], "2026-09-27").replace(
+      "tags: [synthesis]",
+      "tags: [research]",
+    );
+    expect(isSynthesisNote(retagged)).toBe(true);
+  });
+
+  it("still identifies it by the synthesis tag (normalized) if question: was deleted", () => {
+    expect(isSynthesisNote("---\ncreated: 2026-09-27\ntags: [#Synthesis]\n---\n# q\n")).toBe(true);
+  });
+
+  it("ignores a question: line in the body — only frontmatter counts", () => {
+    expect(isSynthesisNote(`${captured}\nquestion: what to buy\n`)).toBe(false);
   });
 });

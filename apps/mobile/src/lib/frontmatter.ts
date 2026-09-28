@@ -481,6 +481,20 @@ export function normalizeTag(raw: string): string {
 }
 
 /**
+ * True when this markdown is a saved retrospective answer (buildSynthesisNote,
+ * retrospective.ts) rather than a note the user captured.
+ *
+ * Both now live in Notes/ (note-capture-mode PRD §4), so the folder can no
+ * longer carry this meaning. buildSynthesisNote always emits BOTH
+ * `tags: [synthesis]` and a `question:` field; either suffices, and
+ * `question:` survives the user retagging the note in Obsidian.
+ */
+export function isSynthesisNote(markdown: string): boolean {
+  if (extractFrontmatterField(markdown, "question") !== null) return true;
+  return getFrontmatterTags(markdown).some((tag) => normalizeTag(tag) === "synthesis");
+}
+
+/**
  * Set the `tags` field to the given tags as an Obsidian-compatible inline flow
  * array `tags: [a, b, c]`, upserting the field. Each tag is normalized and the
  * list is de-duplicated (first-occurrence order). This REPLACES the field — to
