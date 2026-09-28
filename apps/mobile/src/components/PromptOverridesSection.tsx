@@ -7,6 +7,7 @@ import {
   buildEnhanceProsePrompt,
   buildIdeaPrompt,
   buildJournalPrompt,
+  buildNotePrompt,
   buildPersonPrompt,
   buildRetrospectivePrompt,
   buildSharedImagePrompt,
@@ -16,6 +17,7 @@ import { caretProps, useCarnetTheme } from "../lib/theme";
 
 const PROMPT_MODES = [
   { key: "idea", label: "Idea", icon: "lightbulb-on" },
+  { key: "note", label: "Note", icon: "checkbox-marked-outline" },
   { key: "journal", label: "Journal", icon: "microphone" },
   { key: "person", label: "Contact", icon: "account" },
   { key: "sharedImage", label: "Photo + Image", icon: "camera" },
@@ -36,6 +38,8 @@ function defaultPromptFor(mode: PromptModeKey): string {
   switch (mode) {
     case "idea":
       return buildIdeaPrompt("placeholder").system;
+    case "note":
+      return buildNotePrompt("placeholder").system;
     case "journal":
       return buildJournalPrompt("placeholder", "").system;
     case "person":

@@ -96,6 +96,7 @@ describe("settings transfer", () => {
       sharedLink: "Summarize it",
       enhanceProse: "Tighten the prose",
       retrospective: "Cite every claim",
+      note: "Keep my lines",
     };
     const imported = parseSettingsTransfer(
       serializeSettingsTransfer(settings({ promptOverrides: overrides })),

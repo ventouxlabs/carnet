@@ -102,6 +102,7 @@ globalThis.fetch = fetchMock as unknown as typeof fetch;
 import {
   askVault,
   enrichIdea,
+  enrichNote,
   enhanceProse,
   enrichJournal,
   enrichPerson,
@@ -775,5 +776,51 @@ describe("dispatcher threads the vault tag vocabulary", () => {
 
     await expect(enrichIdea("text")).resolves.toBeTruthy();
     expect(systemOf()).not.toContain("This vault already uses these tags");
+  });
+});
+
+// ── note capture mode ─────────────────────────────────────────────────────────
+
+describe("dispatcher enrichNote", () => {
+  function systemOf(call = 0): string {
+    const [, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+    return (JSON.parse(init.body as string) as { messages: Array<{ content: string }> })
+      .messages[0].content;
+  }
+
+  // The vault-tag block above installs a persistent per-profile
+  // implementation (no restoreMocks in vitest.config.ts); start clean.
+  beforeEach(() => {
+    vi.mocked(getVaultTagStrings).mockReset().mockResolvedValue([]);
+  });
+
+  it("forwards overrides.note — never overrides.idea", async () => {
+    vi.mocked(getPromptOverrides).mockResolvedValueOnce({
+      idea: "OVERRIDE-IDEA-7f3a",
+      note: "OVERRIDE-NOTE-4c7a",
+    });
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+
+    await enrichNote("text");
+
+    expect(systemOf()).toBe("OVERRIDE-NOTE-4c7a");
+  });
+
+  it("uses the capture's vault tags after the active profile has switched", async () => {
+    vi.mocked(getVaultTagStrings).mockImplementation(
+      async (profileIdOrLimit?: string | number) => {
+        const profileId = typeof profileIdOrLimit === "string" ? profileIdOrLimit : undefined;
+        return profileId === "personal" ? ["personal-only"] : ["work-secret"];
+      },
+    );
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+
+    await enrichNote("deferred A capture", {
+      vaultContext: { profileId: "personal", rootUri: "file:///personal" },
+    });
+
+    expect(getVaultTagStrings).toHaveBeenCalledWith("personal");
+    expect(systemOf()).toContain("personal-only");
+    expect(systemOf()).not.toContain("work-secret");
   });
 });

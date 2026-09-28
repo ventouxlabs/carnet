@@ -317,6 +317,24 @@ export async function enrichIdea(
   return withFallbackMarker(outcome);
 }
 
+export async function enrichNote(
+  text: string,
+  options?: EnrichmentOptions,
+): Promise<EnrichResult> {
+  // Same shape as enrichIdea: the vocabulary comes from the capture's own
+  // profile (options.vaultContext), never whichever profile is active now.
+  const [settings, overrides, vaultTags] = await Promise.all([
+    getSettings(),
+    getPromptOverrides(),
+    getVaultTagStrings(options?.vaultContext?.profileId),
+  ]);
+  const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
+  const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
+    llmClient.enrichNote(text, config, overrides.note, availableTags),
+  );
+  return withFallbackMarker(outcome);
+}
+
 export async function enrichJournal(
   input: { transcript: string; notes: string },
   options?: EnrichmentOptions,

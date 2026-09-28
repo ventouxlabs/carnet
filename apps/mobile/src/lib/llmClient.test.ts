@@ -57,6 +57,7 @@ import {
   askRetrospective,
   enrichIdea,
   enrichJournal,
+  enrichNote,
   enrichPerson,
   enrichSharedImage,
   enrichSharedLink,
@@ -70,6 +71,7 @@ import {
 import {
   buildIdeaPrompt,
   buildJournalPrompt,
+  buildNotePrompt,
   buildPersonPrompt,
   buildPromoteIdeaPrompt,
   buildRetrospectivePrompt,
@@ -864,5 +866,55 @@ describe("vault tag hint", () => {
     const system = systemOf();
     expect(system).toContain("Custom image instructions.");
     expect(system).toContain("dev");
+  });
+});
+
+describe("enrichNote", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  function systemOf(call: number = 0): string {
+    const [, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+    return (JSON.parse(init.body as string) as RequestBody).messages[0].content;
+  }
+
+  it("sends the note prompt, not the idea prompt", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse("---\ncreated: 2026-09-27\ntags: [note]\n---\n# x\n"),
+    );
+    await enrichNote("- [ ] call the dentist", CONFIG);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as RequestBody;
+    const prompt = buildNotePrompt("- [ ] call the dentist");
+    expect(body.messages[0].content).toBe(prompt.system);
+    expect(body.messages[1].content).toBe(prompt.user);
+  });
+
+  it("normalizes the reply with the note shape (created, tags), not idea's", async () => {
+    // Proves chatCompletion gets noteType "note": under "idea" the missing
+    // `status` fails normalization and the keys come back in reply order.
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse(
+        "---\ntags: [note, errands]\ncreated: 2026-09-27\n---\n# Errands\n\n- [ ] call the dentist\n",
+      ),
+    );
+    const result = await enrichNote("call the dentist", CONFIG);
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-27\ntags: [note, errands]\n---\n# Errands\n\n- [ ] call the dentist\n",
+    );
+  });
+
+  it("honours a prompt override", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+    await enrichNote("text", CONFIG, "My own note instructions.");
+    expect(systemOf()).toBe("My own note instructions.");
+  });
+
+  it("keeps the vault tag vocabulary on an overridden system prompt", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+    await enrichNote("text", CONFIG, "My own note instructions.", ["errands"]);
+    expect(systemOf()).toContain("My own note instructions.");
+    expect(systemOf()).toContain("errands");
   });
 });
