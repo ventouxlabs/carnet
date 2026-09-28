@@ -176,10 +176,32 @@ export async function writeIdea(
 }
 
 /**
+ * Write a captured note (note capture mode) under Notes/. Create-only with
+ * collision suffixing, exactly like writeIdea — and it shares Notes/, and so
+ * the suffix space, with writeSynthesis's saved answers.
+ *
+ * Does NOT touch the note index; the caller pairs this with
+ * upsertNoteInIndex, matching every other write site.
+ */
+export async function writeNote(
+  slug: string,
+  markdown: string,
+  rootOverride?: Root,
+): Promise<{ filepath: string }> {
+  const root = rootOverride ?? await resolveRoot();
+  const notesUri = await root.fs.findOrCreateSubdir(root.uri, "Notes");
+  const filename = await findCollisionFreeName(notesUri, slug, ".md", root.fs);
+  const filepath = await writeNewFile(notesUri, filename, markdown, root.fs);
+  return { filepath };
+}
+
+/**
  * Write a synthesis note (a saved retrospective-query answer) under Notes/.
  *
- * Notes/ holds computed artifacts that cite other notes, as distinct from
- * Ideas/ which holds things the user jotted. Create-only with collision
+ * Notes/ holds notes the user works FROM — captured task notes (writeNote) and
+ * saved retrospective answers alike — as distinct from Ideas/, which holds
+ * thoughts to develop. Use isSynthesisNote(markdown) (frontmatter.ts) to tell
+ * the two apart; the folder no longer does. Create-only with collision
  * suffixing, exactly like writeIdea — a re-asked question saves a second file
  * rather than overwriting the first answer.
  *
