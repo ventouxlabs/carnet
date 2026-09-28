@@ -195,6 +195,7 @@ async function mapWithConcurrency<T>(
 function subdirForMode(mode: CaptureMode): NoteSubdir {
   if (mode === "journal") return "Journal";
   if (mode === "person") return "People";
+  if (mode === "note") return "Notes";
   return "Ideas";
 }
 
@@ -424,12 +425,12 @@ export async function upsertNoteInIndex(
   profileId?: string,
 ): Promise<void> {
   const resolvedProfileId = profileId ?? await activeIndexProfileId();
-  // The uri is authoritative; the mode round-trip is only a fallback. Going
-  // through subdirForMode alone would record "Ideas" for anything outside
-  // Journal/People — including a Notes/ synthesis note — while a full rebuild
-  // reads "Notes" straight off the NoteFileRef, so the same note's subdir
-  // flipped on the next pull-to-refresh. subdirForUri returns null outside the
-  // known note subdirs, which is when the mode collapse is the best guess left.
+  // The uri is authoritative; the mode round-trip is only a fallback. Before
+  // Notes/ had a mode of its own, subdirForMode alone recorded "Ideas" for a
+  // Notes/ synthesis note while a full rebuild read "Notes" straight off the
+  // NoteFileRef, so the same note's subdir flipped on the next pull-to-refresh.
+  // subdirForUri returns null outside the known note subdirs, which is when the
+  // mode collapse is the best guess left.
   const subdir = subdirForUri(uri) ?? subdirForMode(inferNoteMode(uri));
   const entry = buildNoteEntry(uri, subdir, markdown);
   await serializeCacheWrite(async () => {
@@ -530,11 +531,16 @@ function basenameTitle(uri: string): string {
 
 /** Infer the capture mode from the note's IMMEDIATE parent subdir. We match the
  * parent segment (not a substring anywhere in the path) so a vault rooted under
- * a folder literally named "Journal"/"People" doesn't misclassify its Ideas. */
+ * a folder literally named "Journal"/"People" doesn't misclassify its Ideas.
+ *
+ * Notes/ holds BOTH captured notes and saved Ask answers; both report "note".
+ * Where the two must be told apart (Re-enrich), use isSynthesisNote(markdown)
+ * — the folder no longer carries that distinction. */
 export function inferNoteMode(uri: string): CaptureMode {
   const parent = parentSegment(uri);
   if (parent === "Journal") return "journal";
   if (parent === "People") return "person";
+  if (parent === "Notes") return "note";
   return "idea";
 }
 

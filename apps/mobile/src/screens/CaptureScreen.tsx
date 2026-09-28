@@ -845,7 +845,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
       return;
     }
 
-    // mode === "person"
+    if (mode !== "person") return setPhase("input"); // mode === "person" below; any other mode is a malformed carnet://capture/:mode
     try {
       const result = await enrichPerson(
         { ocrResult: ocrText.trim(), context: text.trim() },

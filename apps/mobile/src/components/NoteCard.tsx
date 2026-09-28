@@ -10,6 +10,8 @@ export function modeStamp(mode: CaptureMode): { label: string; icon: string } {
   switch (mode) {
     case "idea":
       return { label: "Idea", icon: "lightbulb-on-outline" };
+    case "note":
+      return { label: "Note", icon: "checkbox-marked-outline" };
     case "journal":
       return { label: "Journal", icon: "book-open-variant" };
     case "person":

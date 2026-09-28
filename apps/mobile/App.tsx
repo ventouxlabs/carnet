@@ -38,6 +38,7 @@ import AskScreen, { type AskRouteParams } from "./src/screens/AskScreen";
 import type { CaptureEntry, CaptureMode } from "./src/lib/storage";
 import type { VaultContext } from "./src/lib/vaultContext";
 import { carnetDark, carnetLight } from "./src/lib/theme";
+import { formatMode } from "./src/lib/recentDetailView";
 import {
   getThemePreference,
   setThemePreference,
@@ -303,14 +304,7 @@ export default function App() {
                 <Stack.Screen
                   name="Capture"
                   component={CaptureScreen}
-                  options={({ route }) => ({
-                    title:
-                      route.params.mode === "idea"
-                        ? "Idea"
-                        : route.params.mode === "journal"
-                          ? "Journal"
-                          : "Contact",
-                  })}
+                  options={({ route }) => ({ title: formatMode(route.params.mode) })}
                 />
                 <Stack.Screen
                   name="Settings"

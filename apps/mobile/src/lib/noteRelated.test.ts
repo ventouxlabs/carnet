@@ -121,15 +121,13 @@ describe("computeRelatedNotes", () => {
     ).toEqual([sameNameOtherSubdir]);
   });
 
-  it("excludes a Notes/ note against Notes/, not Ideas/ (mode reports idea for Notes/)", () => {
-    // inferNoteMode falls back to "idea" for any uri it doesn't recognize,
-    // including Notes/ — so a synthesis note's entry.mode is "idea" even
-    // though it lives in Notes/. Under the OLD mode-derived subdir, the query
-    // would carry subdir "Ideas" (relatedSubdirForMode("idea")), which wrongly
-    // matches this same-basename Ideas/ note's subdir + basename and excludes
-    // it as "self" — dropping a genuinely different, genuinely related note.
-    // The uri-derived subdir ("Notes") does not match "Ideas", so the note
-    // survives as a real related hit.
+  it("excludes a Notes/ note against Notes/, not Ideas/, even when its entry still says idea", () => {
+    // An entry's mode can lag its folder: recents rows and cached index rows
+    // written before Notes/ mapped to "note" still say "idea" until the next
+    // refresh. Under a mode-derived subdir the query would carry "Ideas"
+    // (relatedSubdirForMode("idea")) and wrongly exclude this same-basename
+    // Ideas/ note as "self" — dropping a genuinely related note. The
+    // uri-derived subdir ("Notes") doesn't match "Ideas", so it survives.
     const body = "---\ntags: [hydroponics]\n---\n# Synth\n";
     const synthEntry: CaptureEntry = {
       ...ENTRY,

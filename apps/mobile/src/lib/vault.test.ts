@@ -657,3 +657,34 @@ describe("profile-scoped note-index cache", () => {
     expect(_store.get("carnet:noteindex:v2:work")).toBe(JSON.stringify(work));
   });
 });
+
+// ── Notes/ → note (note capture mode) ────────────────────────────────────────
+
+describe("inferNoteMode — Notes/", () => {
+  it("maps a Notes/ uri (file:// or SAF) to the note mode", () => {
+    expect(inferNoteMode("file:///v/Notes/weekend-errands.md")).toBe("note");
+    const saf =
+      "content://com.android.externalstorage.documents/tree/primary%3ACarnet/document/primary%3ACarnet%2FNotes%2Fweekend-errands.md";
+    expect(inferNoteMode(saf)).toBe("note");
+  });
+
+  it("reports a saved answer in Notes/ as note too — only frontmatter tells them apart", () => {
+    // Why Task 7 gates Re-enrich on isSynthesisNote(body), not on mode.
+    const md = '---\ncreated: 2026-09-13\ntags: [synthesis]\nquestion: "q"\n---\n# q\n';
+    expect(synthesizeEntry("file:///v/Notes/q.md", md).mode).toBe("note");
+  });
+
+  it("indexes a Notes/ note with mode note, its real subdir, and its todos", async () => {
+    addNote("file:///v/Ideas/a.md", "Ideas", "---\ntags: [x]\n---\n# A\n\nbody\n");
+    await refreshTagIndex(); // builds + persists the note index cache
+    await upsertNoteInIndex(
+      "file:///v/Notes/weekend-errands.md",
+      "---\ncreated: 2026-09-27\ntags: [note, errands]\n---\n# Weekend errands\n\n- [ ] call the dentist\n",
+    );
+    const after = await loadCachedNoteIndex();
+    const entry = after!.notes.find((n) => n.uri === "file:///v/Notes/weekend-errands.md");
+    expect(entry?.mode).toBe("note");
+    expect(entry?.subdir).toBe("Notes");
+    expect(entry?.todos).toEqual([{ text: "call the dentist", checked: false }]);
+  });
+});

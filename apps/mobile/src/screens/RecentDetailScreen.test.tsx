@@ -541,6 +541,8 @@ describe("RecentDetailScreen", () => {
 
 const ENRICHED_MD =
   "---\ncreated: 2026-07-08T11:55:46.000Z\nstatus: seedling\ntags: [qa-test]\n---\n# Draft Survival Test\n\nHello body text.\n";
+const SYNTHESIS_MD =
+  '---\ncreated: 2026-09-13\ntags: [synthesis]\nquestion: "what have I been thinking about"\n---\n# what have I been thinking about\n\nHello body text.\n';
 
 describe("RecentDetailScreen — re-enrich family", () => {
   // clearAllMocks clears calls, not implementations — restate the default note
@@ -680,6 +682,23 @@ describe("RecentDetailScreen — re-enrich family", () => {
 
     expect(await screen.findByText(/model exploded/)).toBeTruthy();
     expect(screen.getByText(/Hello body text\./)).toBeTruthy();
+  });
+
+  it("does not offer Re-enrich for a saved answer that reports mode note (Notes/ → note)", async () => {
+    // Since Notes/ maps to "note", every saved answer opened from Search,
+    // TagBrowser, Todos or Ask arrives with mode "note". It must never be
+    // re-enrichable, in every commit of the note-capture work.
+    vi.mocked(readNote).mockResolvedValue(SYNTHESIS_MD);
+    const { navigation } = renderScreen({
+      ...ENTRY,
+      mode: "note",
+      filepath: "file:///v/Notes/synth.md",
+    });
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+
+    expect(await screen.findByText("File info")).toBeTruthy();
+    expect(screen.queryByText("Re-enrich")).toBeNull();
   });
 });
 

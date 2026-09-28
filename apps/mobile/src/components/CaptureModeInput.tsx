@@ -6,6 +6,7 @@ import { VoiceButton, type VoiceButtonHandle } from "../voice/VoiceButton";
 import { CardScannerModal } from "./CardScannerModal";
 import { cardScanHint } from "../lib/cardScanOutcome";
 import type { CaptureMode } from "../lib/storage";
+import { isSaveFirstTextMode } from "../lib/saveFirstRouting";
 import { caretProps, useCarnetTheme } from "../lib/theme";
 
 interface ModeInputProps {
@@ -35,7 +36,7 @@ export function ModeInput({
   voiceRef,
 }: ModeInputProps) {
   const theme = useCarnetTheme();
-  if (mode === "idea") {
+  if (isSaveFirstTextMode(mode)) {
     return (
       <View style={styles.ideaBlock}>
         <View style={styles.voiceRow}>

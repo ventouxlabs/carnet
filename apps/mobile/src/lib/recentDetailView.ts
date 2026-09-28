@@ -12,12 +12,15 @@
  */
 
 import type { CaptureEntry } from "./storage";
+import type { NoteSubdir } from "./noteSubdirs";
 
-/** Human label for a capture mode, used in the File info dialog. */
+/** Human label for a capture mode — the File info dialog and the Capture screen's header title. */
 export function formatMode(mode: CaptureEntry["mode"]): string {
   switch (mode) {
     case "idea":
       return "Idea";
+    case "note":
+      return "Note";
     case "journal":
       return "Journal";
     case "person":
@@ -132,11 +135,10 @@ export function noteCapabilities(
  * Vault subdir for a capture mode. Sharpens the related-notes self-exclusion
  * (see RelatedQuery docs) — the mode maps 1:1 onto the subdir.
  */
-export function relatedSubdirForMode(
-  mode: CaptureEntry["mode"],
-): "Journal" | "People" | "Ideas" {
+export function relatedSubdirForMode(mode: CaptureEntry["mode"]): NoteSubdir {
   if (mode === "journal") return "Journal";
   if (mode === "person") return "People";
+  if (mode === "note") return "Notes";
   return "Ideas";
 }
 

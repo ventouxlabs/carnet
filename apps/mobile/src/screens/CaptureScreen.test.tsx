@@ -10,6 +10,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { PaperProvider } from "react-native-paper";
 
 import { carnetLight } from "../lib/theme";
+import type { CaptureMode } from "../lib/storage";
 
 // Native speech stack — irrelevant here; the ref API must exist.
 vi.mock("../voice/VoiceButton", async () => {
@@ -148,7 +149,7 @@ function makeNavigation() {
   };
 }
 
-function renderScreen(mode: "idea" | "journal" | "person" = "idea") {
+function renderScreen(mode: CaptureMode = "idea") {
   const navigation = makeNavigation();
   render(
     <PaperProvider theme={carnetLight}>
@@ -972,5 +973,27 @@ describe("CaptureScreen (journal) — places", () => {
     expect(body).toContain("## Places");
     expect(body).toContain("[Rud-Alpe](geo:47.2011,10.1166)");
     expect(body).toContain("[Lech](geo:47.2063,10.1435)");
+  });
+});
+
+// ── Modes this screen must never route into Contact ───────────────────────────
+
+describe("CaptureScreen — no Contact fallthrough", () => {
+  it("renders a note on the text surface, never the Contact card scanner", async () => {
+    renderScreen("note");
+    expect(await screen.findByPlaceholderText("What's on your mind?")).toBeTruthy();
+    expect(screen.queryByText("Scan card")).toBeNull();
+  });
+
+  it("does nothing for a mode the screen doesn't serve (a malformed carnet://capture/:mode)", async () => {
+    // photo/audio have their own screens. Before the explicit guard, submit's
+    // unconditional person fallthrough ran Contact enrichment for ANY mode.
+    renderScreen("photo");
+    const input = await screen.findByPlaceholderText("Card text — scan or type");
+    fireEvent.change(input, { target: { value: "not a card" } });
+    fireEvent.click(screen.getByText("Send"));
+    expect(await screen.findByText("Send")).toBeTruthy(); // back to input
+    expect(enrichPerson).not.toHaveBeenCalled();
+    expect(writeRawIdea).not.toHaveBeenCalled();
   });
 });
