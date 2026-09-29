@@ -370,3 +370,68 @@ describe("reEnrichNoteInPlace", () => {
     expect(out.kind).toBe("failed");
   });
 });
+
+// ── note mode (note-capture-mode Task 7) ─────────────────────────────────────
+
+const CAPTURED_NOTE = `---
+created: 2026-09-27
+tags: [note, errands]
+---
+# Weekend errands
+
+- [ ] call the dentist
+`;
+
+const SYNTHESIS = `---
+created: 2026-09-13
+tags: [synthesis]
+question: "what have I been thinking about"
+---
+# what have I been thinking about
+
+You wrote about kites.
+`;
+
+describe("note mode", () => {
+  it("treats a captured note as re-enrichable — one note per file, like idea", () => {
+    expect(isReEnrichableMode("note")).toBe(true);
+  });
+
+  it("re-enriches a captured note through the note prompt, never the Person prompt", async () => {
+    mockReadNote.mockResolvedValue(CAPTURED_NOTE);
+    const out = await reEnrichNoteInPlace({ body: CAPTURED_NOTE, filepath: "n.md", mode: "note" });
+    expect(out.kind).toBe("updated");
+    expect(mockEnrich.mock.calls[0][0].mode).toBe("note");
+    expect(mockEnrich.mock.calls[0][0].tags).toEqual(["note", "errands"]);
+    expect(mockPerson).not.toHaveBeenCalled();
+  });
+
+  it("threads the frozen vault context into a note re-enrich", async () => {
+    mockReadNote.mockResolvedValue(CAPTURED_NOTE);
+    const vaultContext = { profileId: "a", rootUri: "file:///vault-a" };
+    await reEnrichNoteInPlace({ body: CAPTURED_NOTE, filepath: "n.md", mode: "note", vaultContext });
+    expect(mockEnrich.mock.calls[0][0].vaultContext).toEqual(vaultContext);
+  });
+
+  it("refuses a saved Ask answer AFTER reading the disk, even if the caller's snapshot looked like a note", async () => {
+    // RecentDetail gates on isSynthesisNote(body), but body is "" until the
+    // note loads; this is the backstop, and it reads the CURRENT file.
+    mockReadNote.mockResolvedValue(SYNTHESIS);
+    const out = await reEnrichNoteInPlace({ body: CAPTURED_NOTE, filepath: "s.md", mode: "note" });
+    expect(out.kind).toBe("failed");
+    if (out.kind === "failed") expect(out.reason).toMatch(/saved answer/i);
+    expect(mockReadNote).toHaveBeenCalledWith("s.md");
+    expect(mockEnrich).not.toHaveBeenCalled();
+    expect(mockPerson).not.toHaveBeenCalled();
+  });
+
+  it("finishes a pending Note with the note prompt", async () => {
+    await finishPendingEnrichment({ body: PENDING, filepath: "f.md", mode: "note" });
+    expect(mockEnrich.mock.calls[0][0].mode).toBe("note");
+  });
+
+  it("finishes a pending note with no mode as an idea, exactly as before", async () => {
+    await finishPendingEnrichment({ body: PENDING, filepath: "f.md" });
+    expect(mockEnrich.mock.calls[0][0].mode).toBe("idea");
+  });
+});

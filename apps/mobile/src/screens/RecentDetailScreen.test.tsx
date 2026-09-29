@@ -127,7 +127,7 @@ vi.mock("../components/PhotoAttachModal", async () => {
 // here; their real behavior is covered in lib/finishEnrichment.test.ts.
 vi.mock("../lib/finishEnrichment", () => ({
   isPendingEnrich: (body: string) => body.includes("status: pending-enrich"),
-  isReEnrichableMode: (mode: string) => ["idea", "person"].includes(mode),
+  isReEnrichableMode: (mode: string) => ["idea", "person", "note"].includes(mode),
   finishPendingEnrichment: vi.fn(async () => ({
     kind: "updated",
     markdown: "---\n---\n# Finished\n\nFinished body.\n",
@@ -543,6 +543,10 @@ const ENRICHED_MD =
   "---\ncreated: 2026-07-08T11:55:46.000Z\nstatus: seedling\ntags: [qa-test]\n---\n# Draft Survival Test\n\nHello body text.\n";
 const SYNTHESIS_MD =
   '---\ncreated: 2026-09-13\ntags: [synthesis]\nquestion: "what have I been thinking about"\n---\n# what have I been thinking about\n\nHello body text.\n';
+const CAPTURED_NOTE_MD =
+  "---\ncreated: 2026-09-27\ntags: [note, errands]\n---\n# Weekend errands\n\nHello body text.\n\n- [ ] call the dentist\n";
+const PENDING_NOTE_MD =
+  "---\ncreated: 2026-09-27T10:00:00.000Z\nstatus: pending-enrich\nrev: abc\n---\nHello body text.\n- [ ] call the dentist\n";
 
 describe("RecentDetailScreen — re-enrich family", () => {
   // clearAllMocks clears calls, not implementations — restate the default note
@@ -651,12 +655,13 @@ describe("RecentDetailScreen — re-enrich family", () => {
     expect(screen.queryByText("Re-enrich")).toBeNull();
   });
 
-  it("does not offer Re-enrich for a synthesis note in Notes/, even though its mode reports idea", async () => {
-    // inferNoteMode falls back to "idea" for Notes/ (no CaptureMode variant
-    // exists for it yet), so isReEnrichableMode(entry.mode) alone would wrongly
-    // pass. Re-enrich on a synthesis note would run the idea prompt over a
-    // computed answer and overwrite it — must be gated by the uri, not mode.
-    vi.mocked(readNote).mockResolvedValue(ENRICHED_MD);
+  it("does not offer Re-enrich for a saved answer whose entry still says idea (cached row)", async () => {
+    // Rewritten for note capture mode: the old premise — hide Re-enrich for
+    // ANY Notes/ note — is wrong now that Notes/ holds captured notes too (the
+    // next test). A saved Ask answer is what must stay hidden, decided by its
+    // frontmatter. mode "idea" here is a recents/cached-index row written
+    // before Notes/ mapped to "note".
+    vi.mocked(readNote).mockResolvedValue(SYNTHESIS_MD);
     const { navigation } = renderScreen({
       ...ENTRY,
       mode: "idea",
@@ -667,6 +672,42 @@ describe("RecentDetailScreen — re-enrich family", () => {
 
     expect(await screen.findByText("File info")).toBeTruthy();
     expect(screen.queryByText("Re-enrich")).toBeNull();
+  });
+
+  it("offers Re-enrich on a captured note in Notes/ and re-enriches it as a note", async () => {
+    vi.mocked(readNote).mockResolvedValue(CAPTURED_NOTE_MD);
+    const note: CaptureEntry = { ...ENTRY, mode: "note", filepath: "file:///v/Notes/weekend-errands.md" };
+    const { navigation } = renderScreen(note);
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Re-enrich"));
+
+    await waitFor(() =>
+      expect(reEnrichNoteInPlace).toHaveBeenCalledWith({
+        body: CAPTURED_NOTE_MD,
+        filepath: note.filepath,
+        mode: "note",
+        vaultContext: expect.objectContaining({ profileId: "default" }),
+      }),
+    );
+  });
+
+  it("Finish enrichment passes the note's mode, so a pending Note never gets the idea prompt", async () => {
+    vi.mocked(readNote).mockResolvedValue(PENDING_NOTE_MD);
+    const { navigation } = renderScreen({
+      ...ENTRY,
+      mode: "note",
+      filepath: "file:///v/Notes/call-the-dentist.md",
+    });
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Finish enrichment"));
+
+    await waitFor(() =>
+      expect(finishPendingEnrichment).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "note" }),
+      ),
+    );
   });
 
   it("surfaces a failed re-enrich as a banner instead of replacing the body", async () => {

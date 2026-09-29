@@ -32,10 +32,11 @@ export function parentSegment(uri: string): string | undefined {
  * The vault subdir a note actually lives in, read from its uri.
  *
  * Authoritative where `inferNoteMode` (vault.ts) is not: mode collapses every
- * unknown parent to "idea", which is right for display but wrong for any
- * decision that branches on folder identity (related-notes self-exclusion,
- * whether a note has an in-place re-enrichment path). Returns null outside
- * the known note subdirs.
+ * unknown parent to "idea" and can lag a cached row, which is fine for display
+ * but wrong for any decision that branches on folder identity (related-notes
+ * self-exclusion). Re-enrichability is NOT a folder question any more —
+ * Notes/ holds captured notes and saved answers alike; see isSynthesisNote
+ * (frontmatter.ts). Returns null outside the known note subdirs.
  */
 export function subdirForUri(uri: string): NoteSubdir | null {
   const parent = parentSegment(uri);
