@@ -997,3 +997,77 @@ describe("CaptureScreen — no Contact fallthrough", () => {
     expect(writeRawIdea).not.toHaveBeenCalled();
   });
 });
+
+// ── Note capture (note-capture-mode Task 8) ───────────────────────────────────
+
+describe("CaptureScreen (note)", () => {
+  // The Edit test at ~:836 installs a PERSISTENT enrichIdeaInPlace
+  // implementation (mockReturnValue(deferred)), and vi.clearAllMocks keeps
+  // implementations — without this reset every test appended after it
+  // inherits a never-resolving enrichment. Restore the factory default.
+  beforeEach(() => {
+    vi.mocked(enrichIdeaInPlace).mockReset().mockResolvedValue({
+      kind: "updated",
+      markdown: "---\n---\n# My Idea\n\nmy idea\n",
+    });
+  });
+
+  it("save-first Send writes the raw note as a note and enriches it with the note prompt", async () => {
+    const { navigation } = renderScreen("note");
+    const input = await screen.findByPlaceholderText("What's on your mind?");
+    fireEvent.change(input, { target: { value: "Weekend errands\n- [ ] call the dentist" } });
+    fireEvent.click(screen.getByText("Send"));
+
+    await waitFor(() => expect(navigation.goBack).toHaveBeenCalled());
+    expect(writeRawIdea).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "note", text: "Weekend errands\n- [ ] call the dentist" }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(enrichIdeaInPlace).toHaveBeenCalledWith(expect.objectContaining({ mode: "note" }));
+    expect(recordCapture).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "note", title: "Weekend errands" }),
+      "default",
+    );
+    expect(enrichIdea).not.toHaveBeenCalled();
+    expect(enrichPerson).not.toHaveBeenCalled();
+    expect(clearDraft).toHaveBeenCalledWith("note", "default");
+  });
+
+  it("stays save-first with previewBeforeSave on — a Note never enters the idea preview", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      previewBeforeSave: true,
+    } as Awaited<ReturnType<typeof getSettings>>);
+    const { navigation } = renderScreen("note");
+    const input = await screen.findByPlaceholderText("What's on your mind?");
+    fireEvent.change(input, { target: { value: "- [ ] call the dentist" } });
+    fireEvent.click(screen.getByText("Send"));
+
+    await waitFor(() => expect(navigation.goBack).toHaveBeenCalled());
+    expect(writeRawIdea).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "note", text: "- [ ] call the dentist" }),
+      expect.anything(),
+      expect.anything(),
+    );
+    // The preview path's blocking enrichIdea (→ confirmSaveIdea → Ideas/) never runs.
+    expect(enrichIdea).not.toHaveBeenCalled();
+  });
+
+  it("queues a transient enrichment failure as a note row, never an idea row", async () => {
+    vi.mocked(enrichIdeaInPlace).mockResolvedValueOnce({
+      kind: "failed",
+      transient: true,
+      reason: "network down",
+    });
+    renderScreen("note");
+    const input = await screen.findByPlaceholderText("What's on your mind?");
+    fireEvent.change(input, { target: { value: "- [ ] call the dentist" } });
+    fireEvent.click(screen.getByText("Send"));
+
+    await waitFor(() =>
+      expect(enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "note", text: "- [ ] call the dentist" }),
+      ),
+    );
+  });
+});

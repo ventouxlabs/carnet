@@ -6,7 +6,7 @@ import * as Haptics from "expo-haptics";
 import { MIN_TAP_TARGET, useCarnetTheme } from "../lib/theme";
 
 export type CaptureTarget =
-  | { kind: "capture"; mode: "idea" | "journal" | "person" }
+  | { kind: "capture"; mode: "idea" | "note" | "journal" | "person" }
   | { kind: "photo" }
   | { kind: "audio" };
 
@@ -22,6 +22,13 @@ const SHEET_ROWS: Array<{
   icon: string;
   target: CaptureTarget;
 }> = [
+  {
+    key: "note",
+    title: "Note",
+    description: "A task list or working notes",
+    icon: "checkbox-marked-outline",
+    target: { kind: "capture", mode: "note" },
+  },
   {
     key: "journal-today",
     title: "Continue today's journal",

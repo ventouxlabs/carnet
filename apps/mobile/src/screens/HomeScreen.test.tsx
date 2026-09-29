@@ -218,6 +218,16 @@ describe("HomeScreen", () => {
     );
   });
 
+  it("the chevron sheet offers a Note capture", async () => {
+    const { navigation } = renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    fireEvent.click(screen.getByLabelText("More capture modes"));
+    fireEvent.click(await screen.findByText("A task list or working notes"));
+    await waitFor(() =>
+      expect(navigation.navigate).toHaveBeenCalledWith("Capture", { mode: "note" }),
+    );
+  });
+
   it("shows no Karakeep banner when nothing is waiting", async () => {
     renderScreen();
     await screen.findByText("Jack's Baseball Team");

@@ -47,7 +47,7 @@ import { saveFirstModeOf, type SaveFirstTextMode } from "./saveFirstRouting";
 
 // Defined in the leaf ./saveFirstRouting (its header says why); re-exported so
 // this module's API still names the whole save-first surface.
-export { isSaveFirstTextMode, saveFirstModeOf, type SaveFirstTextMode } from "./saveFirstRouting";
+export { isSaveFirstTextMode, saveFirstModeOf, usesSaveFirst, type SaveFirstTextMode } from "./saveFirstRouting";
 
 /** Frontmatter `status` value stamped on the raw note before enrichment lands.
  * Enrichment overwrites the whole note (including this) with the LLM result. */
@@ -124,15 +124,6 @@ function assertReceiptIsIdeaOnly(input: RawCaptureInput): void {
   if (input.receiptId !== undefined && saveFirstModeOf(input) !== "idea") {
     throw new Error("A Drive Inbox receipt can only be written as an idea.");
   }
-}
-
-/**
- * Decide whether Idea capture uses the save-first path. Save-first is the
- * default; `previewBeforeSave` (a Settings flag) restores the old blocking
- * enrich → preview → Save flow. Journal and Person never call this.
- */
-export function usesSaveFirst(previewBeforeSave: boolean): boolean {
-  return !previewBeforeSave;
 }
 
 /**

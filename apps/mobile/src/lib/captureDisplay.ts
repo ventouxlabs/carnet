@@ -10,7 +10,9 @@
 
 import type { CaptureMode } from "./storage";
 import type { PickedAttachment } from "./attachments";
-import type { CaptureResponse } from "@carnet/shared";
+import { deriveTitle, type CaptureResponse } from "@carnet/shared";
+import { formatMode } from "./recentDetailView";
+import { isSaveFirstTextMode, type SaveFirstTextMode } from "./saveFirstRouting";
 
 /** The capture screen's phase machine: distraction-free input, an
  * enrichment request in flight, the blocking preview (opt-in Idea, and
@@ -77,7 +79,8 @@ export interface CanSubmitInputs {
 export function computeCanSubmit(inputs: CanSubmitInputs): boolean {
   const { phase, mode, text, transcript, ocrText } = inputs;
   if (phase !== "input") return false;
-  if (mode === "idea") return text.trim().length > 0;
+  // Idea and Note share one text surface (CaptureModeInput) — only `text` counts.
+  if (isSaveFirstTextMode(mode)) return text.trim().length > 0;
   if (mode === "journal") return transcript.trim().length > 0 || text.trim().length > 0;
   return ocrText.trim().length > 0 || text.trim().length > 0;
 }
@@ -96,4 +99,10 @@ export function buildCapturePreviewResponse(
     preview_markdown: markdown,
     filepath,
   };
+}
+
+/** Recents-history title for a save-first capture: the raw text's H1 or first
+ * line, else the mode's own label — an emoji-only Note is "Note", not "Idea". */
+export function saveFirstTitle(text: string, mode: SaveFirstTextMode = "idea"): string {
+  return deriveTitle(text) || formatMode(mode);
 }

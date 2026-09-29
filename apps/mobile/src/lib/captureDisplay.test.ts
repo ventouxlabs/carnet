@@ -4,6 +4,7 @@ import {
   buildMetaSummary,
   buildCapturePreviewResponse,
   computeCanSubmit,
+  saveFirstTitle,
 } from "./captureDisplay";
 import type { PickedAttachment } from "./attachments";
 
@@ -149,5 +150,24 @@ describe("computeCanSubmit", () => {
     expect(
       computeCanSubmit({ phase: "input", mode: "person", text: "", transcript: "", ocrText: "scanned" }),
     ).toBe(true);
+  });
+});
+
+describe("computeCanSubmit — note", () => {
+  it("needs non-blank text, like idea; stray OCR text never enables it", () => {
+    expect(computeCanSubmit({ phase: "input", mode: "note", text: "", transcript: "", ocrText: "" })).toBe(false);
+    expect(computeCanSubmit({ phase: "input", mode: "note", text: "   ", transcript: "", ocrText: "" })).toBe(false);
+    expect(computeCanSubmit({ phase: "input", mode: "note", text: "- [ ] x", transcript: "", ocrText: "" })).toBe(true);
+    // Under the Contact rule this was true.
+    expect(computeCanSubmit({ phase: "input", mode: "note", text: "", transcript: "", ocrText: "scanned" })).toBe(false);
+  });
+});
+
+describe("saveFirstTitle", () => {
+  it("uses the text's first line, else the mode's own name", () => {
+    expect(saveFirstTitle("Weekend errands\n- [ ] x", "note")).toBe("Weekend errands");
+    expect(saveFirstTitle("", "note")).toBe("Note");
+    expect(saveFirstTitle("", "idea")).toBe("Idea");
+    expect(saveFirstTitle("")).toBe("Idea");
   });
 });
