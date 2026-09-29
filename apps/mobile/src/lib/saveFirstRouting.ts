@@ -19,3 +19,10 @@ export type SaveFirstTextMode = Extract<CaptureMode, "idea" | "note">;
 export function isSaveFirstTextMode(mode: CaptureMode): mode is SaveFirstTextMode {
   return mode === "idea" || mode === "note";
 }
+
+/** The mode a save-first input routes as. Absent means idea — every caller
+ * that predates Note (notificationQuickIdea's quick-reply and Drive Inbox
+ * path, persisted queue rows) builds its input without one. */
+export function saveFirstModeOf(input: { mode?: SaveFirstTextMode }): SaveFirstTextMode {
+  return input.mode ?? "idea";
+}

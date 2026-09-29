@@ -118,12 +118,14 @@ vi.mock("expo-file-system/legacy", () => ({
 // ── Mock llmClient (dispatcher imports enrichIdea + error classifiers from it) ─
 
 const enrichIdeaMock = vi.fn();
+const enrichNoteMock = vi.fn();
 const isPermanentErrorMock = vi.fn().mockReturnValue(false);
 const isNotConfiguredErrorMock = vi.fn().mockReturnValue(false);
 const isInsecureTransportErrorMock = vi.fn().mockReturnValue(false);
 
 vi.mock("./llmClient", () => ({
   enrichIdea: (...args: unknown[]) => enrichIdeaMock(...args),
+  enrichNote: (...args: unknown[]) => enrichNoteMock(...args),
   isPermanentError: (...args: unknown[]) => isPermanentErrorMock(...args),
   isNotConfiguredError: (...args: unknown[]) => isNotConfiguredErrorMock(...args),
   isInsecureTransportError: (...args: unknown[]) => isInsecureTransportErrorMock(...args),
@@ -146,12 +148,14 @@ import {
   enrichIdeaInPlace,
   PENDING_ENRICH_STATUS,
   rewriteRawIdea,
+  type RawCaptureInput,
   usesSaveFirst,
   writeRawIdea,
 } from "./ideaSaveFirst";
 import { getModificationTime, updateNoteIfUnchanged, readNote } from "./writer";
 import { extractFrontmatterField } from "./frontmatter";
 import { getVaultTagStrings } from "./vaultTagHint";
+import { resolveProfileRoot } from "./vaultRoot";
 
 function clearFiles(): void {
   _files.clear();
@@ -161,6 +165,7 @@ function clearFiles(): void {
 beforeEach(() => {
   clearFiles();
   enrichIdeaMock.mockReset();
+  enrichNoteMock.mockReset();
   vi.mocked(getVaultTagStrings).mockReset().mockResolvedValue([]);
   isPermanentErrorMock.mockReturnValue(false);
   isNotConfiguredErrorMock.mockReturnValue(false);
@@ -640,5 +645,101 @@ describe("applyEnrichedIdea — frontmatter preservation", () => {
     expect(content).toContain("# Kite v2");
     // The model's own values still win.
     expect(content).toContain("created: 2026-07-05");
+  });
+});
+
+// ── note mode (note-capture-mode Task 5) ─────────────────────────────────────
+
+describe("save-first note mode", () => {
+  const NOTE_MD =
+    "---\ncreated: 2026-09-27\ntags: [note, errands]\n---\n# Weekend errands\n\n- [ ] call the dentist\n";
+
+  it("writes a raw note under Notes/, not Ideas/", async () => {
+    const { filepath, markdown } = await writeRawIdea({
+      mode: "note",
+      text: "Weekend errands\n- [ ] call the dentist",
+      tags: [],
+    });
+    expect(filepath).toBe("file:///data/carnet/Notes/weekend-errands.md");
+    expect(markdown).toContain(`status: ${PENDING_ENRICH_STATUS}`);
+    expect(markdown).toContain("- [ ] call the dentist");
+  });
+
+  it("writes a raw note into the pinned vault root", async () => {
+    const root = resolveProfileRoot({ rootUri: "file:///data/work-vault" });
+    const { filepath } = await writeRawIdea({ mode: "note", text: "pinned", tags: [] }, undefined, root);
+    expect(filepath).toBe("file:///data/work-vault/Notes/pinned.md");
+  });
+
+  it("still writes an idea under Ideas/ when no mode is given", async () => {
+    const { filepath } = await writeRawIdea({ text: "Build a kite", tags: [] });
+    expect(filepath).toBe("file:///data/carnet/Ideas/build-a-kite.md");
+  });
+
+  it("falls back to the mode's name for text that slugifies to nothing", () => {
+    expect(deriveRawIdeaSlug("🚀", "note")).toBe("note");
+    expect(deriveRawIdeaSlug("🚀")).toBe("idea");
+  });
+
+  it("enriches a note through the note prompt and never the idea prompt", async () => {
+    const { filepath, mtime } = await writeRawIdea({ mode: "note", text: "call the dentist", tags: [] });
+    enrichNoteMock.mockResolvedValue({ markdown: NOTE_MD, model: "test" });
+
+    const outcome = await enrichIdeaInPlace({
+      mode: "note",
+      filepath,
+      expectedMtime: mtime,
+      text: "call the dentist",
+      tags: [],
+    });
+
+    expect(outcome).toEqual({ kind: "updated", markdown: NOTE_MD });
+    expect(enrichNoteMock).toHaveBeenCalledTimes(1);
+    expect(enrichIdeaMock).not.toHaveBeenCalled();
+    expect(_files.get(filepath)!.content).toBe(NOTE_MD);
+  });
+
+  it("uses the note's captured profile tags after the active profile changes", async () => {
+    const { filepath, mtime } = await writeRawIdea({ mode: "note", text: "personal note", tags: [] });
+    vi.mocked(getVaultTagStrings).mockImplementation(async (profileIdOrLimit?: string | number) =>
+      typeof profileIdOrLimit === "string" && profileIdOrLimit === "personal"
+        ? ["personal-only"]
+        : ["work-secret"],
+    );
+    enrichNoteMock.mockResolvedValue({ markdown: NOTE_MD, model: "test" });
+
+    await enrichIdeaInPlace({
+      mode: "note",
+      filepath,
+      expectedMtime: mtime,
+      text: "personal note",
+      tags: [],
+      vaultContext: { profileId: "personal", rootUri: "file:///personal" },
+    });
+
+    expect(getVaultTagStrings).toHaveBeenCalledWith("personal");
+    expect(enrichNoteMock.mock.calls[0]?.[0]).toBe("personal note");
+    expect(enrichNoteMock.mock.calls[0]?.[3]).toEqual(["personal-only"]);
+  });
+
+  it("refuses a Drive Inbox receipt on a note at compile time", () => {
+    // @ts-expect-error — receipts are idea-only (findReceiptRawNote scans Ideas/ only)
+    const bad: RawCaptureInput = { mode: "note", text: "car reply", tags: [], receiptId: "55555555-5555-5555-5555-555555555555" };
+    expect(bad.mode).toBe("note");
+  });
+
+  it("refuses a Drive Inbox receipt on a note at runtime, before anything is written", async () => {
+    // Headless-task data crosses the native bridge untyped; the type alone
+    // cannot hold the line.
+    const bad = {
+      mode: "note",
+      text: "car reply",
+      tags: [],
+      receiptId: "55555555-5555-5555-5555-555555555555",
+    } as unknown as RawCaptureInput;
+    await expect(writeRawIdea(bad)).rejects.toThrow(
+      "A Drive Inbox receipt can only be written as an idea.",
+    );
+    expect(_files.size).toBe(0);
   });
 });
