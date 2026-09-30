@@ -100,6 +100,42 @@ describe("item 1 — inline Dataview spans made inert", () => {
   });
 });
 
+// ── Review MEDIUM-7 (human decision 2026-09-30): code blocks run as queries ──
+// Dataview's default `inlineQueriesInCodeblocks: true` evaluates a whole code
+// block whose text, trimmed, starts with `=` / `$=`. Such a block gets the
+// inert marker on its FIRST content line only; every other block is untouched.
+
+describe("review MEDIUM-7 — code blocks that would run as queries", () => {
+  const cases: Array<[string, string, string]> = [
+    ["backtick fence", "```js\n= this.file.name\n```\n", "```js\ninert: = this.file.name\n```\n"],
+    ["leading blank line, `$=`", "```text\n\n  $= dv.el('b','x')\nmore\n```", "```text\n\n  inert: $= dv.el('b','x')\nmore\n```"],
+    ["renamed dataviewjs", "```dataviewjs\n= x\n```", "```text\ninert: = x\n```"],
+    ["tilde fence", "~~~\n= x\n~~~", "~~~\ninert: = x\n~~~"],
+    ["list-item fence", "- ```js\n  = x\n  ```", "- ```js\n  inert: = x\n  ```"],
+    ["callout fence", "> ```\n> = x\n> ```", "> ```\n> inert: = x\n> ```"],
+    ["indented code block", "para\n\n    = this.file.name\n", "para\n\n    inert: = this.file.name\n"],
+    ["indented code block after a heading", "# H\n    = x\n", "# H\n    inert: = x\n"],
+    ["indented code block after a rule", "a\n\n***\n    $= x\n", "a\n\n***\n    inert: $= x\n"],
+  ];
+  for (const [name, input, expected] of cases) {
+    it(`makes a ${name} inert on its first content line`, () => {
+      expect(s(input)).toBe(expected);
+      expect(s(expected)).toBe(expected);
+    });
+  }
+
+  it("leaves every other code block byte-identical", () => {
+    for (const block of [
+      "```js\nconst a = 1;\n= later line\n```\n",
+      "```js\nconst s = `=${a}`;\n```\n",
+      "para\n    = lazy continuation, not code\n",
+      "```\n```\n= prose after an empty fence\n",
+    ]) {
+      expect(s(block), JSON.stringify(block)).toBe(block);
+    }
+  });
+});
+
 // ── Item 3: a fence line in the frontmatter must not hide the body ────────────
 
 describe("item 3 — frontmatter-aware fence scan", () => {

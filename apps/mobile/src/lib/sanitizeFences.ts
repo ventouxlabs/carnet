@@ -46,7 +46,7 @@ const CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 /** A lenient closer: the fence run behind any indentation. */
 const LENIENT_CLOSE = /^\s*(`{3,}|~{3,})\s*$/;
 
-interface Fence {
+export interface Fence {
   char: string;
   len: number;
 }
@@ -69,7 +69,7 @@ export function isFenceLike(line: string): boolean {
   return FENCE_ANY_PREFIX.test(line);
 }
 
-function certainOpener(line: string): Fence | null {
+export function certainOpener(line: string): Fence | null {
   const match = CERTAIN_OPEN.exec(line);
   if (!match) return null;
   const [, marker, info] = match;
@@ -77,9 +77,23 @@ function certainOpener(line: string): Fence | null {
   return { char: marker[0], len: marker.length };
 }
 
-function closes(line: string, fence: Fence, mode: ScanMode): boolean {
-  const match = (mode.lenientClose ? LENIENT_CLOSE : CLOSE).exec(line);
+/** Does `line` close `fence`? Lenient: behind any indentation. */
+export function closesFence(line: string, fence: Fence, lenient: boolean): boolean {
+  const match = (lenient ? LENIENT_CLOSE : CLOSE).exec(line);
   return match !== null && match[1][0] === fence.char && match[1].length >= fence.len;
+}
+
+function closes(line: string, fence: Fence, mode: ScanMode): boolean {
+  return closesFence(line, fence, mode.lenientClose);
+}
+
+/** A fence marker behind any container prefix; `info` is the rest of the line. */
+export function containerFence(line: string): { fence: Fence; info: string } | null {
+  const match = FENCE_ANY_PREFIX.exec(line);
+  if (!match) return null;
+  const [, , marker, info] = match;
+  if (marker[0] === "`" && info.includes("`")) return null;
+  return { fence: { char: marker[0], len: marker.length }, info };
 }
 
 /** Where an HTML / comment / math block ends: a marker, or a blank line. */

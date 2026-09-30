@@ -25,7 +25,8 @@
 
 import { htmlSpanMatcher } from "./inlineHtml";
 
-const INERT_MARKER = "inert: ";
+/** Inserted before a live query so it no longer starts with a prefix. */
+export const INERT_MARKER = "inert: ";
 
 interface Range {
   start: number;

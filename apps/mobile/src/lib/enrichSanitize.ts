@@ -34,6 +34,7 @@
 
 import { parseFrontmatter, splitFrontmatter } from "./frontmatter";
 import { certainlyFencedLines, isFenceLike, renameExecutableFence } from "./sanitizeFences";
+import { makeCodeBlockQueriesInert } from "./sanitizeCodeBlocks";
 import { makeInlineQueriesInert } from "./sanitizeInlineCode";
 
 export type NoteType = "idea" | "journal" | "person" | "shared";
@@ -110,7 +111,7 @@ interface SanitizeMode {
 const NOTE_MODE: SanitizeMode = { pass: sanitizePass, failClosed };
 const BODY_MODE: SanitizeMode = {
   pass: sanitizeBodyPass,
-  failClosed: (text) => defuseLeadingRule(failClosed(text)),
+  failClosed: (text) => defuseLeadingRule(neutralizeLinks(structureBody(bluntTriggers(text)))),
 };
 
 /** Repeat a pass to a fixed point; fail closed at the cap. */
@@ -139,15 +140,31 @@ const MAX_PASSES = 8;
  * result is inert AND itself a fixed point (idempotence holds here too):
  * `<` is escaped (no tag, no Templater, no raw <code>), every backtick becomes
  * U+02CB ˋ (no code span, no backtick fence), the `=` after an on* name is
- * entity-encoded (that rule needs no `<` to fire), executable ~~~ fences are
- * renamed, and the link rules run once more.
+ * entity-encoded (that rule needs no `<` to fire), then the body gets the
+ * same line-structural rewrites a pass applies (executable ~~~ fences
+ * renamed, query code blocks made inert) and the link rules run once more —
+ * header and body separately, as a pass sees them.
  */
 function failClosed(text: string): string {
-  const blunt = text
+  const { header, body } = splitFrontmatter(bluntTriggers(text));
+  return neutralizeLinks(header) + neutralizeLinks(structureBody(body));
+}
+
+function bluntTriggers(text: string): string {
+  return text
     .replace(/</g, "&lt;")
     .replace(/`/g, "\u02CB")
     .replace(/(on[a-z]+\s*)=/gi, "$1&#61;");
-  return neutralizeLinks(blunt.split("\n").map(renameExecutableFence).join("\n"));
+}
+
+/** The line-structural body rewrites: rename executable fences, then make
+ * code blocks that Dataview would run as queries inert. */
+function structureBody(body: string): string {
+  return structureBodyLines(body.split("\n")).join("\n");
+}
+
+function structureBodyLines(lines: readonly string[]): string[] {
+  return makeCodeBlockQueriesInert(lines.map(renameExecutableFence));
 }
 
 /**
@@ -209,11 +226,12 @@ function sanitizeHeader(header: string): string {
   return ["---", ...inner, "---"].join("\n") + (closedByNewline ? "\n" : "");
 }
 
-/** Rename executable fences everywhere, then neutralize every line that is not
- * certainly inside a fenced code block, one contiguous text run at a time (so
- * multi-line constructs such as a `<script>` body are seen whole). */
+/** Rename executable fences everywhere and make query code blocks inert, then
+ * neutralize every line that is not certainly inside a fenced code block, one
+ * contiguous text run at a time (so multi-line constructs such as a
+ * `<script>` body are seen whole). */
 function sanitizeBody(body: string): string {
-  const lines = body.split("\n").map(renameExecutableFence);
+  const lines = structureBodyLines(body.split("\n"));
   const fenced = certainlyFencedLines(lines);
   const runs: Array<{ fenced: boolean; lines: string[] }> = [];
   lines.forEach((line, i) => {
