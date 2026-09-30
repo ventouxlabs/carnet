@@ -50,6 +50,7 @@ import {
   buildRetrospectivePrompt,
   buildSharedImagePrompt,
   buildSharedLinkPrompt,
+  withInjectionGuard,
   withTagHint,
   type PromptPair,
 } from "./prompts";
@@ -120,7 +121,8 @@ export interface EnrichResult {
  *
  * The user message is never replaced — only the system. This preserves
  * the INJECTION_GUARD-protected delimiter shape that wraps user content,
- * even when the user has fully rewritten the system instructions.
+ * even when the user has fully rewritten the system instructions, and the
+ * guard itself is appended to the override (withInjectionGuard).
  */
 export function withSystemOverride(
   pair: PromptPair,
@@ -128,7 +130,7 @@ export function withSystemOverride(
 ): PromptPair {
   const trimmed = override?.trim() ?? "";
   if (!trimmed) return pair;
-  return { system: trimmed, user: pair.user };
+  return { system: withInjectionGuard(trimmed), user: pair.user };
 }
 
 /**
@@ -427,9 +429,12 @@ export async function enrichSharedImage(
   const { system: defaultSystem, userText } = buildSharedImagePrompt(input.context);
   // Multimodal user content can't go through withSystemOverride (which is
   // PromptPair-shaped), so the splice happens inline. Same null-safe rule:
-  // empty/whitespace override → default.
+  // empty/whitespace override → default; an override keeps the guard.
   const systemOverride = override?.trim() ?? "";
-  const system = withTagHint(systemOverride || defaultSystem, availableTags);
+  const system = withTagHint(
+    systemOverride ? withInjectionGuard(systemOverride) : defaultSystem,
+    availableTags,
+  );
   const dataUrl = `data:${safeMime};base64,${input.base64}`;
   const messages: OpenAIMessage[] = [
     { role: "system", content: system },

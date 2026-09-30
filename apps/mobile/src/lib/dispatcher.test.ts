@@ -114,6 +114,7 @@ import {
 import * as llmClient from "./llmClient";
 import { getSettings, getPromptOverrides } from "./settings";
 import { getVaultTagStrings } from "./vaultTagHint";
+import { withInjectionGuard } from "./prompts";
 
 function makeOkResponse(markdown: string, model = "test-model"): Response {
   const body = JSON.stringify({
@@ -522,7 +523,7 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
     const body = JSON.parse(init.body as string) as {
       messages: Array<{ content: string }>;
     };
-    expect(body.messages[0].content).toBe("OVERRIDE-IDEA-7f3a");
+    expect(body.messages[0].content).toBe(withInjectionGuard("OVERRIDE-IDEA-7f3a"));
   });
 
   it("enrichJournal forwards overrides.journal", async () => {
@@ -537,7 +538,7 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
     const body = JSON.parse(init.body as string) as {
       messages: Array<{ content: string }>;
     };
-    expect(body.messages[0].content).toBe("OVERRIDE-JOURNAL-9c1d");
+    expect(body.messages[0].content).toBe(withInjectionGuard("OVERRIDE-JOURNAL-9c1d"));
   });
 
   it("enrichPerson forwards overrides.person", async () => {
@@ -552,7 +553,7 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
     const body = JSON.parse(init.body as string) as {
       messages: Array<{ content: string }>;
     };
-    expect(body.messages[0].content).toBe("OVERRIDE-PERSON-2e8b");
+    expect(body.messages[0].content).toBe(withInjectionGuard("OVERRIDE-PERSON-2e8b"));
   });
 
   it("enrichSharedImage forwards overrides.sharedImage", async () => {
@@ -567,7 +568,7 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
     const body = JSON.parse(init.body as string) as {
       messages: Array<{ content: string }>;
     };
-    expect(body.messages[0].content).toBe("OVERRIDE-SHAREDIMAGE-4b6f");
+    expect(body.messages[0].content).toBe(withInjectionGuard("OVERRIDE-SHAREDIMAGE-4b6f"));
   });
 
   it("enrichSharedLink forwards overrides.sharedLink", async () => {
@@ -585,7 +586,7 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
     const body = JSON.parse(init.body as string) as {
       messages: Array<{ content: string }>;
     };
-    expect(body.messages[0].content).toBe("OVERRIDE-SHAREDLINK-5d0a");
+    expect(body.messages[0].content).toBe(withInjectionGuard("OVERRIDE-SHAREDLINK-5d0a"));
   });
 
   it("promoteIdea applies NO override — the current, correct behaviour", async () => {
