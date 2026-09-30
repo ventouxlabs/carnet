@@ -92,6 +92,12 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   `.claude/PRPs/prds/note-capture-mode.prd.md`; (2) `Notes/` intentionally holds two kinds
   of file, told apart by frontmatter (`isSynthesisNote`), not folder. Drive Inbox (Android
   Auto) stays idea-only. Plan: `.claude/PRPs/plans/note-capture-mode.plan.md`.
+  A line guard enforces "never expand" in code: if a reply drops, rewords, adds or
+  re-orders a line, the note keeps the model's title/tags over the user's own lines.
+  Follow-up (non-blocking, predates the guard): Finish/Re-enrich still send a note's
+  image-embed and `## Files` lines to the model, though they are re-added afterwards; a
+  reply that drops them trips the fallback and the note loses its checkboxes. Strip the
+  attachment lines from the enrichment input first (all re-enrichable modes).
 
 ## Security follow-ups (from the note-capture review, 2026-09-29) — pre-existing, all modes
 
