@@ -19,6 +19,8 @@ const BULLET = String.raw`(?:[-*+]|\d{1,9}[.)])`;
 const LINE_MARKER = new RegExp(String.raw`^(?:${BULLET} \[[ xX]\] |${BULLET} |#{1,6} )`);
 const TODO = new RegExp(String.raw`^${BULLET} \[[ xX]\] `);
 const CHECKED = new RegExp(String.raw`^${BULLET} \[[xX]\] `);
+/** A todo the Todos screen collects: checklist.ts CHECKLIST_LINE_RE's `-` only. */
+const COLLECTABLE = /^-[ \t]+\[[ xX]\][ \t]+/;
 const ATX_HEADING = /^#{1,6} /;
 const H1 = /^# /;
 /** A fence opener, as enrichSanitize.ts FENCE_OPEN reads one. */
@@ -29,6 +31,8 @@ interface BodyLine {
   readonly text: string;
   /** A `- [ ]` / `- [x]` todo (or `*`, `+`, `1.` — Obsidian renders them all). */
   readonly todo: boolean;
+  /** A `- [ ]` / `- [x]` todo specifically — the only kind Todos collects. */
+  readonly collectable: boolean;
   /** A ticked `- [x]` todo. */
   readonly checked: boolean;
   /** No marker at all: a plain line of text. */
@@ -51,6 +55,7 @@ function toBodyLine(line: string): BodyLine {
   return {
     text: trimmed.replace(LINE_MARKER, ""),
     todo: TODO.test(trimmed),
+    collectable: COLLECTABLE.test(trimmed),
     checked: CHECKED.test(trimmed),
     plain: !LINE_MARKER.test(trimmed),
     heading: ATX_HEADING.test(trimmed),
@@ -67,14 +72,15 @@ function bodyLines(text: string): BodyLine[] {
 
 /** Whether the reply's line keeps the user's: same words and the same ticked
  * state, and a todo stays a todo. A model may turn a plain or bulleted line
- * into `- [ ]`, but never tick one, un-tick a done one, strip a checkbox
- * (which would drop an open todo out of the Todos screen), or turn the user's
- * heading into a task. Directional. */
+ * into `- [ ]`, but never tick one, un-tick a done one, strip a checkbox or
+ * re-bullet a `- [ ]` as `*`/`1.` (either drops an open todo out of the Todos
+ * screen), or turn the user's heading into a task. Directional. */
 function keepsLine(user: BodyLine, reply: BodyLine): boolean {
   return (
     user.text === reply.text &&
     user.checked === reply.checked &&
     (!user.todo || reply.todo) &&
+    (!user.collectable || reply.collectable) &&
     !(user.heading && reply.todo)
   );
 }

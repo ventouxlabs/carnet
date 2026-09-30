@@ -110,6 +110,11 @@ describe("keepsUserLines — expansions fail", () => {
     expect(keepsUserLines("- [ ] buy stamps", `${FM}# buy stamps\n`)).toBe(false);
   });
 
+  it("fails a - [ ] todo re-bulleted as * or 1. — Todos only collects - [ ] lines", () => {
+    expect(keepsUserLines("- [ ] buy stamps", `${FM}# T\n\n* [ ] buy stamps\n`)).toBe(false);
+    expect(keepsUserLines("- [x] buy stamps", `${FM}# T\n\n1. [x] buy stamps\n`)).toBe(false);
+  });
+
   it("fails a heading turned into a todo", () => {
     const out = `${FM}- [ ] Errands\n- [ ] buy milk\n`;
     expect(keepsUserLines("# Errands\nbuy milk", out)).toBe(false);
