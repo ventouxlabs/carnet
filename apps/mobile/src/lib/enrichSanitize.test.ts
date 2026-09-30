@@ -240,12 +240,12 @@ describe("normalizeFrontmatter", () => {
     );
   });
 
-  it("appends unknown extra keys after the canonical ones", () => {
+  it("drops unknown extra keys (strict allowlist, B3 decision 1)", () => {
     const md =
       "---\ncreated: 2026-07-04\nstatus: seedling\ntags: [idea]\nsource: web\n---\n# T\n";
     const out = normalizeFrontmatter(md, "idea");
     expect(out).toBe(
-      "---\ncreated: 2026-07-04\nstatus: seedling\ntags: [idea]\nsource: web\n---\n# T\n",
+      "---\ncreated: 2026-07-04\nstatus: seedling\ntags: [idea]\n---\n# T\n",
     );
   });
 

@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { sanitizeAndNormalize, sanitizeMarkdown } from "./enrichSanitize";
+import { filterFrontmatterKeys, sanitizeAndNormalize, sanitizeMarkdown } from "./enrichSanitize";
 import { executeChat } from "./llmHttp";
 
 function ideaNote(body: string): string {
@@ -197,19 +197,19 @@ describe("item 2 — strict frontmatter allowlist on executeChat's two branches"
     return markdown;
   }
 
-  it.fails("compliant branch drops extra keys (dg-publish, publish, cssclasses)", async () => {
+  it("compliant branch drops extra keys (dg-publish, publish, cssclasses)", async () => {
     const md = await chat(
       "---\ncreated: 2026-07-04\nstatus: seedling\ntags: [idea]\ndg-publish: true\npublish: true\ncssclasses: [x]\n---\n# T\n",
     );
     expect(md).toBe("---\ncreated: 2026-07-04\nstatus: seedling\ntags: [idea]\n---\n# T\n");
   });
 
-  it.fails("fallback branch (missing required `status`) drops extra keys too", async () => {
+  it("fallback branch (missing required `status`) drops extra keys too", async () => {
     const md = await chat("---\ncreated: 2026-07-04\ntags: [idea]\ndg-publish: true\n---\n# T\n");
     expect(md).toBe("---\ncreated: 2026-07-04\ntags: [idea]\n---\n# T\n");
   });
 
-  it.fails("fallback branch denies quoted, explicit and spaced key forms", async () => {
+  it("fallback branch denies quoted, explicit and spaced key forms", async () => {
     const md = await chat(
       '---\ncreated: 2026-07-04\ntags:\n  - idea\n"dg-publish": true\n? publish\n: true\ndg publish: true\ncssclasses : [x]\n---\n# T\n',
     );
@@ -220,6 +220,27 @@ describe("item 2 — strict frontmatter allowlist on executeChat's two branches"
     const stub =
       '---\ncreated: 2026-09-30\nkind: shared-audio\nsource: "memo.m4a"\nmime: "audio/mp4"\nsize: 12\ntags: [shared, audio]\n---\n# Shared audio\n';
     expect(s(stub)).toBe(stub);
+  });
+});
+
+describe("filterFrontmatterKeys — deny by default at column 0", () => {
+  it("keeps a canonical note byte-for-byte", () => {
+    const md = "---\ndate: 2026-07-04\ntags: [journal]\npeople: []\nideas: []\n---\n# Day\n";
+    expect(filterFrontmatterKeys(md, "journal")).toBe(md);
+  });
+
+  it("drops a non-canonical key together with the lines under it", () => {
+    const md = "---\nname: Ada\ncssclasses:\n  - wide\n- loose\ntags:\n- person\n---\n# Ada\n";
+    expect(filterFrontmatterKeys(md, "person")).toBe("---\nname: Ada\ntags:\n- person\n---\n# Ada\n");
+  });
+
+  it("drops comment, flow and orphan lines before the first key", () => {
+    const md = "---\n  - orphan\n# comment\n{publish: true}\nkind: shared-link\n---\n# T\n";
+    expect(filterFrontmatterKeys(md, "shared")).toBe("---\nkind: shared-link\n---\n# T\n");
+  });
+
+  it("leaves a note without frontmatter untouched", () => {
+    expect(filterFrontmatterKeys("# T\n\ndg-publish: true\n", "idea")).toBe("# T\n\ndg-publish: true\n");
   });
 });
 

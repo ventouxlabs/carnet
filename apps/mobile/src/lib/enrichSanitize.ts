@@ -41,10 +41,13 @@ export type NoteType = "idea" | "journal" | "person" | "shared";
 /**
  * Canonical top-level frontmatter key order per note type, mirroring the exact
  * shape prompts.ts asks the model to emit. A valid, prompt-shaped note is thus
- * re-serialized BYTE-FOR-BYTE; unknown extra keys are appended in their
- * original order so nothing is dropped.
+ * re-serialized BYTE-FOR-BYTE. It is also the ALLOWLIST for model output
+ * (B3 decision 1): any other key a model emits — `dg-publish`, `publish`,
+ * `cssclasses`, or a custom key a prompt override asks for — is dropped.
+ * App-owned keys (`location`, `fallback`, `rev`, …) are all added after this
+ * gate, so it never sees them.
  */
-const CANONICAL_ORDER: Record<NoteType, readonly string[]> = {
+export const CANONICAL_ORDER: Record<NoteType, readonly string[]> = {
   idea: ["created", "status", "tags"],
   journal: ["date", "tags", "people", "ideas"],
   person: ["name", "company", "title", "email", "phone", "linkedin", "met", "where", "tags"],
@@ -235,7 +238,8 @@ function neutralizeLinks(text: string): string {
 
 /**
  * Validate + canonicalize the frontmatter of a (already-sanitized) note.
- * Returns the note with frontmatter re-serialized in canonical key order, or
+ * Returns the note with frontmatter re-serialized in canonical key order —
+ * non-canonical keys dropped (see CANONICAL_ORDER) — or
  * null when the block is missing/empty or a required key is absent. The body is
  * preserved byte-for-byte (splitFrontmatter guarantees header + body === input).
  */
@@ -264,16 +268,50 @@ export function normalizeFrontmatter(
       seen.add(key);
     }
   }
-  for (const [key, value] of fields) {
-    if (seen.has(key)) continue;
-    ordered.push([key, value]);
-    seen.add(key);
-  }
 
   const block = ordered
     .map(([key, value]) => (value ? `${key}: ${value}` : `${key}:`))
     .join("\n");
   return `---\n${block}\n---\n${body}`;
+}
+
+/** A column-0 `key:` line for exactly this key (YAML needs space or EOL after the colon). */
+function isKeyLine(line: string, key: string): boolean {
+  return line.startsWith(`${key}:`) && /^(\s|$)/.test(line.slice(key.length + 1));
+}
+
+/**
+ * Keep only `allowed` keys' lines. Deny by default at column 0: a canonical
+ * `key:` line opens a kept group; ANY other column-0 line — another key, a
+ * quoted `"dg-publish":` or explicit `? key` / `: value` form, a comment, a
+ * flow mapping — closes it and is dropped. Indented and `- ` item lines
+ * follow the group above them.
+ */
+function keepAllowedKeyLines(inner: readonly string[], allowed: readonly string[]): string[] {
+  const kept: string[] = [];
+  let keeping = false;
+  for (const line of inner) {
+    const continuation = /^\s/.test(line) || line === "" || line === "-" || line.startsWith("- ");
+    if (!continuation) keeping = allowed.some((key) => isKeyLine(line, key));
+    if (keeping) kept.push(line);
+  }
+  return kept;
+}
+
+/**
+ * Drop every frontmatter key a note of this type does not own (B3 decision 1),
+ * together with its continuation lines, and re-emit exact `---` delimiters.
+ * Unlike normalizeFrontmatter this never rejects and never reorders, so it is
+ * the allowlist for executeChat's fallback branch, where normalization
+ * failed. A note without frontmatter is returned unchanged.
+ */
+export function filterFrontmatterKeys(markdown: string, noteType: NoteType): string {
+  const { header, body } = splitFrontmatter(markdown);
+  if (!header) return markdown;
+  const closedByNewline = header.endsWith("\n");
+  const lines = (closedByNewline ? header.slice(0, -1) : header).split("\n");
+  const kept = keepAllowedKeyLines(lines.slice(1, -1), CANONICAL_ORDER[noteType]);
+  return ["---", ...kept, "---"].join("\n") + (closedByNewline ? "\n" : "") + body;
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────

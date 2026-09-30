@@ -615,6 +615,26 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
   });
 });
 
+describe("promoteIdea keeps the note's app-owned frontmatter (B3 allowlist)", () => {
+  it("re-applies non-canonical fields from the current note; drops model-invented ones", async () => {
+    // The strict allowlist drops every non-idea key the model echoes, so
+    // promote must carry the note's own `fallback` / `location` across itself.
+    const currentMd =
+      "---\ncreated: 2026-07-04\nstatus: seedling\ntags: [idea]\nfallback: relais\nlocation: 48.85,2.35\n---\n# My Idea\n\nRaw.\n";
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse(
+        "---\ncreated: 2026-07-04\nstatus: developing\ntags: [idea]\nfallback: relais\ndg-publish: true\n---\n# My Idea\n\nMore.\n",
+      ),
+    );
+
+    const result = await promoteIdea(currentMd, "developing");
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-07-04\nstatus: developing\ntags: [idea]\nfallback: relais\nlocation: 48.85,2.35\n---\n# My Idea\n\nMore.\n",
+    );
+  });
+});
+
 describe("askVault routing", () => {
   it("resolves the enhance provider and returns its label with the result", async () => {
     fetchMock.mockResolvedValueOnce(makeOkResponse("You wrote about X in March."));

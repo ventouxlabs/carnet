@@ -5,7 +5,12 @@
  * comment for the full decomposition map.
  */
 
-import { sanitizeAndNormalize, sanitizeMarkdown, type NoteType } from "./enrichSanitize";
+import {
+  filterFrontmatterKeys,
+  sanitizeAndNormalize,
+  sanitizeMarkdown,
+  type NoteType,
+} from "./enrichSanitize";
 import type { PromptPair } from "./prompts";
 import { parseErrorBody, sanitizeErrorMessage, withTimeout } from "./httpClient";
 import { LlmClientError, timeoutError } from "./llmErrors";
@@ -217,8 +222,13 @@ export async function executeChat(
       // Neutralization is unconditional; when frontmatter normalization fails
       // (malformed / missing required keys) we still return the neutralized —
       // and therefore inert — markdown rather than a note that could execute.
+      // The key allowlist applies to BOTH branches: a reply that omits a
+      // required key must not smuggle `dg-publish: true` through the fallback.
       const stripped = stripCodeFences(content);
-      const markdown = sanitizeAndNormalize(stripped, noteType) ?? sanitizeMarkdown(stripped);
+      const markdown = filterFrontmatterKeys(
+        sanitizeAndNormalize(stripped, noteType) ?? sanitizeMarkdown(stripped),
+        noteType,
+      );
       const modelUsed = json.model ?? model;
       return { markdown, model: modelUsed };
     },
