@@ -3015,6 +3015,7 @@ Step 6's push/PR. Every commit ends with the mobile gate and the Drive Inbox gat
 - Review fix C (L3): `withUserLines` normalizes CRLF **and a lone CR** to LF in both the input and the reply. A lone CR in a reply's title (`# T\rtags: …`) can no longer carry text along with the title.
 - Review fix C (L4): the fallback always opens with a frontmatter block, an empty `---\n---\n` when the reply had none, so a user's leading `---` block is always body. After the `#note` merge the bytes are identical to the old no-frontmatter output, because `upsertFrontmatterField` synthesized the same block. One of this branch's `withUserLines` tests changed its expected value accordingly.
 - Review L2 (nesting is not checked) stays as documented under item 1 (indentation is ignored).
+- Review fix D: `TODO.md`'s security follow-ups list five pre-existing items, not four. The extra one is the frontmatter fence-line bypass of B3 found while fixing A (all modes; only the note fallback is hardened here). `verify:capture-flow` now runs `noteLineGuard.test.ts`; `CLAUDE.md`'s one-line description of that suite list was left as is.
 
 ---
 

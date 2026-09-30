@@ -93,6 +93,36 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   of file, told apart by frontmatter (`isSynthesisNote`), not folder. Drive Inbox (Android
   Auto) stays idea-only. Plan: `.claude/PRPs/plans/note-capture-mode.plan.md`.
 
+## Security follow-ups (from the note-capture review, 2026-09-29) — pre-existing, all modes
+
+None of these came from Note mode; the review of that branch surfaced them. Each needs its
+own change to the shared B3 sanitizer or writer, with its own tests.
+
+- [ ] **Inline DataviewJS passes B3.** `` `$= dv.el(…)` `` survives `neutralizeText`: the
+  inline-DQL rule (`enrichSanitize.ts` ~:154) only matches `` `=…` ``. A fix such as
+  `` /`\$?=\s*[^`]*`/ `` covers the default prefixes, but Dataview's inline prefixes
+  are user-configurable, so a prefix-agnostic rule may be needed.
+- [ ] **Model-emitted extra frontmatter keys are kept.** `normalizeFrontmatter`
+  (`enrichSanitize.ts` ~:208-212) appends every unknown key, so a model can set
+  `dg-publish`, `publish` or `cssclasses`. Fix: keep only `CANONICAL_ORDER[noteType]`.
+- [ ] **A fence line inside the model's frontmatter hides the whole body from B3.**
+  `sanitizeMarkdown` is fence-aware but not frontmatter-aware: a bare `` ``` `` line
+  in the frontmatter opens a "fence" that runs to the end, so the body is skipped.
+  `normalizeFrontmatter` then drops that line, and the body ships live and
+  unsanitized. Found while fixing the note fallback, which now sanitizes the
+  frontmatter and body separately. The compliant path, and every other mode, still
+  has the hole. Fix: in `sanitizeMarkdown`, split the frontmatter off first and
+  fence-scan the body from a clean state.
+- [ ] **The `file://` create-only write can race and overwrite.** `vaultFs.ts`'s
+  `file://` backend `createFile` only builds a path, and `writeString` then writes
+  it. Two writers that pick the same free name both "create" it, and the second
+  clobbers the first. SAF's `createFileAsync` renames instead, so SAF vaults are not
+  affected.
+- [ ] **A prompt override drops `INJECTION_GUARD`.** `withSystemOverride`
+  (`llmClient.ts`) replaces the whole system prompt, the guard included. The note
+  override matches idea's behaviour here. Fix: always append the guard to an
+  overridden system prompt.
+
 ## Landed, device verification complete (benefit not yet measured)
 
 Code merged and green in CI, then verified against a real vault on hardware. The
