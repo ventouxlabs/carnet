@@ -7,7 +7,7 @@
 
 import {
   filterFrontmatterKeys,
-  sanitizeAndNormalize,
+  normalizeFrontmatter,
   sanitizeMarkdown,
   sanitizeReplyBody,
   type NoteType,
@@ -217,6 +217,15 @@ export async function executeChat(
         );
       }
 
+      if (content.length > MAX_REPLY_CHARS) {
+        // Refuse rather than truncate: a cut reply can end mid-construct. The
+        // same classification as a malformed reply (status-200, retryable
+        // on the fallback provider).
+        throw new LlmClientError(
+          `${label} returned an oversized response (${content.length} characters; the limit is ${MAX_REPLY_CHARS})`,
+          response.status,
+        );
+      }
       const markdown = gateModelMarkdown(stripCodeFences(content), noteType);
       const modelUsed = json.model ?? model;
       return { markdown, model: modelUsed };
@@ -242,11 +251,16 @@ export async function executeChat(
  */
 function gateModelMarkdown(stripped: string, noteType: NoteType | null): string {
   if (noteType === null) return sanitizeReplyBody(stripped);
-  return filterFrontmatterKeys(
-    sanitizeAndNormalize(stripped, noteType) ?? sanitizeMarkdown(stripped),
-    noteType,
-  );
+  const sanitized = sanitizeMarkdown(stripped);
+  return filterFrontmatterKeys(normalizeFrontmatter(sanitized, noteType) ?? sanitized, noteType);
 }
+
+/**
+ * Longest model reply the sanitizer is handed (256 Ki characters), far above
+ * any real note or answer. The sanitizer is linear, but it runs up to 8
+ * passes; an unbounded reply is still an availability problem on a phone.
+ */
+export const MAX_REPLY_CHARS = 256 * 1024;
 
 /**
  * Text-only chat completion. Builds [system, user] from a PromptPair and

@@ -35,6 +35,7 @@
 import { parseFrontmatter, splitFrontmatter } from "./frontmatter";
 import { certainlyFencedLines, isFenceLike, renameExecutableFence } from "./sanitizeFences";
 import { makeCodeBlockQueriesInert } from "./sanitizeCodeBlocks";
+import { removeElement, stripTemplater } from "./sanitizeElements";
 import { makeInlineQueriesInert } from "./sanitizeInlineCode";
 import { neutralizeLinkTargets } from "./sanitizeLinks";
 
@@ -71,8 +72,6 @@ const REQUIRED_KEYS: Record<NoteType, readonly string[]> = {
 
 // ── Sanitize (neutralize executable content) ──────────────────────────────────
 
-const TEMPLATER = /<%[\s\S]*?%>/g;
-const TEMPLATER_REMOVED = "[templater expression removed]";
 
 /**
  * Neutralize executable content in a markdown document. Frontmatter-aware and
@@ -189,7 +188,7 @@ function sanitizeBodyPass(markdown: string): string {
 }
 
 function normalizeAndStripTemplater(markdown: string): string {
-  return markdown.replace(/\r\n?/g, "\n").replace(TEMPLATER, TEMPLATER_REMOVED);
+  return stripTemplater(markdown.replace(/\r\n?/g, "\n"));
 }
 
 /**
@@ -259,15 +258,11 @@ function neutralizeText(text: string): string {
   let s = text;
 
   // Templater — executes JS. `<%= tp.date.now() %>`, `<% … %>`.
-  s = s.replace(TEMPLATER, TEMPLATER_REMOVED);
+  s = stripTemplater(s);
 
-  // <script>…</script> and a lone/unclosed opening tag.
-  s = s.replace(/<script\b[\s\S]*?<\/script\s*>/gi, "[script removed]");
-  s = s.replace(/<script\b[^>]*>/gi, "[script removed]");
-
-  // <iframe>…</iframe> and a lone/unclosed opening tag.
-  s = s.replace(/<iframe\b[\s\S]*?<\/iframe\s*>/gi, "[iframe removed]");
-  s = s.replace(/<iframe\b[^>]*>/gi, "[iframe removed]");
+  // <script>…</script> and a lone/unclosed opening tag; then <iframe> alike.
+  s = removeElement(s, "script", "[script removed]");
+  s = removeElement(s, "iframe", "[iframe removed]");
 
   // on*= inline event-handler attributes (onclick=, onload=, …). After
   // whitespace or `/` (`<svg/onload=…>`) the whole attribute, quoted or bare,

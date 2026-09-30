@@ -417,6 +417,47 @@ describe("filterFrontmatterKeys — deny by default at column 0", () => {
   });
 });
 
+// ── Review MEDIUM-4: bounded input, linear time ──────────────────────────────
+
+describe("review MEDIUM-4 — availability", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function chatSized(chars: number): Promise<string> {
+    const content = `# T\n\n${"x".repeat(chars - 5)}`;
+    const body = JSON.stringify({ model: "m", choices: [{ message: { role: "assistant", content } }] });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status: 200 })));
+    const { markdown } = await executeChat("https://llm.example.com", "k", "m", [], "idea", "Test");
+    return markdown;
+  }
+
+  it("rejects a reply over the 256 KiB cap as malformed — never truncates", async () => {
+    await expect(chatSized(256 * 1024 + 1)).rejects.toThrow(/oversized response/);
+    expect((await chatSized(256 * 1024)).length).toBe(256 * 1024);
+  });
+
+  // Each input is the largest the cap lets through; every one was quadratic
+  // (seconds) before. The bound is ~40x the linear time, to stay CI-stable.
+  const CAP = 256 * 1024;
+  let distinctRuns = "";
+  for (let k = 1; distinctRuns.length < CAP; k++) distinctRuns += `${"`".repeat(k)} x `;
+  const adversarial: Array<[string, string]> = [
+    ["unclosed Templater", "<%".repeat(CAP / 2)],
+    ["lone <script openers", "<script ".repeat(CAP / 8)],
+    ["lone <iframe openers", "<iframe ".repeat(CAP / 8)],
+    ["unclosed link text", "[".repeat(CAP)],
+    ["distinct-length backtick runs", distinctRuns.slice(0, CAP)],
+  ];
+  for (const [name, input] of adversarial) {
+    it(`sanitizes ${name} at the cap in linear time`, () => {
+      const started = performance.now();
+      s(input);
+      expect(performance.now() - started).toBeLessThan(2000);
+    });
+  }
+});
+
 // ── Invariants: total + idempotent over the corpus and a seeded fuzz ──────────
 
 const CORPUS: string[] = [

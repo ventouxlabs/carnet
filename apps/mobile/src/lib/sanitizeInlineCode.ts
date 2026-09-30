@@ -45,20 +45,35 @@ function runEnd(text: string, from: number, end: number): number {
   return i;
 }
 
-/** Start of the first later backtick run of exactly `len`, or -1. Inside a
- * span backslashes are literal, so no escape handling here. */
-function findCloser(text: string, from: number, end: number, len: number): number {
-  let i = from;
-  while (i < end) {
-    if (text[i] !== "`") {
-      i++;
-      continue;
-    }
-    const after = runEnd(text, i, end);
-    if (after - i === len) return i;
-    i = after;
+/** Start offsets of every maximal backtick run in a segment, keyed by length. */
+type RunIndex = ReadonlyMap<number, readonly number[]>;
+
+function indexRuns(seg: string): RunIndex {
+  const runs = new Map<number, number[]>();
+  for (let i = seg.indexOf("`"); i !== -1; ) {
+    const end = runEnd(seg, i, seg.length);
+    const starts = runs.get(end - i);
+    if (starts) starts.push(i);
+    else runs.set(end - i, [i]);
+    i = seg.indexOf("`", end);
   }
-  return -1;
+  return runs;
+}
+
+/** Start of the first maximal run of exactly `len` at or after `from`, or -1
+ * (binary search, so pairing stays O(n log n) with many unmatched runs).
+ * Inside a span backslashes are literal, so closers are raw maximal runs. */
+function findCloser(runs: RunIndex, from: number, len: number): number {
+  const starts = runs.get(len);
+  if (!starts) return -1;
+  let lo = 0;
+  let hi = starts.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (starts[mid] < from) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < starts.length ? starts[lo] : -1;
 }
 
 /** How a renderer might read one segment. The union of all readings is used. */
@@ -77,7 +92,7 @@ const READINGS: readonly Reading[] = [
 ];
 
 /** Offsets (into `seg`) just past each opener whose span is a live query. */
-function liveOpeners(seg: string, reading: Reading): number[] {
+function liveOpeners(seg: string, reading: Reading, runs: RunIndex): number[] {
   const found: number[] = [];
   const htmlEnd = reading.htmlAware ? htmlSpanMatcher(seg) : null;
   let i = 0;
@@ -92,7 +107,7 @@ function liveOpeners(seg: string, reading: Reading): number[] {
       continue;
     }
     const open = runEnd(seg, i, seg.length);
-    const close = findCloser(seg, open, seg.length, open - i);
+    const close = findCloser(runs, open, open - i);
     if (close === -1) {
       i = open; // unmatched run: literal backticks
       continue;
@@ -189,8 +204,10 @@ export function makeInlineQueriesInert(text: string): string {
   const positions = new Set<number>();
   for (const { start, end } of segmentations.flat()) {
     const seg = text.slice(start, end);
+    if (!seg.includes("`")) continue;
+    const runs = indexRuns(seg);
     for (const reading of READINGS) {
-      liveOpeners(seg, reading).forEach((at) => positions.add(start + at));
+      liveOpeners(seg, reading, runs).forEach((at) => positions.add(start + at));
     }
   }
   const cuts = [...positions].sort((a, b) => a - b);
