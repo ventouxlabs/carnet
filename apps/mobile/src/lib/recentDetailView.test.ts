@@ -47,6 +47,12 @@ describe("formatMode", () => {
       note: "Note",
     });
   });
+
+  it("gives a mode this build can't name a generic label, not undefined", () => {
+    // A row persisted by a newer build, read after a downgrade — the File info
+    // summary used to read "undefined · captured …".
+    expect(formatMode("task" as unknown as Parameters<typeof formatMode>[0])).toBe("Capture");
+  });
 });
 
 describe("formatDate", () => {

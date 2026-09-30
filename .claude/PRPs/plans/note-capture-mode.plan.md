@@ -2998,6 +2998,7 @@ Step 6's push/PR. Every commit ends with the mobile gate and the Drive Inbox gat
 - Item 1: indentation is ignored along with trailing whitespace (the line is trimmed before its marker is stripped).
 - Item 1: `withUserLines` puts the model's title *in place of* an identical first input line instead of dropping it, so the note keeps an H1 (`injectImageEmbed` puts attachments above the frontmatter when there is none). It does not stack the model's title on an input that already starts with its own `# ` H1 (re-enrich).
 - Item 3: the raw note stub did **not** already carry `note` (no `mode` branch in `buildRawIdeaMarkdown`); it now does, merged through `mergeUserTags` → `setFrontmatterTags`. In both places `note` goes first, matching the prompt's `tags: [note, …]`, and a reply that already has it (any spelling) is left byte-for-byte.
+- Item 4: `const _exhaustive: never = mode` alone fails `tsc` under `noUnusedLocals` (TS6133), so each `default` binds `unknownMode: never` and reads it with `void`. The throw came from `modeStamp` returning `undefined`, so one `default` there fixes `NoteCard`, `NoteMetaRow`, `RelatedNotesCard`, `SearchScreen` and `HomeScreen:532`; `formatMode` gets the same `default` ("undefined · captured …" in File info). Neither `NoteMetaRow.tsx` nor `HomeScreen.tsx` needed editing. The test is a new `components/NoteCard.test.tsx` plus a `recentDetailView.test.ts` case.
 
 ---
 
@@ -3013,12 +3014,12 @@ These are documented, not new work.
   - The note index caches each row's `mode` (`vault.ts:227`), and the cache has no version check (`vault.ts:334-354`).
   - As a result, existing `Notes/` files keep showing "Idea" on Home cards, and stay under Search's Idea chip rather than the Note chip, until a pull-to-refresh or the next full scan. Recents entries recorded before this change also keep their stored mode.
   - This is safe for Re-enrich: the gate is the note's frontmatter (Task 7 pins a stale `"idea"` synthesis row).
-- **R3. App downgrade after capturing notes.** An older build is unaffected by anything this build could change:
-  - Its `modeStamp` and `formatMode` have no default. Opening a `note` entry in RecentDetail throws in `NoteMetaRow` (`modeStamp(mode).label`, reproduced in the dry run), and a Home/Search card renders no stamp.
+- **R3. App downgrade after capturing notes.** Older builds still crash on a `note` entry. That can't be fixed retroactively, and it is the accepted cost:
+  - An older build's `modeStamp` and `formatMode` have no default. Opening a `note` entry in RecentDetail throws in `NoteMetaRow` (`modeStamp(mode).label`, reproduced in the dry run), and destructuring it in a Home/Search `NoteCard` throws too.
   - Its Sync dialog calls `modeStamp(row.mode).label` (`HomeScreen.tsx:532`), which throws on a queued `note` row.
   - Its drain has no `else`, so it silently removes a queued note row.
 
-  Follow-up, out of scope here: this build now *keeps* unroutable rows (decision 10). A `never`-guarded fallback in `modeStamp` would harden the **next** downgrade the same way.
+  This build and later ones degrade instead (Task 10 item 4): `modeStamp` and `formatMode` have a `never`-bound `default` that returns a generic "Capture" stamp/label, so a mode persisted by an even newer build no longer throws into `CrashBoundary` or the Sync dialog, and the drain keeps the row it can't route (decision 10).
 - **R4. `Notes/` mixes captured notes and saved Ask answers.**
   - This is deliberate (PRD §3 and its risk table).
   - They are distinguished by `#note` vs `#synthesis` and `question:`, and by `isSynthesisNote` in code.

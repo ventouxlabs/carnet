@@ -29,6 +29,12 @@ export function formatMode(mode: CaptureEntry["mode"]): string {
       return "Photo";
     case "audio":
       return "Audio";
+    default: {
+      // Exhaustive for tsc, generic at runtime — see NoteCard.tsx modeStamp.
+      const unknownMode: never = mode;
+      void unknownMode; // read, so noUnusedLocals accepts the binding
+      return "Capture";
+    }
   }
 }
 
