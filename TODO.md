@@ -83,7 +83,7 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
 
 ## Landed, pending on-device verification
 
-- [ ] **Note capture mode** (PR #<n>) — a sixth mode, Note, writes create-only into
+- [ ] **Note capture mode** (PR #222) — a sixth mode, Note, writes create-only into
   `Notes/` through a prompt that titles and tags a task list and NEVER expands it; action
   lines become `- [ ]` and reach TodosScreen with no todo code changed. Always save-first
   ("Preview ideas before saving" gates ideas only); queues offline; re-enrichable. Two
