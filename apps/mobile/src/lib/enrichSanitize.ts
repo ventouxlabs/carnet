@@ -84,13 +84,44 @@ const TEMPLATER_REMOVED = "[templater expression removed]";
  * returns null, never throws.
  */
 export function sanitizeMarkdown(markdown: string): string {
+  return converge(markdown, NOTE_MODE);
+}
+
+/**
+ * Sanitize a model reply that is BODY text with no frontmatter contract —
+ * Enhance (rewritten prose) and Ask (a synthesized answer). It never splits
+ * off a header: a leading `---` … `---` block in such a reply is prose, and
+ * treating it as a header both skipped the body neutralizers' view of it and
+ * dropped its fence lines. Its first non-blank line is also defused when it
+ * starts with `---` (see defuseLeadingRule), because Enhance on a note with no
+ * header and no `# ` title writes the reply at the very top of the file, where
+ * a `---` line would open live frontmatter (`dg-publish: true`).
+ */
+export function sanitizeReplyBody(markdown: string): string {
+  return converge(markdown, BODY_MODE);
+}
+
+interface SanitizeMode {
+  pass: (text: string) => string;
+  /** Fail-closed result at the cap; must itself be a fixed point of `pass`. */
+  failClosed: (text: string) => string;
+}
+
+const NOTE_MODE: SanitizeMode = { pass: sanitizePass, failClosed };
+const BODY_MODE: SanitizeMode = {
+  pass: sanitizeBodyPass,
+  failClosed: (text) => defuseLeadingRule(failClosed(text)),
+};
+
+/** Repeat a pass to a fixed point; fail closed at the cap. */
+function converge(markdown: string, mode: SanitizeMode): string {
   let current = markdown;
   for (let pass = 0; pass < MAX_PASSES; pass++) {
-    const next = sanitizePass(current);
+    const next = mode.pass(current);
     if (next === current) return current;
     current = next;
   }
-  return failClosed(current);
+  return mode.failClosed(current);
 }
 
 /**
@@ -129,9 +160,35 @@ function failClosed(text: string): string {
  * frontmatter too. Strip it globally before anything is preserved verbatim.
  */
 function sanitizePass(markdown: string): string {
-  const text = markdown.replace(/\r\n?/g, "\n").replace(TEMPLATER, TEMPLATER_REMOVED);
+  const text = normalizeAndStripTemplater(markdown);
   const { header, body } = splitFrontmatter(text);
   return header ? sanitizeHeader(header) + sanitizeBody(body) : sanitizeBody(text);
+}
+
+/** One body-only pass: no header split, leading `---` defused. */
+function sanitizeBodyPass(markdown: string): string {
+  return sanitizeBody(defuseLeadingRule(normalizeAndStripTemplater(markdown)));
+}
+
+function normalizeAndStripTemplater(markdown: string): string {
+  return markdown.replace(/\r\n?/g, "\n").replace(TEMPLATER, TEMPLATER_REMOVED);
+}
+
+/**
+ * Make sure a body-only reply cannot start with a frontmatter opener. The
+ * first non-blank line, when it starts with `---`, becomes `***` if it is a
+ * thematic break (renders as the same rule) and is otherwise escaped as
+ * `\---…` (renders the same text). Leading blank lines count, because
+ * Enhance trims the reply before writing it.
+ */
+function defuseLeadingRule(text: string): string {
+  const lines = text.split("\n");
+  const first = lines.findIndex((line) => line.trim() !== "");
+  if (first === -1 || !lines[first].trimStart().startsWith("---")) return text;
+  const line = lines[first];
+  const indent = line.slice(0, line.length - line.trimStart().length);
+  const defused = /^(?:-[ \t]*){3,}$/.test(line.trim()) ? `${indent}***` : `${indent}\\${line.trimStart()}`;
+  return [...lines.slice(0, first), defused, ...lines.slice(first + 1)].join("\n");
 }
 
 /**

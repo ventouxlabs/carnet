@@ -9,6 +9,7 @@ import {
   filterFrontmatterKeys,
   sanitizeAndNormalize,
   sanitizeMarkdown,
+  sanitizeReplyBody,
   type NoteType,
 } from "./enrichSanitize";
 import type { PromptPair } from "./prompts";
@@ -235,11 +236,12 @@ export async function executeChat(
  * fallback.
  *
  * `noteType: null` marks a BODY-ONLY reply (Enhance, Ask) with no frontmatter
- * contract: it lands below an app-owned header, so a leading `---` block in it
- * is prose, and a key allowlist would delete that prose.
+ * contract: sanitizeReplyBody never splits a header off it (a leading `---`
+ * block is prose there, and a key allowlist would delete it) and defuses a
+ * leading `---` so the reply can never open live frontmatter.
  */
 function gateModelMarkdown(stripped: string, noteType: NoteType | null): string {
-  if (noteType === null) return sanitizeMarkdown(stripped);
+  if (noteType === null) return sanitizeReplyBody(stripped);
   return filterFrontmatterKeys(
     sanitizeAndNormalize(stripped, noteType) ?? sanitizeMarkdown(stripped),
     noteType,

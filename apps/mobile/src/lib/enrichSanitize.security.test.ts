@@ -11,8 +11,10 @@ import {
   filterFrontmatterKeys,
   sanitizeAndNormalize,
   sanitizeMarkdown,
+  sanitizeReplyBody,
   type NoteType,
 } from "./enrichSanitize";
+import { splitFrontmatter } from "./frontmatter";
 import { executeChat } from "./llmHttp";
 
 function ideaNote(body: string): string {
@@ -181,6 +183,43 @@ describe("extras — fences in containers, fake openers, quote-delimited on*=", 
   });
 });
 
+// ── Review round: body-only replies (Enhance, Ask) never split frontmatter ────
+
+describe("review HIGH-1 — body-only replies", () => {
+  it("neutralizes a leading `---` block instead of treating it as a header", () => {
+    const reply = "---\n`= this.file.name\n`\n<img src=x\nonerror=alert(1)>\n---\nprose here";
+    expect(sanitizeReplyBody(reply)).toBe(
+      "***\n`inert: = this.file.name\n`\n<img src=x>\n---\nprose here",
+    );
+  });
+
+  it("keeps fence lines inside a leading `---` block", () => {
+    const reply = "---\nIntro\n```js\nx()\n```\n---\nMore\n";
+    expect(sanitizeReplyBody(reply)).toBe("***\nIntro\n```js\nx()\n```\n---\nMore\n");
+  });
+
+  it("can never become live frontmatter at file start (header-less Enhance)", () => {
+    for (const reply of [
+      "---\ndg-publish: true\ncssclasses: x\n---\nRewritten prose.",
+      "\n\n---\ndg-publish: true\n---\nx",
+      "---dg-publish: true\n---\nx",
+    ]) {
+      const out = sanitizeReplyBody(reply);
+      expect(splitFrontmatter(out.trim()).header, JSON.stringify(reply)).toBe("");
+      expect(sanitizeReplyBody(out)).toBe(out);
+    }
+    expect(sanitizeReplyBody("---\ndg-publish: true\n---\nRewritten prose.")).toBe(
+      "***\ndg-publish: true\n---\nRewritten prose.",
+    );
+    expect(sanitizeReplyBody("---dg: x\n---\nbody")).toBe("\\---dg: x\n---\nbody");
+  });
+
+  it("leaves an ordinary body reply byte-identical", () => {
+    const reply = "Went out early.\n\n- saw the heron\n\n---\n\nLater: `code` here.\n";
+    expect(sanitizeReplyBody(reply)).toBe(reply);
+  });
+});
+
 // ── Item 2: model-emitted frontmatter keys are allowlisted on BOTH branches ───
 
 describe("item 2 — strict frontmatter allowlist on executeChat's two branches", () => {
@@ -225,7 +264,7 @@ describe("item 2 — strict frontmatter allowlist on executeChat's two branches"
     // Enhance / Ask: a leading `---` block is prose below an app-owned header.
     const prose = "---\nIntro paragraph\n\nSummary: the gist\n---\nMore <script>x</script>\n";
     expect(await chat(prose, null)).toBe(
-      "---\nIntro paragraph\n\nSummary: the gist\n---\nMore [script removed]\n",
+      "***\nIntro paragraph\n\nSummary: the gist\n---\nMore [script removed]\n",
     );
   });
 

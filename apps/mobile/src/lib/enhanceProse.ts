@@ -252,8 +252,9 @@ export async function enhanceNoteProse(input: {
 
     const outcome = await dispatchEnhance(rest);
     // Already fence-stripped AND security-sanitized upstream: executeChat runs
-    // stripCodeFences, then sanitizeMarkdown (enhanceProse passes NoteType
-    // null — body text, no frontmatter contract). Re-sanitizing here would
+    // stripCodeFences, then sanitizeReplyBody (enhanceProse passes NoteType
+    // null — body text, no frontmatter contract, leading `---` defused so a
+    // header-less note cannot gain live frontmatter). Re-sanitizing here would
     // be redundant, and reaching for sanitizeMarkdown to strip fences would be
     // wrong — it preserves fence bodies verbatim by design.
     const cleaned = stripCitationMarkers(outcome.result.markdown.trim()).trim();

@@ -77,6 +77,7 @@ import {
   withInjectionGuard,
 } from "./prompts";
 import type { SelectedNote } from "./retrospective";
+import { splitFrontmatter } from "./frontmatter";
 
 interface RequestBody {
   model: string;
@@ -664,6 +665,9 @@ describe("body-only calls are not frontmatter-filtered", () => {
   // reply that opens with a `---` rule is prose, not properties: filtering it
   // against a note type's key allowlist deleted every line in between.
   const reply = "---\nIntro paragraph\n\nSummary: the gist\n---\nMore\n";
+  // The leading rule is rewritten to `***` (same render) so it can never be
+  // read as a frontmatter opener; everything else is kept.
+  const kept = "***\nIntro paragraph\n\nSummary: the gist\n---\nMore\n";
 
   beforeEach(() => {
     fetchMock.mockReset();
@@ -672,7 +676,18 @@ describe("body-only calls are not frontmatter-filtered", () => {
   it("enhanceProse keeps prose between two leading `---` rules", async () => {
     fetchMock.mockResolvedValueOnce(makeOkResponse(reply));
     const { markdown } = await enhanceProse("some body prose to enhance", CONFIG);
-    expect(markdown).toBe(reply);
+    expect(markdown).toBe(kept);
+  });
+
+  it("enhanceProse output can never open live frontmatter on a header-less note", async () => {
+    // enhanceProse.ts writes `${header}${title}…${reply.trim()}`, so with no
+    // header and no `# ` title the reply starts the file.
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse("---\ndg-publish: true\ncssclasses: x\n---\nRewritten prose."),
+    );
+    const { markdown } = await enhanceProse("some body prose to enhance", CONFIG);
+    expect(splitFrontmatter(markdown.trim()).header).toBe("");
+    expect(markdown).toBe("***\ndg-publish: true\ncssclasses: x\n---\nRewritten prose.");
   });
 
   it("askRetrospective keeps prose between two leading `---` rules", async () => {
@@ -681,7 +696,7 @@ describe("body-only calls are not frontmatter-filtered", () => {
       { uri: "file:///v/Ideas/a.md", title: "A", body: "notes", truncated: false },
     ];
     const { markdown } = await askRetrospective("q?", notes, CONFIG);
-    expect(markdown).toBe(reply);
+    expect(markdown).toBe(kept);
   });
 });
 
