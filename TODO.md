@@ -151,9 +151,9 @@ canonicalizer is needed.
   on-device behavior but **does not establish causal benefit** over content-only
   tagging; do not infer a canonicalizer need from these samples.
 
-## B3 sanitizer hardening (branch `fix/b3-sanitizer-hardening`, 2026-09-30)
+## B3 sanitizer hardening — shipped in #223 (squash `d815dda`, 2026-09-30)
 
-Plan: `.claude/PRPs/plans/b3-sanitizer-hardening.plan.md`. Pre-existing bypasses that the
+Plan: `.claude/PRPs/plans/completed/b3-sanitizer-hardening.plan.md`. Pre-existing bypasses that the
 Note-capture (#222) security review surfaced; they affect every capture mode. Hashes are
 branch commits (squash-merge will collapse them).
 

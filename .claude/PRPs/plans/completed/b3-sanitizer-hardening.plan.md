@@ -1,8 +1,9 @@
 # B3 Sanitizer Hardening — Implementation Plan
 
-Status: in-progress
+Status: shipped
 
-**Approved:** 2026-09-30
+**Approved:** 2026-09-30 · **Shipped:** 2026-09-30 in #223 (squash `d815dda`). Code review APPROVE and security review PASS at `af99f90`; CI green.
+Obsidian/Dataview rendering behaviour was reasoned from their source, not checked on a device.
 
 **Goal:** Close the pre-existing B3 bypasses (`lib/enrichSanitize.ts`) and two
 adjacent weaknesses (prompt overrides that drop `INJECTION_GUARD`, and `file://`
