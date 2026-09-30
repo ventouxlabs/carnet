@@ -98,6 +98,11 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   image-embed and `## Files` lines to the model, though they are re-added afterwards; a
   reply that drops them trips the fallback and the note loses its checkboxes. Strip the
   attachment lines from the enrichment input first (all re-enrichable modes).
+  Known limitation: the `injectImageEmbed` fix stops *new* files from getting an image
+  embed above their frontmatter, but doesn't repair ones v0.11.0 already wrote. A raw Idea
+  with a photo whose enrichment failed still starts with `![](…)`, so `isPendingEnrich`
+  refuses it and "Finish enrichment" is unavailable. Follow-up: detect/repair that shape
+  (move a leading embed below the frontmatter) on read or via a one-shot sweep.
 
 ## Security follow-ups (from the note-capture review, 2026-09-29) — pre-existing, all modes
 
