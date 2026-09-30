@@ -346,6 +346,14 @@ describe("review MEDIUM-6 — link destinations", () => {
     });
   }
 
+  it("accepts the ]:-anywhere over-match: only the dangerous scheme in prose becomes #", () => {
+    // Matching a definition's `]:` anywhere also catches prose that literally
+    // names a scheme after `]:`. Nothing else is touched — an accepted trade
+    // for catching definitions behind containers and multi-line labels.
+    expect(s("see [MDN]: javascript: basics\n")).toBe("see [MDN]: # basics\n");
+    expect(s("see [MDN]: https://developer.mozilla.org\n")).toBe("see [MDN]: https://developer.mozilla.org\n");
+  });
+
   it("keeps ordinary links and inline data: images byte-identical", () => {
     for (const ok of [
       "[a](https://x.y/javascript:foo) and [b](#javascript) and <https://x.y>",
