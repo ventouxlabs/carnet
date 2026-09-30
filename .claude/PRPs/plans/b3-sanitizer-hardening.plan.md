@@ -122,3 +122,15 @@ bytes; that's verified in the differential below.
   is sanitized.
 - Karakeep export sends vault content out, not into the vault.
 - Custom Dataview prefixes (decision 4).
+
+## Deviations
+
+- RED cases were committed as `it.fails` and flipped to `it` by the commit that fixes them, so every commit's gate stays green.
+- "Certain" fence is stricter than design step 4: a line skips neutralization only when three parses agree (CommonMark top level; list-item parse where a dedented line ends an indented fence; block-context parse where ``` inside an HTML block or `%%`/`$$` block is not an opener). The indent/info rules alone left list-dedent and HTML-block bypasses.
+- Header lines are dropped when they start with `---` after `trimStart` (not only at column 0), matching `frontmatterInnerLines`' `trim() === "---"` closer.
+- Fail-closed does more than escape `<` and break backtick runs: every backtick becomes U+02CB, the `=` after an `on*` name becomes `&#61;`, executable `~~~` fences are renamed and link rules re-run, so the fail-closed output is itself a fixed point.
+- The inline tokenizer (step 5) runs per paragraph, per heuristic block and per line/table cell, each with and without backslash escapes, and a span live under any of them is made inert. A single tokenization missed spans after a heading, a blank line or a table pipe, and after an escaped backtick.
+- Commit 4 also escapes raw HTML `<code` (`&lt;code`): Dataview evaluates every rendered `<code>`, so this is item 1's threat in HTML syntax.
+- `promoteIdea` re-applies all of the current note's non-canonical fields (`preserveFrontmatterFields(…, CANONICAL_ORDER.idea)`, as in the mapping), not only `fallback`.
+- `findCollisionFreeName`'s signature change is a branded `DirLock` first parameter, and it is no longer exported; the unused `writeBinaryBytes` helper was removed.
+- New finding, logged in `TODO.md` and not fixed: Dataview's default `inlineQueriesInCodeblocks: true` also evaluates a whole fenced or indented code block whose text starts with `=`/`$=`.

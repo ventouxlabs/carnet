@@ -151,6 +151,35 @@ canonicalizer is needed.
   on-device behavior but **does not establish causal benefit** over content-only
   tagging; do not infer a canonicalizer need from these samples.
 
+## B3 sanitizer hardening (branch `fix/b3-sanitizer-hardening`, 2026-09-30)
+
+Plan: `.claude/PRPs/plans/b3-sanitizer-hardening.plan.md`. Pre-existing bypasses that the
+Note-capture (#222) security review surfaced; they affect every capture mode. Hashes are
+branch commits (squash-merge will collapse them).
+
+- [x] `dc60d7a` RED suite `enrichSanitize.security.test.ts` (in `verify:capture-flow`).
+- [x] `e7ed615` LF normalization; frontmatter split before the fence scan (a fence line in
+  the header no longer hides the body); exact `---` delimiters; executable fences renamed
+  behind `>`/list prefixes; only *certain* fences skip neutralization; `src="x"onerror=`.
+- [x] `a43bf23` Sanitizer iterates to a fixed point (cap 8) and fails closed — idempotent.
+- [x] `8b4aee0` Inline `=`/`$=` code spans paired CommonMark-style and made inert
+  (`` `inert: = x` ``), not deleted; raw `<code>` escaped.
+- [x] `dbd58d1` Strict frontmatter key allowlist on both `executeChat` branches;
+  `promoteIdea` re-applies the note's own `fallback`/`location`.
+- [x] `342a7db` A prompt override keeps `INJECTION_GUARD`.
+- [x] `c0e14bb` `writeUniqueFile`: choose-name/create/write under one `dir:` lock (file://
+  create-only race).
+- [ ] **Custom Dataview inline prefixes** (decision 4, deferred) — only the defaults `=` and
+  `$=` are covered. A vault whose `.obsidian/plugins/dataview/data.json` sets other
+  `inlineQueryPrefix`/`inlineJsQueryPrefix` values is not protected.
+- [ ] **Dataview evaluates whole code BLOCKS too** (found during this work, not fixed) —
+  Dataview's default `inlineQueriesInCodeblocks: true` (upstream `src/settings.ts`) makes
+  it evaluate a fenced or indented code block whose entire text, trimmed, starts with `=`
+  (or `$=`, which also needs the non-default `enableInlineDataviewJs`). The sanitizer keeps
+  fence bodies byte-for-byte by policy, so this is open. Default-settings impact is
+  read-only DQL. Needs a human call: it conflicts with the "```js survives byte-for-byte"
+  rule.
+
 ## Deferred to v0.3
 
 - [ ] **Auto-capture surfaces** — Android Quick Settings tile dropped from the roadmap
