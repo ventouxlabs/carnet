@@ -323,6 +323,13 @@ describe("review MEDIUM-6 — link destinations", () => {
     ["reference data: definition", "[x]: data:text/html,hi\n", "[x]: #text/html,hi\n"],
     ["javascript: autolink", "see <javascript:alert(1)> now", "see <#alert(1)> now"],
     ["entity-encoded raw href", '<a href="jav&#x61;script:alert(1)">x</a>', '<a href="#alert(1)">x</a>'],
+    ["backslash-escaped colon", "[x](javascript\\:alert(1))", "[x](#alert(1))"],
+    ["backslash-escaped reference definition", "[x]: javascript\\:alert(1)\n", "[x]: #alert(1)\n"],
+    ["space padding past any window", `<a href="${" ".repeat(200)}javascript:alert(1)">x</a>`, '<a href="#alert(1)">x</a>'],
+    ["tab-entity padding past any window", `<a href="java${"&Tab;".repeat(130)}script:alert(1)">x</a>`, '<a href="#alert(1)">x</a>'],
+    ["zero-padded numeric reference", '<a href="&#0000000106;avascript:alert(1)">x</a>', '<a href="#alert(1)">x</a>'],
+    ["zero-padded reference in a destination", "[x](&#x000006A;avascript:alert(1))", "[x](#alert(1))"],
+    ["space-padded angle destination", "[x](<   javascript:alert(1)>)", "[x](<#alert(1)>)"],
   ];
   for (const [name, input, expected] of cases) {
     it(`neutralizes a ${name}`, () => {

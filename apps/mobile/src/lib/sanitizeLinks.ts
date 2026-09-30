@@ -9,44 +9,62 @@
  * Every place a destination can start is checked: after `](`, after a
  * reference definition's `]:`, inside an autolink `<…>`, and after a raw
  * `href=`. A leading `<` (angle destination) is skipped, and the scheme is
- * read the way a renderer and a browser would: HTML entities decoded
- * (`jav&#97;script&colon;`), tab/newline dropped, case folded.
+ * read the way a renderer and a browser would: HTML entities decoded, with
+ * any number of leading zeros (`jav&#97;script&colon;`, `&#0000106;`),
+ * backslash-escaped punctuation decoded (`javascript\:`, CommonMark), leading
+ * spaces/C0 and any tab/newline dropped with no length limit (the URL parser
+ * has none), and case folded.
  *
- * Pure, total and linear: one pass of a bounded candidate regex, and each
- * scheme or image check reads at most a small fixed window.
+ * Pure, total and linear: one pass of a bounded candidate regex. A scheme
+ * check stops at the first decoded character that cannot continue
+ * `javascript:` / `data:`, and the padding it skips cannot contain another
+ * candidate, so no text is scanned twice. The image check reads a fixed
+ * window.
  */
 
 /** Where a destination can start; the match ends right before it. */
 const DESTINATION_START = /\]\(\s*|^ {0,3}\[[^\]\n]{1,999}\]:[ \t]*\n?[ \t]*|\bhref\s*=\s*["']?|</gim;
 
-/** An entity that can spell part of a scheme (CommonMark needs the `;`, a
- * browser decoding an attribute does not). */
-const ENTITY = /^&(?:#[0-9]{1,7};?|#[xX][0-9a-fA-F]{1,6};?|colon;|tab;|newline;)/i;
+/** An entity that can spell part of a scheme, at lastIndex (CommonMark needs
+ * the `;`, a browser decoding an attribute does not; browsers accept any
+ * number of leading zeros). */
+const ENTITY = /&(?:#0*([0-9]{1,7});?|#[xX]0*([0-9a-fA-F]{1,6});?|(colon|tab|newline);)/iy;
 
-const NAMED: Readonly<Record<string, string>> = { "colon;": ":", "tab;": "\t", "newline;": "\n" };
+const NAMED: Readonly<Record<string, string>> = { colon: ":", tab: "\t", newline: "\n" };
 
-/** Longest window a scheme may be spelled across (entities included). */
-const SCHEME_WINDOW = 128;
+/** ASCII punctuation, which a CommonMark backslash escapes. */
+const ASCII_PUNCTUATION = /^[!-/:-@[-`{-~]$/;
 
 /** Longest link text searched backwards for the `![` of an inline image. */
 const ALT_TEXT_WINDOW = 1000;
 
-function decodeEntity(entity: string): string {
-  const body = entity.slice(1).toLowerCase();
-  if (!body.startsWith("#")) return NAMED[body] ?? "";
-  const hex = body.startsWith("#x");
-  const code = parseInt(body.slice(hex ? 2 : 1), hex ? 16 : 10);
+function decodeEntity(match: RegExpExecArray): string {
+  const [, decimal, hex, named] = match;
+  if (named) return NAMED[named.toLowerCase()] ?? "";
+  const code = decimal ? parseInt(decimal, 10) : parseInt(hex, 16);
   return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "�";
+}
+
+/** The character spelled at `i` and the raw length that spells it. */
+function charAt(text: string, i: number): [string, number] {
+  if (text[i] === "&") {
+    ENTITY.lastIndex = i;
+    const entity = ENTITY.exec(text);
+    if (entity) return [decodeEntity(entity), entity[0].length];
+  }
+  if (text[i] === "\\" && i + 1 < text.length && ASCII_PUNCTUATION.test(text[i + 1])) {
+    return [text[i + 1], 2];
+  }
+  return [text[i], 1];
 }
 
 /** The dangerous scheme spelled at `at`, and the raw index just past its `:`. */
 function schemeAt(text: string, at: number): { scheme: string; end: number } | null {
   let decoded = "";
   let i = at;
-  while (i < text.length && i - at < SCHEME_WINDOW) {
-    const entity = text[i] === "&" ? ENTITY.exec(text.slice(i, i + 12)) : null;
-    const ch = entity ? decodeEntity(entity[0]) : text[i];
-    i += entity ? entity[0].length : 1;
+  while (i < text.length) {
+    const [ch, width] = charAt(text, i);
+    i += width;
     // Browsers drop tab/newline anywhere in a URL and C0/space before it.
     if (/^[\t\n\r]$/.test(ch) || (decoded === "" && /^[\x00-\x20]$/.test(ch))) continue;
     decoded += ch.toLowerCase();
