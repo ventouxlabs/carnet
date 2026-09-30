@@ -22,8 +22,12 @@
  * window.
  */
 
-/** Where a destination can start; the match ends right before it. */
-const DESTINATION_START = /\]\(\s*|^ {0,3}\[[^\]\n]{1,999}\]:[ \t]*\n?[ \t]*|\bhref\s*=\s*["']?|</gim;
+/** Where a destination can start; the match ends right before it. A
+ * reference definition's `]:` is matched anywhere — behind a `>` or list
+ * container, after an escaped `]` or a multi-line label — since
+ * over-matching is safe: only a dangerous scheme is ever rewritten. URL
+ * attributes beyond `href` (`action`, `formaction`) are covered too. */
+const DESTINATION_START = /\]\(\s*|\]:[ \t]*\n?[ \t]*|\b(?:href|action|formaction)\s*=\s*["']?|</gi;
 
 /** An entity that can spell part of a scheme, at lastIndex (CommonMark needs
  * the `;`, a browser decoding an attribute does not; browsers accept any
@@ -74,13 +78,21 @@ function schemeAt(text: string, at: number): { scheme: string; end: number } | n
   return null;
 }
 
-/** Does the link text closing at `close` (a `]`) open with `![`? */
+/** Is the character at `i` backslash-escaped (an odd run of `\` before it)? */
+function isEscaped(text: string, i: number): boolean {
+  let slashes = 0;
+  for (let j = i - 1; j >= 0 && text[j] === "\\"; j--) slashes++;
+  return slashes % 2 === 1;
+}
+
+/** Does the link text closing at `close` (a `]`) open with a live `![`? An
+ * escaped `\!` is a literal, so `\![x](…)` is a link, not an image. */
 function isImageText(text: string, close: number): boolean {
   let depth = 0;
   for (let i = close - 1; i >= 0 && close - i <= ALT_TEXT_WINDOW; i--) {
     if (text[i] === "]") depth++;
     else if (text[i] === "[" && depth > 0) depth--;
-    else if (text[i] === "[") return text[i - 1] === "!";
+    else if (text[i] === "[") return text[i - 1] === "!" && !isEscaped(text, i - 1);
   }
   return false;
 }

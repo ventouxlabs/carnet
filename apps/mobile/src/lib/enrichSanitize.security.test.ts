@@ -330,6 +330,15 @@ describe("review MEDIUM-6 — link destinations", () => {
     ["zero-padded numeric reference", '<a href="&#0000000106;avascript:alert(1)">x</a>', '<a href="#alert(1)">x</a>'],
     ["zero-padded reference in a destination", "[x](&#x000006A;avascript:alert(1))", "[x](#alert(1))"],
     ["space-padded angle destination", "[x](<   javascript:alert(1)>)", "[x](<#alert(1)>)"],
+    // Security re-review 2026-09-30: definitions behind a container, or with
+    // a label the column-0 rule could not read, and non-href URL attributes.
+    ["blockquoted reference definition", "> [x]: javascript:alert(1)\n", "> [x]: #alert(1)\n"],
+    ["list-item reference definition", "- [x]: javascript:alert(1)\n", "- [x]: #alert(1)\n"],
+    ["reference definition with an escaped ]", "[a\\]b]: javascript:alert(1)\n", "[a\\]b]: #alert(1)\n"],
+    ["reference definition with a multi-line label", "[a\nb]: javascript:alert(1)\n", "[a\nb]: #alert(1)\n"],
+    ["form action", '<form action="javascript:alert(1)">', '<form action="#alert(1)">'],
+    ["button formaction", '<button formaction="javascript:alert(1)">x</button>', '<button formaction="#alert(1)">x</button>'],
+    ["data: link behind an escaped !", "\\![x](data:image/svg+xml;base64,PHN2Zz4=)", "\\![x](#svg+xml;base64,PHN2Zz4=)"],
   ];
   for (const [name, input, expected] of cases) {
     it(`neutralizes a ${name}`, () => {
@@ -342,6 +351,9 @@ describe("review MEDIUM-6 — link destinations", () => {
       "[a](https://x.y/javascript:foo) and [b](#javascript) and <https://x.y>",
       "![image](data:image/png;base64,iVBORw0KGgo=) and ![a [nested] alt](data:image/gif;base64,R0lG)",
       "[ref]: https://example.com\n",
+      "> [ref]: https://example.com and see [a]: the note\n",
+      // An escaped backslash leaves the `!` live: still a genuine image.
+      "\\\\![image](data:image/png;base64,iVBORw0KGgo=)",
     ]) {
       expect(s(ok), ok).toBe(ok);
     }

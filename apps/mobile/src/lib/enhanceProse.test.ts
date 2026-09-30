@@ -203,6 +203,23 @@ describe("enhanceNoteProse — a reply can never become the note's frontmatter",
     const written = mockUpdateNote.mock.calls[0][1];
     expect(splitFrontmatter(written).header).not.toContain("dg-publish");
   });
+
+  // Security re-review 2026-09-30: stripping a marker can join the halves of
+  // any construct B3 left alone. Each reply is what the gate already passed.
+  it.each([
+    ["-[1]--\ndg-publish: true\n---\n", /^---\ndg-publish/],
+    ["`[1]= this.file.name` ", /`= this\.file\.name`/],
+    ["<[1]% tp.system.prompt('x') %> ", /<% tp/],
+    ["<scr[1]ipt>alert(1)</script> ", /<script>/],
+    ["[x](java[1]script:alert(1)) ", /javascript:/],
+    ["``[1]`dataviewjs\nx\n```\n", /```dataviewjs/],
+  ])("never lets citation stripping rejoin a live construct (%j)", async (lead, live) => {
+    mockDispatch.mockResolvedValue(ok(`${lead}Polished prose, long enough to pass.`));
+
+    await enhanceNoteProse({ body: `${LONG_PROSE}\n`, filepath: "f.md" });
+
+    expect(mockUpdateNote.mock.calls[0][1]).not.toMatch(live);
+  });
 });
 
 describe("enhanceNoteProse — disk freshness + write guard", () => {
