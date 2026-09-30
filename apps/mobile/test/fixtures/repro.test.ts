@@ -120,10 +120,12 @@ import {
   slugify,
   updateNoteIfUnchanged,
   writeIdea,
+  writeNote,
   writePerson,
 } from "../../src/lib/writer";
 import { getFrontmatterTags } from "../../src/lib/frontmatter";
 import { sanitizeAndNormalize } from "../../src/lib/enrichSanitize";
+import { extractChecklistLines } from "../../src/lib/checklist";
 
 beforeEach(() => {
   _files.clear();
@@ -290,5 +292,38 @@ describe("repro: OmniRoute canned responses", () => {
     expect(normalized).not.toBeNull();
     // Body length survives byte-for-byte past the frontmatter re-serialization.
     expect(normalized?.length).toBeGreaterThanOrEqual(content.length);
+  });
+});
+
+// ── Note capture: a task list survives with every line intact ────────────────
+// note-capture-mode PRD acceptance criteria 2-4. Pins sanitize/normalize
+// (noteType "note") → writeNote → the todo scan against a canned reply. It
+// does NOT prove a real model obeys "do not expand" — that half is on-device.
+
+describe("repro: note capture keeps every line (note-tasklist.json)", () => {
+  it("normalizes as a note, lands in Notes/, keeps every input line, and exposes the actions as todos", async () => {
+    const fixture = readOmniRouteFixture("note-tasklist.json") as ReturnType<
+      typeof readOmniRouteFixture
+    > & { input: string };
+    const content = fixture.choices?.[0]?.message.content ?? "";
+
+    const normalized = sanitizeAndNormalize(content, "note");
+    expect(normalized).not.toBeNull();
+    expect(normalized).toMatch(/^---\ncreated: 2026-09-27\ntags: \[note, errands, weekend\]\n---\n/);
+
+    const { filepath } = await writeNote("weekend-errands", normalized ?? "");
+    expect(filepath).toBe("file:///data/carnet/Notes/weekend-errands.md");
+    const written = await readNote(filepath);
+
+    for (const line of fixture.input.split("\n").map((l) => l.trim()).filter(Boolean)) {
+      expect(written).toContain(line);
+    }
+    // A context line is never turned into a task.
+    expect(written).not.toContain("- [ ] the car is in the east lot");
+    expect(extractChecklistLines(written).map((t) => t.text)).toEqual([
+      "call the dentist",
+      "buy stamps",
+      "renew passport",
+    ]);
   });
 });

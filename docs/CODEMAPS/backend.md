@@ -16,6 +16,7 @@ It has no LLM or mobile-runtime dependency. See `docs/mdcrm/architecture.md`.
 ## Capture → vault  (mode → enrich → write)
 ```
 Idea     CaptureScreen   → dispatcher.enrichIdea    → writer.writeIdea      → Ideas/{slug}.md
+Note     CaptureScreen   → dispatcher.enrichNote    → writer.writeNote      → Notes/{slug}.md
 Journal  CaptureScreen   → dispatcher.enrichJournal → writer.appendJournal  → Journal/YYYY-MM-DD.md
 Person   PhotoCapture    → ocr → enrichPerson        → writer.writePerson    → People/F-L.md
 Photo    PhotoCapture    → enrich (vision)           → writer.writeBinary    → Photos/{slug}.jpg
@@ -30,7 +31,7 @@ Share    ShareReceive    → enrichSharedImage / Link / raw file → writeIdea /
 The single OpenAI-compatible client behind the dispatcher. `lib/omniroute.ts` and
 `lib/localLlm.ts` were consolidated into it and **no longer exist**; older docs and
 archived plans naming them are history, not drift.
-`enrichIdea` `enrichJournal` `enrichPerson` `enrichSharedImage` `enrichSharedLink`
+`enrichIdea` `enrichNote` `enrichJournal` `enrichPerson` `enrichSharedImage` `enrichSharedLink`
 `transcribeAudio` `autoTranscribeIfEnabled` `promoteIdea` `listModels` `enhanceProse`
 `askRetrospective` `ocrCardViaVision`
 errors: `isNotConfiguredError` `isPermanentError` `isInsecureTransportError`;
@@ -54,7 +55,7 @@ writer.test.ts (file://) + writerSaf.test.ts (SAF harness).
 `listNoteFiles` excludes Syncthing `*.sync-conflict-*` copies;
 `listSyncConflictFiles` enumerates them (lib/syncConflicts.ts pairs them —
 Home banner + review dialog).
-`writeIdea` `writeSynthesis` (Notes/{slug}.md — saved retrospective-query answers)
+`writeIdea` `writeNote` (Notes/{slug}.md — captured notes) `writeSynthesis` (Notes/{slug}.md — saved retrospective-query answers)
 `writePerson` `writeBinary` `appendJournal` `updateNote` `moveToArchive`
 `readNote` `listNoteFiles`; attachments `injectAttachments` `listPairedBinaries`
 `resolvePairedUri` (read-only `findSubdir` — never creates dirs) `stripPairedBinaryLinks`;
@@ -130,12 +131,15 @@ payload to keep those apart).
 design: `vault.ts` pulls AsyncStorage at import time, so test mocks can import
 the real `subdirForUri` instead of hand-copying it.
 **The uri is authoritative wherever a decision turns on folder identity.**
-`inferNoteMode` collapses every unrecognized parent to `"idea"`, which is fine
-for display but wrong for the related-notes self-exclusion and for whether a
-note has an in-place re-enrichment path — both read `subdirForUri`. The
-`RecentDetail` label still shows "Idea" for a `Notes/` note; knowingly deferred,
-since fixing it means a new `CaptureMode` variant and that type is declared
-twice with different members (`storage.ts` vs `queue.ts`).
+`inferNoteMode` maps Ideas/→idea, Journal/→journal, People/→person, Notes/→note
+and collapses anything else to `"idea"`; a cached row's mode can also lag its
+folder until the next refresh. That is fine for display but wrong for the
+related-notes self-exclusion, which reads `subdirForUri`. Re-enrich is not a
+folder question: `Notes/` holds captured notes (re-enrichable) and saved Ask
+answers (never) alike, so `RecentDetailScreen` and `reEnrichNoteInPlace` gate on
+`isSynthesisNote` (frontmatter `tags: [synthesis]` or `question:`). `queue.ts`'s
+`CaptureMode` is derived from `QueuePayload["mode"]`, so it can't drift from
+`storage.ts`'s.
 
 ## Review-surface intelligence
 - `lib/relatedNotes.ts` (pure) — lexical related-note scoring over the cached

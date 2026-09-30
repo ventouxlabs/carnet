@@ -131,7 +131,8 @@ tampering.
 ## Reproducing bug reports
 A fixtures/repro harness exists (agent_roadmap item #1, built 2026-07-08):
 `npm -w @carnet/mobile run verify:capture-flow` runs the capture-flow test subset
-(writer/frontmatter/queue/vault/search/journal-tag-index/WYSIWYG round-trip) plus
+(writer/frontmatter/queue/vault/search/journal-tag-index/WYSIWYG round-trip, plus the
+save-first routing/save-first/finish-enrichment/capture-display suites) plus
 `test/fixtures/repro.test.ts` against real vault fixtures in
 `apps/mobile/test/fixtures/vault/`. Reproduce capture-flow bugs by adding a fixture +
 case there, or a targeted vitest against the relevant `lib/*.ts` module (`writer.ts`,

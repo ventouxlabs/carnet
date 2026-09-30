@@ -81,6 +81,18 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   `.claude/PRPs/plans/completed/self-hosted-sentry.plan.md` for why hosted crash reporting
   was rejected.
 
+## Landed, pending on-device verification
+
+- [ ] **Note capture mode** (PR #<n>) — a sixth mode, Note, writes create-only into
+  `Notes/` through a prompt that titles and tags a task list and NEVER expands it; action
+  lines become `- [ ]` and reach TodosScreen with no todo code changed. Always save-first
+  ("Preview ideas before saving" gates ideas only); queues offline; re-enrichable. Two
+  things not to re-litigate: (1) it deliberately and narrowly reverses the "no new capture
+  surface" non-goal of `notes-todo-capture.prd.md` — see the table in
+  `.claude/PRPs/prds/note-capture-mode.prd.md`; (2) `Notes/` intentionally holds two kinds
+  of file, told apart by frontmatter (`isSynthesisNote`), not folder. Drive Inbox (Android
+  Auto) stays idea-only. Plan: `.claude/PRPs/plans/note-capture-mode.plan.md`.
+
 ## Landed, device verification complete (benefit not yet measured)
 
 Code merged and green in CI, then verified against a real vault on hardware. The
