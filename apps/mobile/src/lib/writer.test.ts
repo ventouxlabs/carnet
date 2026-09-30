@@ -905,12 +905,19 @@ describe("create-only writes are atomic per directory", () => {
     expect(new Set([a.finalName, b.finalName])).toEqual(new Set(["pic.jpg", "pic-2.jpg"]));
   });
 
-  it("does not deadlock a same-day journal append racing a Journal/ sidecar", async () => {
+  it("a same-day journal append racing a Journal/ sidecar loses neither (no deadlock)", async () => {
+    // appendJournal's create branch takes the `dir:` lock inside its file
+    // lock (always file → dir), so a sidecar cannot claim the same free name.
     const results = await Promise.all([
       appendJournal("2026-09-30", "---\ntags: [a]\n---\none\n"),
       writeTextFile("Journal", "2026-09-30.md", "sidecar"),
       appendJournal("2026-09-30", "---\ntags: [b]\n---\ntwo\n"),
     ]);
     expect(results).toHaveLength(3);
+    const journal = [..._files.entries()].filter(([uri]) => uri.includes("/Journal/"));
+    const everything = journal.map(([, entry]) => entry.content).join("\n");
+    expect(everything).toContain("sidecar");
+    expect(everything).toContain("one");
+    expect(everything).toContain("two");
   });
 });

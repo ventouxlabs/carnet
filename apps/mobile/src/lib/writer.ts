@@ -167,7 +167,9 @@ async function serialize<T>(filepath: string, fn: () => Promise<T>): Promise<T> 
  *
  * The key lives in its own `dir:` namespace: appendJournal serializes on the
  * FILE path, and nesting two waits on one key deadlocks (serialize's chain
- * would queue the inner call behind the outer one it is part of).
+ * would queue the inner call behind the outer one it is part of). Lock order
+ * is always file → dir: appendJournal takes `dir:` inside its file lock for
+ * its create branch, and nothing holding `dir:` ever waits on a file key.
  *
  * Returns the created URI and the name that was chosen (SAF may still rename
  * on create; callers that link the name derive it from the URI).
@@ -260,7 +262,10 @@ export async function appendJournal(
   // it's still unique per file.
   const lockKey = `${journalUri}/${filename}`;
 
-  return serialize(lockKey, async () => {
+  // The `dir:` lock is taken INSIDE the file lock (always file → dir, never
+  // the reverse, so no deadlock): a writeUniqueFile into Journal/ could
+  // otherwise pick this same free name between our check and our create.
+  return serialize(lockKey, () => serialize(`dir:${journalUri}`, async () => {
     const existingUri = await root.fs.findChild(journalUri, filename);
 
     if (existingUri) {
@@ -286,7 +291,7 @@ export async function appendJournal(
 
     const filepath = await writeNewFile(journalUri, filename, markdown, root.fs);
     return { filepath, markdown };
-  });
+  }));
 }
 
 /**
