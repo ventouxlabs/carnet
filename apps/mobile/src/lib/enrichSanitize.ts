@@ -36,6 +36,7 @@ import { parseFrontmatter, splitFrontmatter } from "./frontmatter";
 import { certainlyFencedLines, isFenceLike, renameExecutableFence } from "./sanitizeFences";
 import { makeCodeBlockQueriesInert } from "./sanitizeCodeBlocks";
 import { makeInlineQueriesInert } from "./sanitizeInlineCode";
+import { neutralizeLinkTargets } from "./sanitizeLinks";
 
 export type NoteType = "idea" | "journal" | "person" | "shared";
 
@@ -111,7 +112,7 @@ interface SanitizeMode {
 const NOTE_MODE: SanitizeMode = { pass: sanitizePass, failClosed };
 const BODY_MODE: SanitizeMode = {
   pass: sanitizeBodyPass,
-  failClosed: (text) => defuseLeadingRule(neutralizeLinks(structureBody(bluntTriggers(text)))),
+  failClosed: (text) => defuseLeadingRule(neutralizeLinkTargets(structureBody(bluntTriggers(text)))),
 };
 
 /** Repeat a pass to a fixed point; fail closed at the cap. */
@@ -147,7 +148,7 @@ const MAX_PASSES = 8;
  */
 function failClosed(text: string): string {
   const { header, body } = splitFrontmatter(bluntTriggers(text));
-  return neutralizeLinks(header) + neutralizeLinks(structureBody(body));
+  return neutralizeLinkTargets(header) + neutralizeLinkTargets(structureBody(body));
 }
 
 function bluntTriggers(text: string): string {
@@ -268,14 +269,15 @@ function neutralizeText(text: string): string {
   s = s.replace(/<iframe\b[\s\S]*?<\/iframe\s*>/gi, "[iframe removed]");
   s = s.replace(/<iframe\b[^>]*>/gi, "[iframe removed]");
 
-  // on*= inline event-handler attributes (onclick=, onload=, …). Strip the
-  // whole attribute, quoted or bare, leaving the surrounding tag inert. The
-  // leading delimiter is whitespace, `/` (`<svg/onload=…>`) or the closing
-  // quote of the previous attribute (`src="x"onerror=…`, no space at all). A
-  // quote delimiter is kept so the previous attribute stays balanced.
-  s = s.replace(/([\s/"'])on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (_attr, delim: string) =>
-    delim === '"' || delim === "'" ? delim : "",
-  );
+  // on*= inline event-handler attributes (onclick=, onload=, …). After
+  // whitespace or `/` (`<svg/onload=…>`) the whole attribute, quoted or bare,
+  // is stripped, leaving the surrounding tag inert.
+  s = s.replace(/[\s/]on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  // Glued to the closing quote of the previous attribute (`src="x"onerror=…`)
+  // the `=` is entity-encoded instead: `onerror&#61;"…"` is one inert
+  // attribute NAME in HTML, and the same shape in prose (`'online=true'`)
+  // still renders its text rather than being deleted.
+  s = s.replace(/(["']on[a-z]+\s*)=/gi, "$1&#61;");
 
   // Raw HTML <code> element: Dataview evaluates EVERY rendered <code> whose
   // text starts with `=` / `$=`, not only markdown code spans. Escape the tag
@@ -283,31 +285,11 @@ function neutralizeText(text: string): string {
   // tags defeat any content check. Markdown spans: makeInlineQueriesInert.
   s = s.replace(/<code\b/gi, "&lt;code");
 
-  return neutralizeLinks(s);
+  // Link targets (sanitizeLinks.ts): each rewrite only REPLACES a scheme with
+  // `#`, so it cannot assemble a new construct and a second run is a no-op.
+  return neutralizeLinkTargets(s);
 }
 
-/**
- * Link-target rewrites. Each only REPLACES a scheme with `#` (never deletes),
- * so it cannot assemble a new construct and applying it twice is a no-op.
- */
-function neutralizeLinks(text: string): string {
-  // javascript: targets in ANY markdown link/image → replace the scheme so the
-  // target becomes inert while keeping paren balance (`](javascript:x)` →
-  // `](#x)`). Also covers a raw href="javascript:…".
-  const noJs = text
-    .replace(/(\]\(\s*)javascript:/gi, "$1#")
-    .replace(/(\bhref\s*=\s*["']?)javascript:/gi, "$1#");
-
-  // data: targets in NON-image links only. `[text](data:…)` → neutralized. The
-  // image exception is MIME-GATED: only `![alt](data:image/…)` (a genuine inline
-  // image — #60) is left untouched. A `data:text/html` (or any non-image mime)
-  // disguised with a leading `!` is NOT a safe image and is neutralized too.
-  return noJs.replace(
-    /(!?)(\[[^\]]*\]\(\s*)data:(image\/)?/gi,
-    (full, bang: string, mid: string, image: string | undefined) =>
-      bang && image ? full : `${bang}${mid}#`,
-  );
-}
 
 // ── Normalize frontmatter ─────────────────────────────────────────────────────
 

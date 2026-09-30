@@ -260,8 +260,15 @@ describe("extras — fences in containers, fake openers, quote-delimited on*=", 
     expect(s("<div>\n```js\n<img src=x onerror=alert(1)>\n```\n")).not.toMatch(/onerror/i);
   });
 
-  it("strips an on*= attribute glued to a closing quote — src=\"x\"onerror=", () => {
-    expect(s(`# T\n\n<img src="x"onerror="alert(1)">\n`)).toBe(`# T\n\n<img src="x">\n`);
+  it("defuses an on*= attribute glued to a closing quote — src=\"x\"onerror=", () => {
+    // Encoded, not deleted: `onerror&#61;"…"` is one inert attribute NAME.
+    expect(s(`# T\n\n<img src="x"onerror="alert(1)">\n`)).toBe(`# T\n\n<img src="x"onerror&#61;"alert(1)">\n`);
+  });
+
+  it("review MEDIUM-5: the quote-adjacent on*= form never deletes prose", () => {
+    expect(s("Turn it on = off? 'online=true' and \"x\"onward = 3\n")).toBe(
+      "Turn it on = off? 'online&#61;true' and \"x\"onward &#61; 3\n",
+    );
   });
 });
 
@@ -299,6 +306,38 @@ describe("review HIGH-1 — body-only replies", () => {
   it("leaves an ordinary body reply byte-identical", () => {
     const reply = "Went out early.\n\n- saw the heron\n\n---\n\nLater: `code` here.\n";
     expect(sanitizeReplyBody(reply)).toBe(reply);
+  });
+});
+
+// ── Review MEDIUM-6: link-scheme forms that passed ───────────────────────────
+
+describe("review MEDIUM-6 — link destinations", () => {
+  const cases: Array<[string, string, string]> = [
+    ["angle-bracket destination", "[x](<javascript:alert(1)>)", "[x](<#alert(1)>)"],
+    ["decimal entity in the scheme", "[x](jav&#97;script:alert(1))", "[x](#alert(1))"],
+    ["hex entity and &colon;", "[x](&#x6A;avascript&colon;alert(1))", "[x](#alert(1))"],
+    ["tab entity inside the scheme", "[x](<java&Tab;script:alert(1)>)", "[x](<#alert(1)>)"],
+    ["reference definition", "[x]: javascript:alert(1)\n\n[click][x]", "[x]: #alert(1)\n\n[click][x]"],
+    ["angle reference definition", "[x]: <javascript:alert(1)>\n", "[x]: <#alert(1)>\n"],
+    ["angle data: destination", "[x](<data:text/html,<b>hi</b>>)", "[x](<#text/html,<b>hi</b>>)"],
+    ["reference data: definition", "[x]: data:text/html,hi\n", "[x]: #text/html,hi\n"],
+    ["javascript: autolink", "see <javascript:alert(1)> now", "see <#alert(1)> now"],
+    ["entity-encoded raw href", '<a href="jav&#x61;script:alert(1)">x</a>', '<a href="#alert(1)">x</a>'],
+  ];
+  for (const [name, input, expected] of cases) {
+    it(`neutralizes a ${name}`, () => {
+      expect(s(input)).toBe(expected);
+    });
+  }
+
+  it("keeps ordinary links and inline data: images byte-identical", () => {
+    for (const ok of [
+      "[a](https://x.y/javascript:foo) and [b](#javascript) and <https://x.y>",
+      "![image](data:image/png;base64,iVBORw0KGgo=) and ![a [nested] alt](data:image/gif;base64,R0lG)",
+      "[ref]: https://example.com\n",
+    ]) {
+      expect(s(ok), ok).toBe(ok);
+    }
   });
 });
 
