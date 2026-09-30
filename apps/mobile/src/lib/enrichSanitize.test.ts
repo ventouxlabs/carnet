@@ -41,7 +41,7 @@ describe("sanitizeMarkdown — executable fences", () => {
     const input = ideaNote("# Title\n\nToday: `= this.file.name` here.\n");
     const out = sanitizeMarkdown(input);
     expect(out).not.toContain("`= this.file.name`");
-    expect(out).toContain("[inline dataview removed]");
+    expect(out).toContain("`inert: = this.file.name`");
   });
 
   it("(1t) renames a ```dataviewjs fence AND neutralizes Templater hidden in its body", () => {
@@ -240,12 +240,12 @@ describe("normalizeFrontmatter", () => {
     );
   });
 
-  it("appends unknown extra keys after the canonical ones", () => {
+  it("drops unknown extra keys (strict allowlist, B3 decision 1)", () => {
     const md =
       "---\ncreated: 2026-07-04\nstatus: seedling\ntags: [idea]\nsource: web\n---\n# T\n";
     const out = normalizeFrontmatter(md, "idea");
     expect(out).toBe(
-      "---\ncreated: 2026-07-04\nstatus: seedling\ntags: [idea]\nsource: web\n---\n# T\n",
+      "---\ncreated: 2026-07-04\nstatus: seedling\ntags: [idea]\n---\n# T\n",
     );
   });
 

@@ -60,6 +60,7 @@ import {
   enrichPerson,
   enrichSharedImage,
   enrichSharedLink,
+  enhanceProse,
   promoteIdea,
   LlmClientError,
   isPermanentError,
@@ -73,8 +74,10 @@ import {
   buildPersonPrompt,
   buildPromoteIdeaPrompt,
   buildRetrospectivePrompt,
+  withInjectionGuard,
 } from "./prompts";
 import type { SelectedNote } from "./retrospective";
+import { splitFrontmatter } from "./frontmatter";
 
 interface RequestBody {
   model: string;
@@ -413,7 +416,7 @@ describe("askRetrospective", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as RequestBody;
     expect(body.messages[0].content).toBe(
-      "You are an extremely terse retrospective assistant.",
+      withInjectionGuard("You are an extremely terse retrospective assistant."),
     );
   });
 });
@@ -655,6 +658,48 @@ describe("enrichSharedLink", () => {
   });
 });
 
+// ── Body-only replies carry no frontmatter contract (B3 allowlist) ────────────
+
+describe("body-only calls are not frontmatter-filtered", () => {
+  // Enhance and Ask return BODY text that lands below an app-owned header. A
+  // reply that opens with a `---` rule is prose, not properties: filtering it
+  // against a note type's key allowlist deleted every line in between.
+  const reply = "---\nIntro paragraph\n\nSummary: the gist\n---\nMore\n";
+  // The leading rule is rewritten to `***` (same render) so it can never be
+  // read as a frontmatter opener; everything else is kept.
+  const kept = "***\nIntro paragraph\n\nSummary: the gist\n---\nMore\n";
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  it("enhanceProse keeps prose between two leading `---` rules", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse(reply));
+    const { markdown } = await enhanceProse("some body prose to enhance", CONFIG);
+    expect(markdown).toBe(kept);
+  });
+
+  it("enhanceProse output can never open live frontmatter on a header-less note", async () => {
+    // enhanceProse.ts writes `${header}${title}…${reply.trim()}`, so with no
+    // header and no `# ` title the reply starts the file.
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse("---\ndg-publish: true\ncssclasses: x\n---\nRewritten prose."),
+    );
+    const { markdown } = await enhanceProse("some body prose to enhance", CONFIG);
+    expect(splitFrontmatter(markdown.trim()).header).toBe("");
+    expect(markdown).toBe("***\ndg-publish: true\ncssclasses: x\n---\nRewritten prose.");
+  });
+
+  it("askRetrospective keeps prose between two leading `---` rules", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse(reply));
+    const notes: SelectedNote[] = [
+      { uri: "file:///v/Ideas/a.md", title: "A", body: "notes", truncated: false },
+    ];
+    const { markdown } = await askRetrospective("q?", notes, CONFIG);
+    expect(markdown).toBe(kept);
+  });
+});
+
 // ── withSystemOverride (pure helper) ──────────────────────────────────────────
 
 describe("withSystemOverride", () => {
@@ -675,14 +720,14 @@ describe("withSystemOverride", () => {
   it("swaps in the override system, preserving the user content", () => {
     const result = withSystemOverride(pair, "my custom system");
     expect(result).toEqual({
-      system: "my custom system",
+      system: withInjectionGuard("my custom system"),
       user: "user-content",
     });
   });
 
   it("trims surrounding whitespace from the override", () => {
     const result = withSystemOverride(pair, "  trimmed  ");
-    expect(result.system).toBe("trimmed");
+    expect(result.system).toBe(withInjectionGuard("trimmed"));
   });
 });
 
@@ -724,7 +769,7 @@ describe("enrich entry points honor prompt overrides", () => {
     const body = JSON.parse(init.body as string) as RequestBody;
     expect(body.messages[0].role).toBe("system");
     expect(body.messages[0].content).toBe(
-      "You are an extremely terse summariser. Respond in one line.",
+      withInjectionGuard("You are an extremely terse summariser. Respond in one line."),
     );
   });
 
@@ -748,7 +793,7 @@ describe("enrich entry points honor prompt overrides", () => {
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as RequestBody;
-    expect(body.messages[0].content).toBe("journal-custom");
+    expect(body.messages[0].content).toBe(withInjectionGuard("journal-custom"));
   });
 
   it("enrichSharedImage applies the sharedImage override via its inline splice", async () => {
@@ -770,7 +815,7 @@ describe("enrich entry points honor prompt overrides", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as RequestBody;
     expect(body.messages[0].role).toBe("system");
-    expect(body.messages[0].content).toBe("shared-image-custom-system");
+    expect(body.messages[0].content).toBe(withInjectionGuard("shared-image-custom-system"));
     // User content stays multimodal (the image bytes still attach)
     expect(Array.isArray(body.messages[1].content)).toBe(true);
   });

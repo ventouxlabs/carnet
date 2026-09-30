@@ -5,7 +5,13 @@
  * comment for the full decomposition map.
  */
 
-import { sanitizeAndNormalize, sanitizeMarkdown, type NoteType } from "./enrichSanitize";
+import {
+  filterFrontmatterKeys,
+  normalizeFrontmatter,
+  sanitizeMarkdown,
+  sanitizeReplyBody,
+  type NoteType,
+} from "./enrichSanitize";
 import type { PromptPair } from "./prompts";
 import { parseErrorBody, sanitizeErrorMessage, withTimeout } from "./httpClient";
 import { LlmClientError, timeoutError } from "./llmErrors";
@@ -177,7 +183,7 @@ export async function executeChat(
   apiKey: string,
   model: string,
   messages: OpenAIMessage[],
-  noteType: NoteType,
+  noteType: NoteType | null,
   label: string,
   timeoutMs: number = FETCH_TIMEOUT_MS,
   allowInsecureTransport = false,
@@ -211,19 +217,50 @@ export async function executeChat(
         );
       }
 
-      // Security gate (B3): neutralize any executable content the model emitted
-      // (Dataview/Templater/raw HTML/javascript: links) and canonicalize the
-      // frontmatter BEFORE the markdown reaches any caller or the vault.
-      // Neutralization is unconditional; when frontmatter normalization fails
-      // (malformed / missing required keys) we still return the neutralized —
-      // and therefore inert — markdown rather than a note that could execute.
-      const stripped = stripCodeFences(content);
-      const markdown = sanitizeAndNormalize(stripped, noteType) ?? sanitizeMarkdown(stripped);
+      if (content.length > MAX_REPLY_CHARS) {
+        // Refuse rather than truncate: a cut reply can end mid-construct. The
+        // same classification as a malformed reply (status-200, retryable
+        // on the fallback provider).
+        throw new LlmClientError(
+          `${label} returned an oversized response (${content.length} characters; the limit is ${MAX_REPLY_CHARS})`,
+          response.status,
+        );
+      }
+      const markdown = gateModelMarkdown(stripCodeFences(content), noteType);
       const modelUsed = json.model ?? model;
       return { markdown, model: modelUsed };
     },
   );
 }
+
+/**
+ * Security gate (B3) for every model reply: neutralize any executable content
+ * the model emitted (Dataview/Templater/raw HTML/javascript: links) and, for a
+ * note type, canonicalize the frontmatter BEFORE the markdown reaches any
+ * caller or the vault. Neutralization is unconditional; when frontmatter
+ * normalization fails (malformed / missing required keys) the neutralized —
+ * and therefore inert — markdown is still returned rather than a note that
+ * could execute. The key allowlist applies to BOTH branches: a reply that
+ * omits a required key must not smuggle `dg-publish: true` through the
+ * fallback.
+ *
+ * `noteType: null` marks a BODY-ONLY reply (Enhance, Ask) with no frontmatter
+ * contract: sanitizeReplyBody never splits a header off it (a leading `---`
+ * block is prose there, and a key allowlist would delete it) and defuses a
+ * leading `---` so the reply can never open live frontmatter.
+ */
+function gateModelMarkdown(stripped: string, noteType: NoteType | null): string {
+  if (noteType === null) return sanitizeReplyBody(stripped);
+  const sanitized = sanitizeMarkdown(stripped);
+  return filterFrontmatterKeys(normalizeFrontmatter(sanitized, noteType) ?? sanitized, noteType);
+}
+
+/**
+ * Longest model reply the sanitizer is handed (256 Ki characters), far above
+ * any real note or answer. The sanitizer is linear, but it runs up to 8
+ * passes; an unbounded reply is still an availability problem on a phone.
+ */
+export const MAX_REPLY_CHARS = 256 * 1024;
 
 /**
  * Text-only chat completion. Builds [system, user] from a PromptPair and
@@ -234,7 +271,7 @@ export async function chatCompletion(
   apiKey: string,
   model: string,
   prompt: PromptPair,
-  noteType: NoteType,
+  noteType: NoteType | null,
   label: string,
   timeoutMs?: number,
   allowInsecureTransport = false,

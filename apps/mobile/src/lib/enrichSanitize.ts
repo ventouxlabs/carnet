@@ -5,7 +5,7 @@
  *
  * THREAT MODEL — the vault is a code-execution surface. Obsidian executes:
  *   - ```dataviewjs fenced blocks (Dataview plugin — near-ubiquitous)
- *   - ```dataview / inline `=…` DQL queries
+ *   - ```dataview / inline `=…` DQL and `$=…` DataviewJS queries (any <code>)
  *   - Templater `<%…%>` expressions (executes JS)
  *   - raw <script>/<iframe>, on*= handler attributes, javascript: link targets
  *
@@ -20,8 +20,11 @@
  *     code fences, so a `<%…%>` hidden inside ```js / ```dataviewjs executes
  *     regardless. It is Templater's own execution syntax, never legitimate
  *     captured content, so byte-for-byte fence preservation does not apply to it.
- *   - Neutralize raw HTML (<script>/<iframe> removed, on*= handlers stripped),
- *     javascript: link targets, and data: targets in NON-image link contexts.
+ *   - Neutralize raw HTML (<script>/<iframe> removed, on*= handlers stripped,
+ *     <code> escaped), javascript: link targets, and data: targets in
+ *     NON-image link contexts.
+ *   - Inline Dataview query spans are made INERT, content kept visible:
+ *     `= x` → `inert: = x` (sanitizeInlineCode.ts).
  *   - #60 inline images (`![alt](data:image/…)`) MUST survive — data: rewriting
  *     is scoped to `[text](data:…)` links only, never image sources.
  *
@@ -30,16 +33,24 @@
  */
 
 import { parseFrontmatter, splitFrontmatter } from "./frontmatter";
+import { certainlyFencedLines, isFenceLike, renameExecutableFence } from "./sanitizeFences";
+import { makeCodeBlockQueriesInert } from "./sanitizeCodeBlocks";
+import { removeElement, stripTemplater } from "./sanitizeElements";
+import { makeInlineQueriesInert } from "./sanitizeInlineCode";
+import { neutralizeLinkTargets } from "./sanitizeLinks";
 
 export type NoteType = "idea" | "journal" | "person" | "shared";
 
 /**
  * Canonical top-level frontmatter key order per note type, mirroring the exact
  * shape prompts.ts asks the model to emit. A valid, prompt-shaped note is thus
- * re-serialized BYTE-FOR-BYTE; unknown extra keys are appended in their
- * original order so nothing is dropped.
+ * re-serialized BYTE-FOR-BYTE. It is also the ALLOWLIST for model output
+ * (B3 decision 1): any other key a model emits — `dg-publish`, `publish`,
+ * `cssclasses`, or a custom key a prompt override asks for — is dropped.
+ * App-owned keys (`location`, `fallback`, `rev`, …) are all added after this
+ * gate, so it never sees them.
  */
-const CANONICAL_ORDER: Record<NoteType, readonly string[]> = {
+export const CANONICAL_ORDER: Record<NoteType, readonly string[]> = {
   idea: ["created", "status", "tags"],
   journal: ["date", "tags", "people", "ideas"],
   person: ["name", "company", "title", "email", "phone", "linkedin", "met", "where", "tags"],
@@ -61,64 +72,181 @@ const REQUIRED_KEYS: Record<NoteType, readonly string[]> = {
 
 // ── Sanitize (neutralize executable content) ──────────────────────────────────
 
-/** Matches a fenced-code opening line: optional indent, ``` or ~~~ (>=3), info. */
-const FENCE_OPEN = /^(\s*)(`{3,}|~{3,})(.*)$/;
-
-/** Fence languages Obsidian executes — renamed to `text` (body preserved). */
-const EXECUTABLE_FENCE_LANGS = new Set(["dataviewjs", "dataview"]);
 
 /**
- * Neutralize executable content in a markdown document. Fence-aware: the HTML /
- * templater / link transforms run ONLY on text OUTSIDE fenced code blocks, so a
- * user's captured ```js or ```html snippet is never mutated. Executable fence
- * languages are renamed in place. Pure and total — never returns null.
+ * Neutralize executable content in a markdown document. Frontmatter-aware and
+ * fence-aware: the header is neutralized line by line and re-emitted with
+ * exact `---` delimiters, then the body is scanned for fences from a clean
+ * state. The HTML / link transforms skip only lines that are CERTAINLY inside
+ * a fenced code block (see sanitizeFences.ts), so a user's captured ```js or
+ * ```html snippet is never mutated. Executable fence languages are renamed on
+ * every line. The pass repeats to a fixed point and fails closed at the cap,
+ * so the result is idempotent: s(s(x)) === s(x). Pure and total — never
+ * returns null, never throws.
  */
 export function sanitizeMarkdown(markdown: string): string {
-  // Templater `<%…%>` executes JS and ignores code fences (raw find-and-replace),
-  // so it must die EVERYWHERE — inside ```js/```html/```dataviewjs bodies too,
-  // not just the outside-fence text neutralizeText() handles. Strip it globally
-  // up front, before the fence-aware pass preserves any remaining fence bodies.
-  const lines = markdown
-    .replace(/<%[\s\S]*?%>/g, "[templater expression removed]")
-    .split("\n");
-  const out: string[] = [];
-  let textBuf: string[] = [];
+  return converge(markdown, NOTE_MODE);
+}
 
-  const flushText = (): void => {
-    if (textBuf.length > 0) {
-      out.push(neutralizeText(textBuf.join("\n")));
-      textBuf = [];
-    }
-  };
+/**
+ * Sanitize a model reply that is BODY text with no frontmatter contract —
+ * Enhance (rewritten prose) and Ask (a synthesized answer). It never splits
+ * off a header: a leading `---` … `---` block in such a reply is prose, and
+ * treating it as a header both skipped the body neutralizers' view of it and
+ * dropped its fence lines. Its first non-blank line is also defused when it
+ * starts with `---` (see defuseLeadingRule), because Enhance on a note with no
+ * header and no `# ` title writes the reply at the very top of the file, where
+ * a `---` line would open live frontmatter (`dg-publish: true`).
+ */
+export function sanitizeReplyBody(markdown: string): string {
+  return converge(markdown, BODY_MODE);
+}
 
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const fence = FENCE_OPEN.exec(line);
-    if (fence) {
-      flushText();
-      const [, indent, marker, info] = fence;
-      const lang = info.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
-      const isExecutable = EXECUTABLE_FENCE_LANGS.has(lang);
-      out.push(isExecutable ? `${indent}${marker}text` : line);
-      i++;
-      // Consume the block body verbatim up to (and including) a matching close.
-      const closeRe = new RegExp(`^\\s*${marker[0]}{${marker.length},}\\s*$`);
-      while (i < lines.length && !closeRe.test(lines[i])) {
-        out.push(lines[i]);
-        i++;
-      }
-      if (i < lines.length) {
-        out.push(lines[i]); // closing fence
-        i++;
-      }
-      continue;
-    }
-    textBuf.push(line);
-    i++;
+interface SanitizeMode {
+  pass: (text: string) => string;
+  /** Fail-closed result at the cap; must itself be a fixed point of `pass`. */
+  failClosed: (text: string) => string;
+}
+
+const NOTE_MODE: SanitizeMode = { pass: sanitizePass, failClosed };
+const BODY_MODE: SanitizeMode = {
+  pass: sanitizeBodyPass,
+  failClosed: (text) => defuseLeadingRule(neutralizeLinkTargets(structureBody(bluntTriggers(text)))),
+};
+
+/** Repeat a pass to a fixed point; fail closed at the cap. */
+function converge(markdown: string, mode: SanitizeMode): string {
+  let current = markdown;
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    const next = mode.pass(current);
+    if (next === current) return current;
+    current = next;
   }
-  flushText();
-  return out.join("\n");
+  return mode.failClosed(current);
+}
+
+/**
+ * Passes allowed to reach a fixed point. One pass can ASSEMBLE a live construct
+ * by deleting what separated its halves (`<sc onx="y"ript>` → `<script>`), so
+ * the whole pass — fence classification included — repeats until the output
+ * stops changing. Benign text converges on the first repeat.
+ */
+const MAX_PASSES = 8;
+
+/**
+ * Reached only when MAX_PASSES did not converge, i.e. adversarial input. The
+ * last iteration is NEVER returned (the next pass might still have changed
+ * it); every trigger the pass reacts to is removed bluntly instead, so the
+ * result is inert AND itself a fixed point (idempotence holds here too):
+ * `<` is escaped (no tag, no Templater, no raw <code>), every backtick becomes
+ * U+02CB ˋ (no code span, no backtick fence), the `=` after an on* name is
+ * entity-encoded (that rule needs no `<` to fire), then the body gets the
+ * same line-structural rewrites a pass applies (executable ~~~ fences
+ * renamed, query code blocks made inert) and the link rules run once more —
+ * header and body separately, as a pass sees them.
+ */
+function failClosed(text: string): string {
+  const { header, body } = splitFrontmatter(bluntTriggers(text));
+  return neutralizeLinkTargets(header) + neutralizeLinkTargets(structureBody(body));
+}
+
+function bluntTriggers(text: string): string {
+  return text
+    .replace(/</g, "&lt;")
+    .replace(/`/g, "\u02CB")
+    .replace(/(on[a-z]+\s*)=/gi, "$1&#61;");
+}
+
+/** The line-structural body rewrites: rename executable fences, then make
+ * code blocks that Dataview would run as queries inert. */
+function structureBody(body: string): string {
+  return structureBodyLines(body.split("\n")).join("\n");
+}
+
+function structureBodyLines(lines: readonly string[]): string[] {
+  return makeCodeBlockQueriesInert(lines.map(renameExecutableFence));
+}
+
+/**
+ * One full pass. Line endings are normalized to LF first: Obsidian treats a
+ * lone CR or CRLF as a line break, so a `\r`-terminated ```dataviewjs line
+ * is a live fence there but was invisible to a `\n`-only scan.
+ *
+ * Templater `<%…%>` executes JS and ignores code fences (raw find-and-replace),
+ * so it must die EVERYWHERE — inside ```js/```html/```dataviewjs bodies and the
+ * frontmatter too. Strip it globally before anything is preserved verbatim.
+ */
+function sanitizePass(markdown: string): string {
+  const text = normalizeAndStripTemplater(markdown);
+  const { header, body } = splitFrontmatter(text);
+  return header ? sanitizeHeader(header) + sanitizeBody(body) : sanitizeBody(text);
+}
+
+/** One body-only pass: no header split, leading `---` defused. */
+function sanitizeBodyPass(markdown: string): string {
+  return sanitizeBody(defuseLeadingRule(normalizeAndStripTemplater(markdown)));
+}
+
+function normalizeAndStripTemplater(markdown: string): string {
+  return stripTemplater(markdown.replace(/\r\n?/g, "\n"));
+}
+
+/**
+ * Make sure a body-only reply cannot start with a frontmatter opener. The
+ * first non-blank line, when it starts with `---`, becomes `***` if it is a
+ * thematic break (renders as the same rule) and is otherwise escaped as
+ * `\---…` (renders the same text). Leading blank lines count, because
+ * Enhance trims the reply before writing it.
+ */
+function defuseLeadingRule(text: string): string {
+  const lines = text.split("\n");
+  const first = lines.findIndex((line) => line.trim() !== "");
+  if (first === -1 || !lines[first].trimStart().startsWith("---")) return text;
+  const line = lines[first];
+  const indent = line.slice(0, line.length - line.trimStart().length);
+  const defused = /^(?:-[ \t]*){3,}$/.test(line.trim()) ? `${indent}***` : `${indent}\\${line.trimStart()}`;
+  return [...lines.slice(0, first), defused, ...lines.slice(first + 1)].join("\n");
+}
+
+/**
+ * Neutralize a frontmatter block one line at a time and re-emit it with
+ * exact `---` delimiters (splitFrontmatter accepts a loose `----` closer that
+ * Obsidian does not). A header line that is — or becomes, once neutralized —
+ * a `---` line or a fence marker is dropped: parseFrontmatter would drop it
+ * anyway, and a fence line here used to flip the body scan's fence parity so
+ * the whole body shipped unsanitized.
+ */
+function sanitizeHeader(header: string): string {
+  const closedByNewline = header.endsWith("\n");
+  const lines = (closedByNewline ? header.slice(0, -1) : header).split("\n");
+  const inner = lines
+    .slice(1, -1)
+    .map(neutralizeSegment)
+    .filter((line) => !line.trimStart().startsWith("---") && !isFenceLike(line));
+  return ["---", ...inner, "---"].join("\n") + (closedByNewline ? "\n" : "");
+}
+
+/** Rename executable fences everywhere and make query code blocks inert, then
+ * neutralize every line that is not certainly inside a fenced code block, one
+ * contiguous text run at a time (so multi-line constructs such as a
+ * `<script>` body are seen whole). */
+function sanitizeBody(body: string): string {
+  const lines = structureBodyLines(body.split("\n"));
+  const fenced = certainlyFencedLines(lines);
+  const runs: Array<{ fenced: boolean; lines: string[] }> = [];
+  lines.forEach((line, i) => {
+    const last = runs[runs.length - 1];
+    if (last && last.fenced === fenced[i]) last.lines.push(line);
+    else runs.push({ fenced: fenced[i], lines: [line] });
+  });
+  return runs
+    .map((run) => (run.fenced ? run.lines.join("\n") : neutralizeSegment(run.lines.join("\n"))))
+    .join("\n");
+}
+
+/** Everything that neutralizes a non-code text segment. */
+function neutralizeSegment(text: string): string {
+  return makeInlineQueriesInert(neutralizeText(text));
 }
 
 /**
@@ -130,49 +258,40 @@ function neutralizeText(text: string): string {
   let s = text;
 
   // Templater — executes JS. `<%= tp.date.now() %>`, `<% … %>`.
-  s = s.replace(/<%[\s\S]*?%>/g, "[templater expression removed]");
+  s = stripTemplater(s);
 
-  // <script>…</script> and a lone/unclosed opening tag.
-  s = s.replace(/<script\b[\s\S]*?<\/script\s*>/gi, "[script removed]");
-  s = s.replace(/<script\b[^>]*>/gi, "[script removed]");
+  // <script>…</script> and a lone/unclosed opening tag; then <iframe> alike.
+  s = removeElement(s, "script", "[script removed]");
+  s = removeElement(s, "iframe", "[iframe removed]");
 
-  // <iframe>…</iframe> and a lone/unclosed opening tag.
-  s = s.replace(/<iframe\b[\s\S]*?<\/iframe\s*>/gi, "[iframe removed]");
-  s = s.replace(/<iframe\b[^>]*>/gi, "[iframe removed]");
-
-  // on*= inline event-handler attributes (onclick=, onload=, …). Strip the
-  // whole attribute, quoted or bare, leaving the surrounding tag inert. The
-  // leading delimiter is whitespace OR `/` so tag-slash forms without a space
-  // (`<svg/onload=…>`, `<img/onerror=…>`) are caught, not just ` onload=…`.
+  // on*= inline event-handler attributes (onclick=, onload=, …). After
+  // whitespace or `/` (`<svg/onload=…>`) the whole attribute, quoted or bare,
+  // is stripped, leaving the surrounding tag inert.
   s = s.replace(/[\s/]on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  // Glued to the closing quote of the previous attribute (`src="x"onerror=…`)
+  // the `=` is entity-encoded instead: `onerror&#61;"…"` is one inert
+  // attribute NAME in HTML, and the same shape in prose (`'online=true'`)
+  // still renders its text rather than being deleted.
+  s = s.replace(/(["']on[a-z]+\s*)=/gi, "$1&#61;");
 
-  // Inline Dataview DQL query span: a code span whose content starts with `=`.
-  s = s.replace(/`=\s*[^`]*`/g, "`[inline dataview removed]`");
+  // Raw HTML <code> element: Dataview evaluates EVERY rendered <code> whose
+  // text starts with `=` / `$=`, not only markdown code spans. Escape the tag
+  // opener rather than inspecting the content — entities (`&#61;`) and nested
+  // tags defeat any content check. Markdown spans: makeInlineQueriesInert.
+  s = s.replace(/<code\b/gi, "&lt;code");
 
-  // javascript: targets in ANY markdown link/image → replace the scheme so the
-  // target becomes inert while keeping paren balance (`](javascript:x)` →
-  // `](#x)`). Also covers a raw href="javascript:…".
-  s = s.replace(/(\]\(\s*)javascript:/gi, "$1#");
-  s = s.replace(/(\bhref\s*=\s*["']?)javascript:/gi, "$1#");
-
-  // data: targets in NON-image links only. `[text](data:…)` → neutralized. The
-  // image exception is MIME-GATED: only `![alt](data:image/…)` (a genuine inline
-  // image — #60) is left untouched. A `data:text/html` (or any non-image mime)
-  // disguised with a leading `!` is NOT a safe image and is neutralized too.
-  s = s.replace(
-    /(!?)(\[[^\]]*\]\(\s*)data:(image\/)?/gi,
-    (full, bang: string, mid: string, image: string | undefined) =>
-      bang && image ? full : `${bang}${mid}#`,
-  );
-
-  return s;
+  // Link targets (sanitizeLinks.ts): each rewrite only REPLACES a scheme with
+  // `#`, so it cannot assemble a new construct and a second run is a no-op.
+  return neutralizeLinkTargets(s);
 }
+
 
 // ── Normalize frontmatter ─────────────────────────────────────────────────────
 
 /**
  * Validate + canonicalize the frontmatter of a (already-sanitized) note.
- * Returns the note with frontmatter re-serialized in canonical key order, or
+ * Returns the note with frontmatter re-serialized in canonical key order —
+ * non-canonical keys dropped (see CANONICAL_ORDER) — or
  * null when the block is missing/empty or a required key is absent. The body is
  * preserved byte-for-byte (splitFrontmatter guarantees header + body === input).
  */
@@ -201,16 +320,50 @@ export function normalizeFrontmatter(
       seen.add(key);
     }
   }
-  for (const [key, value] of fields) {
-    if (seen.has(key)) continue;
-    ordered.push([key, value]);
-    seen.add(key);
-  }
 
   const block = ordered
     .map(([key, value]) => (value ? `${key}: ${value}` : `${key}:`))
     .join("\n");
   return `---\n${block}\n---\n${body}`;
+}
+
+/** A column-0 `key:` line for exactly this key (YAML needs space or EOL after the colon). */
+function isKeyLine(line: string, key: string): boolean {
+  return line.startsWith(`${key}:`) && /^(\s|$)/.test(line.slice(key.length + 1));
+}
+
+/**
+ * Keep only `allowed` keys' lines. Deny by default at column 0: a canonical
+ * `key:` line opens a kept group; ANY other column-0 line — another key, a
+ * quoted `"dg-publish":` or explicit `? key` / `: value` form, a comment, a
+ * flow mapping — closes it and is dropped. Indented and `- ` item lines
+ * follow the group above them.
+ */
+function keepAllowedKeyLines(inner: readonly string[], allowed: readonly string[]): string[] {
+  const kept: string[] = [];
+  let keeping = false;
+  for (const line of inner) {
+    const continuation = /^\s/.test(line) || line === "" || line === "-" || line.startsWith("- ");
+    if (!continuation) keeping = allowed.some((key) => isKeyLine(line, key));
+    if (keeping) kept.push(line);
+  }
+  return kept;
+}
+
+/**
+ * Drop every frontmatter key a note of this type does not own (B3 decision 1),
+ * together with its continuation lines, and re-emit exact `---` delimiters.
+ * Unlike normalizeFrontmatter this never rejects and never reorders, so it is
+ * the allowlist for executeChat's fallback branch, where normalization
+ * failed. A note without frontmatter is returned unchanged.
+ */
+export function filterFrontmatterKeys(markdown: string, noteType: NoteType): string {
+  const { header, body } = splitFrontmatter(markdown);
+  if (!header) return markdown;
+  const closedByNewline = header.endsWith("\n");
+  const lines = (closedByNewline ? header.slice(0, -1) : header).split("\n");
+  const kept = keepAllowedKeyLines(lines.slice(1, -1), CANONICAL_ORDER[noteType]);
+  return ["---", ...kept, "---"].join("\n") + (closedByNewline ? "\n" : "") + body;
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────

@@ -869,3 +869,55 @@ describe("extractFrontmatterField", () => {
   });
 });
 
+
+// ── Concurrent create-only writes (B3 item 5) ────────────────────────────────
+// The file:// backend's createFile only builds a path and writeString then
+// writes it, so two writers that both chose the same free name used to both
+// "create" it and the second silently clobbered the first.
+
+describe("create-only writes are atomic per directory", () => {
+  beforeEach(() => {
+    clearFiles();
+  });
+
+  it("two concurrent same-slug writeIdea calls produce two distinct files", async () => {
+    const [a, b] = await Promise.all([writeIdea("same", "# A\n"), writeIdea("same", "# B\n")]);
+    expect(a.filepath).not.toBe(b.filepath);
+    expect(await readNote(a.filepath)).toBe("# A\n");
+    expect(await readNote(b.filepath)).toBe("# B\n");
+  });
+
+  it("different writers targeting one directory share its lock", async () => {
+    const [idea, text] = await Promise.all([
+      writeIdea("same", "# idea\n"),
+      writeTextFile("Ideas", "same.md", "# text\n"),
+    ]);
+    expect(idea.filepath).not.toBe(text.filepath);
+    expect(await readNote(idea.filepath)).toBe("# idea\n");
+    expect(await readNote(text.filepath)).toBe("# text\n");
+  });
+
+  it("two concurrent same-name writeBinary calls keep both payloads", async () => {
+    const [a, b] = await Promise.all([
+      writeBinary("Photos", "pic.jpg", "QUFB", "image/jpeg"),
+      writeBinary("Photos", "pic.jpg", "QkJC", "image/jpeg"),
+    ]);
+    expect(new Set([a.finalName, b.finalName])).toEqual(new Set(["pic.jpg", "pic-2.jpg"]));
+  });
+
+  it("a same-day journal append racing a Journal/ sidecar loses neither (no deadlock)", async () => {
+    // appendJournal's create branch takes the `dir:` lock inside its file
+    // lock (always file → dir), so a sidecar cannot claim the same free name.
+    const results = await Promise.all([
+      appendJournal("2026-09-30", "---\ntags: [a]\n---\none\n"),
+      writeTextFile("Journal", "2026-09-30.md", "sidecar"),
+      appendJournal("2026-09-30", "---\ntags: [b]\n---\ntwo\n"),
+    ]);
+    expect(results).toHaveLength(3);
+    const journal = [..._files.entries()].filter(([uri]) => uri.includes("/Journal/"));
+    const everything = journal.map(([, entry]) => entry.content).join("\n");
+    expect(everything).toContain("sidecar");
+    expect(everything).toContain("one");
+    expect(everything).toContain("two");
+  });
+});

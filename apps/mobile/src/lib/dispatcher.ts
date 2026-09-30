@@ -59,7 +59,8 @@ import * as llmClient from "./llmClient";
 import type { EnrichResult, ProviderConfig } from "./llmClient";
 import type { SelectedNote } from "./retrospective";
 import { isLocalNetworkUrl } from "./netAllowlist";
-import { upsertFrontmatterField } from "./frontmatter";
+import { preserveFrontmatterFields, upsertFrontmatterField } from "./frontmatter";
+import { CANONICAL_ORDER } from "./enrichSanitize";
 import {
   readNote,
   readPairedBinaryFromNote,
@@ -411,7 +412,15 @@ export async function promoteIdea(
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
     llmClient.promoteIdea(currentMarkdown, target, config),
   );
-  return withFallbackMarker(outcome);
+  // The B3 key allowlist drops every non-idea key the model echoes back, so
+  // re-apply the note's OWN app-owned fields (`fallback` provenance,
+  // `location`, …) explicitly; the model still owns the canonical ones.
+  const markdown = preserveFrontmatterFields(
+    outcome.result.markdown,
+    currentMarkdown,
+    CANONICAL_ORDER.idea,
+  );
+  return withFallbackMarker({ ...outcome, result: { ...outcome.result, markdown } });
 }
 
 /**
