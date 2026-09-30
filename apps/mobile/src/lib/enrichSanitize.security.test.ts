@@ -117,7 +117,7 @@ describe("item 4 — fixed point", () => {
   ];
 
   for (const [name, input, live] of rows) {
-    it.fails(`${name}: no live construct after sanitizing`, () => {
+    it(`${name}: no live construct after sanitizing`, () => {
       const out = s(input);
       expect(out).not.toMatch(live);
       expect(s(out)).toBe(out);
@@ -129,14 +129,14 @@ describe("item 4 — fixed point", () => {
     return `<img src=x${" o".repeat(depth)} onq='z'${"nx='z'".repeat(depth)}nx=alert(1)>`;
   }
 
-  it.fails("converges for shallow nesting without failing closed", () => {
+  it("converges for shallow nesting without failing closed", () => {
     const out = s(`# T\n\n${nested(2)}\n`);
     expect(out).not.toMatch(/on[a-z]+\s*=/i);
     expect(out).toContain("<img src=x");
     expect(s(out)).toBe(out);
   });
 
-  it.fails("fails CLOSED when the pass cap is hit — never returns the last iteration", () => {
+  it("fails CLOSED when the pass cap is hit — never returns the last iteration", () => {
     const out = s(`# T\n\n${nested(12)}\n`);
     expect(out).not.toContain("<");
     expect(out).toContain("&lt;img src=x");
@@ -273,20 +273,20 @@ function fuzzInputs(count: number, seed: number): string[] {
 }
 
 describe("invariants — total and idempotent", () => {
-  it.fails("s(s(x)) === s(x) over the sanitizer corpus", () => {
+  it("s(s(x)) === s(x) over the sanitizer corpus", () => {
     for (const input of CORPUS) {
       const once = s(input);
       expect(s(once), JSON.stringify(input)).toBe(once);
     }
   });
 
-  it.fails("never throws and is idempotent over 2000 seeded fuzz inputs", () => {
+  it("never throws and is idempotent over 2000 seeded fuzz inputs", () => {
     for (const input of fuzzInputs(2000, 0xb3)) {
       const once = s(input);
       expect(s(once), JSON.stringify(input)).toBe(once);
       expect(once).not.toMatch(/<%[\s\S]*?%>/); // a closed Templater tag
       // No executable fence opener survives on any line, behind any prefix.
-      expect(once).not.toMatch(/^(?:\s|>|[-*+]|\d{1,9}[.)])*(?:`{3,}|~{3,})\s*dataview(?:js)?(?:\s|$)/im);
+      expect(once).not.toMatch(/^(?:[^\S\n]|>|[-*+]|\d{1,9}[.)])*(?:`{3,}|~{3,})[^\S\n]*dataview(?:js)?(?:[^\S\n]|$)/im);
     }
   });
 });

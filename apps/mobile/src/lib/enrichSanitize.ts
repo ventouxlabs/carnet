@@ -72,10 +72,44 @@ const TEMPLATER_REMOVED = "[templater expression removed]";
  * state. The HTML / link transforms skip only lines that are CERTAINLY inside
  * a fenced code block (see sanitizeFences.ts), so a user's captured ```js or
  * ```html snippet is never mutated. Executable fence languages are renamed on
- * every line. Pure and total — never returns null, never throws.
+ * every line. The pass repeats to a fixed point and fails closed at the cap,
+ * so the result is idempotent: s(s(x)) === s(x). Pure and total — never
+ * returns null, never throws.
  */
 export function sanitizeMarkdown(markdown: string): string {
-  return sanitizePass(markdown);
+  let current = markdown;
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    const next = sanitizePass(current);
+    if (next === current) return current;
+    current = next;
+  }
+  return failClosed(current);
+}
+
+/**
+ * Passes allowed to reach a fixed point. One pass can ASSEMBLE a live construct
+ * by deleting what separated its halves (`<sc onx="y"ript>` → `<script>`), so
+ * the whole pass — fence classification included — repeats until the output
+ * stops changing. Benign text converges on the first repeat.
+ */
+const MAX_PASSES = 8;
+
+/**
+ * Reached only when MAX_PASSES did not converge, i.e. adversarial input. The
+ * last iteration is NEVER returned (the next pass might still have changed
+ * it); every trigger the pass reacts to is removed bluntly instead, so the
+ * result is inert AND itself a fixed point (idempotence holds here too):
+ * `<` is escaped (no tag, no Templater, no raw <code>), every backtick becomes
+ * U+02CB ˋ (no code span, no backtick fence), the `=` after an on* name is
+ * entity-encoded (that rule needs no `<` to fire), executable ~~~ fences are
+ * renamed, and the link rules run once more.
+ */
+function failClosed(text: string): string {
+  const blunt = text
+    .replace(/</g, "&lt;")
+    .replace(/`/g, "\u02CB")
+    .replace(/(on[a-z]+\s*)=/gi, "$1&#61;");
+  return neutralizeLinks(blunt.split("\n").map(renameExecutableFence).join("\n"));
 }
 
 /**
@@ -164,23 +198,30 @@ function neutralizeText(text: string): string {
   // Inline Dataview DQL query span: a code span whose content starts with `=`.
   s = s.replace(/`=\s*[^`]*`/g, "`[inline dataview removed]`");
 
+  return neutralizeLinks(s);
+}
+
+/**
+ * Link-target rewrites. Each only REPLACES a scheme with `#` (never deletes),
+ * so it cannot assemble a new construct and applying it twice is a no-op.
+ */
+function neutralizeLinks(text: string): string {
   // javascript: targets in ANY markdown link/image → replace the scheme so the
   // target becomes inert while keeping paren balance (`](javascript:x)` →
   // `](#x)`). Also covers a raw href="javascript:…".
-  s = s.replace(/(\]\(\s*)javascript:/gi, "$1#");
-  s = s.replace(/(\bhref\s*=\s*["']?)javascript:/gi, "$1#");
+  const noJs = text
+    .replace(/(\]\(\s*)javascript:/gi, "$1#")
+    .replace(/(\bhref\s*=\s*["']?)javascript:/gi, "$1#");
 
   // data: targets in NON-image links only. `[text](data:…)` → neutralized. The
   // image exception is MIME-GATED: only `![alt](data:image/…)` (a genuine inline
   // image — #60) is left untouched. A `data:text/html` (or any non-image mime)
   // disguised with a leading `!` is NOT a safe image and is neutralized too.
-  s = s.replace(
+  return noJs.replace(
     /(!?)(\[[^\]]*\]\(\s*)data:(image\/)?/gi,
     (full, bang: string, mid: string, image: string | undefined) =>
       bang && image ? full : `${bang}${mid}#`,
   );
-
-  return s;
 }
 
 // ── Normalize frontmatter ─────────────────────────────────────────────────────
