@@ -60,6 +60,7 @@ import type { EnrichResult, ProviderConfig } from "./llmClient";
 import type { SelectedNote } from "./retrospective";
 import { isLocalNetworkUrl } from "./netAllowlist";
 import { upsertFrontmatterField } from "./frontmatter";
+import { keepsUserLines, withUserLines } from "./noteLineGuard";
 import {
   readNote,
   readPairedBinaryFromNote,
@@ -317,6 +318,18 @@ export async function enrichIdea(
   return withFallbackMarker(outcome);
 }
 
+/** The note prompt's hard rule — never expand — enforced on the reply rather
+ * than trusted: a reply that drops, rewords, reorders or adds lines keeps its
+ * frontmatter and title, and gets the user's own lines back verbatim. No new
+ * status and no retry. A compliant reply is returned untouched. */
+function keepNoteLines(text: string, result: EnrichResult): EnrichResult {
+  if (keepsUserLines(text, result.markdown)) return result;
+  return { ...result, markdown: withUserLines(text, result.markdown) };
+}
+
+/** Every note enrichment — submit (ideaSaveFirst.enrichIdeaInPlace), the
+ * queue drain, Finish enrichment and Re-enrich — comes through here, so the
+ * line guard lives here once. */
 export async function enrichNote(
   text: string,
   options?: EnrichmentOptions,
@@ -332,7 +345,8 @@ export async function enrichNote(
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
     llmClient.enrichNote(text, config, overrides.note, availableTags),
   );
-  return withFallbackMarker(outcome);
+  // withFallbackChain throws on failure, so this is always a successful reply.
+  return keepNoteLines(text, withFallbackMarker(outcome));
 }
 
 export async function enrichJournal(

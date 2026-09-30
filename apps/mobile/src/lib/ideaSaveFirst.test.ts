@@ -699,6 +699,22 @@ describe("save-first note mode", () => {
     expect(_files.get(filepath)!.content).toBe(NOTE_MD);
   });
 
+  it("writes the user's lines, not an expanded reply (submit, Finish and Re-enrich all land here)", async () => {
+    const text = "Weekend errands\ncall the dentist";
+    const { filepath, mtime } = await writeRawIdea({ mode: "note", text, tags: [] });
+    enrichNoteMock.mockResolvedValue({
+      markdown:
+        "---\ncreated: 2026-09-27\ntags: [note, errands]\n---\n# Weekend errands\n\nA busy weekend.\n- [ ] call the dentist to book a cleaning\n",
+      model: "test",
+    });
+
+    const outcome = await enrichIdeaInPlace({ mode: "note", filepath, expectedMtime: mtime, text, tags: [] });
+
+    const onDisk = "---\ncreated: 2026-09-27\ntags: [note, errands]\n---\n# Weekend errands\n\ncall the dentist\n";
+    expect(outcome).toEqual({ kind: "updated", markdown: onDisk });
+    expect(_files.get(filepath)!.content).toBe(onDisk);
+  });
+
   it("uses the note's captured profile tags after the active profile changes", async () => {
     const { filepath, mtime } = await writeRawIdea({ mode: "note", text: "personal note", tags: [] });
     vi.mocked(getVaultTagStrings).mockImplementation(async (profileIdOrLimit?: string | number) =>

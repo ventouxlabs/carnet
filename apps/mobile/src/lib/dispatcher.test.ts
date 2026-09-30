@@ -824,3 +824,76 @@ describe("dispatcher enrichNote", () => {
     expect(systemOf()).not.toContain("work-secret");
   });
 });
+
+// ── note capture mode: "never expand" enforced in code (plan Task 10) ────────
+//
+// Replies go through the REAL llmClient + sanitizer (fetch is the only mock
+// here), so each reply below is what the model sent, not what arrives.
+
+describe("dispatcher enrichNote keeps the user's lines", () => {
+  const INPUT = "call the dentist\nbuy stamps";
+
+  beforeEach(() => {
+    vi.mocked(getVaultTagStrings).mockReset().mockResolvedValue([]);
+  });
+
+  it("replaces an expanded body with the user's lines verbatim, keeping the model's title and tags", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse(
+        "---\ncreated: 2026-09-29\ntags: [note, errands]\n---\n# Errands\n\n" +
+          "You should call the dentist soon to book a cleaning.\n- [ ] buy stamps\n- [ ] buy envelopes too\n",
+      ),
+    );
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-29\ntags: [note, errands]\n---\n# Errands\n\ncall the dentist\nbuy stamps\n",
+    );
+  });
+
+  it("passes a compliant reply through byte-for-byte", async () => {
+    const compliant =
+      "---\ncreated: 2026-09-29\ntags: [note, errands]\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n";
+    fetchMock.mockResolvedValueOnce(makeOkResponse(compliant));
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(compliant);
+  });
+
+  it("compares against the user's raw text, so a line the sanitizer altered comes back whole (R6)", async () => {
+    // neutralizeText's on*= stripper eats ` once = daily` from plain text.
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse(
+        "---\ncreated: 2026-09-29\ntags: [note, plants]\n---\n# Plants\n\n- [ ] water the ferns once = daily\n",
+      ),
+    );
+
+    const result = await enrichNote("water the ferns once = daily");
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-29\ntags: [note, plants]\n---\n# Plants\n\nwater the ferns once = daily\n",
+    );
+  });
+
+  it("keeps the fallback-provider marker when it falls back to the user's lines", async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      ...BASE_SETTINGS,
+      fallbackProviderId: "relais",
+      llmProviders: BASE_SETTINGS.llmProviders.map((p) =>
+        p.id === "relais" ? { ...p, model: "local-fallback-model" } : p,
+      ),
+    });
+    fetchMock.mockRejectedValueOnce(new TypeError("Network request failed"));
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse("---\ncreated: 2026-09-29\ntags: [note]\n---\n# Errands\n\nA long expansion.\n"),
+    );
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-29\ntags: [note]\nfallback: relais\n---\n# Errands\n\ncall the dentist\nbuy stamps\n",
+    );
+  });
+});

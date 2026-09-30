@@ -295,4 +295,18 @@ describe("buildNotePrompt (note capture: tidy and tag, never expand)", () => {
   it("asks for the note tag plus two suggestions", () => {
     expect(buildNotePrompt("x").system).toContain("tags: [note, {tag1}, {tag2}]");
   });
+
+  // Re-enrich feeds an already-enriched note back in. noteLineGuard enforces
+  // "keep the lines"; these two rules make a compliant reply the likely one.
+  it("reuses an existing # heading as the title on re-enrich", () => {
+    expect(buildNotePrompt("# Errands\n- [ ] x").system).toContain(
+      'If the text already starts with a "# " heading, reuse it as the title',
+    );
+  });
+
+  it("keeps existing checkboxes, ticked or not, exactly as written", () => {
+    expect(buildNotePrompt("- [x] done").system).toContain(
+      'Keep existing "- [ ]" and "- [x]" lines exactly as written',
+    );
+  });
 });

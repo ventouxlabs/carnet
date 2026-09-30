@@ -879,6 +879,35 @@ describe("drainQueue — notes and unknown modes", () => {
     expect(rows().length).toBe(0);
   });
 
+  it("drains an expanded reply with the user's lines verbatim, not the model's prose", async () => {
+    // The dispatcher runs for real here (only llmClient is mocked), so this
+    // is the drain reaching the same line guard as submit and re-enrich.
+    const { enrichNote } = await import("./llmClient");
+    const { updateNoteIfUnchanged } = await import("./writer");
+    vi.mocked(enrichNote).mockResolvedValueOnce({
+      markdown:
+        "---\ncreated: 2026-09-29\ntags: [note]\n---\n# Errands\n\nBook a cleaning with the dentist this week.\n- [ ] buy stamps\n",
+      model: "test",
+    });
+    await enqueue({
+      mode: "note",
+      text: "call the dentist\n- [ ] buy stamps",
+      filepath: "file:///carnet/Notes/call-the-dentist.md",
+      baselineMtime: 7,
+      baselineContent: "RAW",
+    });
+
+    await drainQueue();
+
+    expect(vi.mocked(updateNoteIfUnchanged)).toHaveBeenCalledWith(
+      "file:///carnet/Notes/call-the-dentist.md",
+      "---\ncreated: 2026-09-29\ntags: [note]\n---\n# Errands\n\ncall the dentist\n- [ ] buy stamps\n",
+      7,
+      "RAW",
+    );
+    expect(rows().length).toBe(0);
+  });
+
   it("keeps a row this build cannot route, instead of removing it as if it had drained", async () => {
     // A row written by a newer build and drained after a downgrade. Before
     // the exhaustive else, processRow returned normally and the row was

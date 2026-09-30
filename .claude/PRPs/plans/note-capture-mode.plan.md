@@ -2990,6 +2990,14 @@ Step 6's push/PR. Every commit ends with the mobile gate and the Drive Inbox gat
 
 **Commit shape:** one commit per numbered item (1 and 2 may share one), conventional `feat(note)`/`fix(note)`/`test(note)`, staging explicit paths only.
 
+**Deviations, as implemented (one line each):**
+- Item 1: `dispatcher.test.ts` runs the real `llmClient` against `fetchMock`, so the expanded/compliant replies go through `makeOkResponse` (and the real sanitizer), not a mocked `llmClient.enrichNote`.
+- Item 1: the two matching rules are one check: the body must equal the input lines one-for-one, in order (so a duplicated line fails), trying the first ATX heading both as a match and as a new title.
+- Item 1: the guard compares against the user's raw text, not a sanitized copy, so a line the sanitizer altered (R6 `once = daily`) comes back whole in the fallback. The fallback body is the same raw text the save-first stub already writes.
+- Item 1: checked state must match both ways: a model that ticks a todo fails like one that un-ticks it.
+- Item 1: indentation is ignored along with trailing whitespace (the line is trimmed before its marker is stripped).
+- Item 1: `withUserLines` puts the model's title *in place of* an identical first input line instead of dropping it, so the note keeps an H1 (`injectImageEmbed` puts attachments above the frontmatter when there is none). It does not stack the model's title on an input that already starts with its own `# ` H1 (re-enrich).
+
 ---
 
 ## Risks and accepted trade-offs

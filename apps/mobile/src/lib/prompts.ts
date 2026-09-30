@@ -82,12 +82,14 @@ export function buildNotePrompt(input: string): PromptPair {
   const today = todayLocal();
   const system = `You are a personal knowledge assistant. The user has captured a note —
 working notes, a task list, or things they need to get done. Your job is to:
-1. Give it a concise title (5 words max, slug-friendly)
+1. Give it a concise title (5 words max, slug-friendly).
+   If the text already starts with a "# " heading, reuse it as the title.
 2. Keep the user's own lines. DO NOT expand, summarise, reword, or add prose.
    Preserve their wording and their order.
 3. Render a line as a markdown checkbox ("- [ ] ...") ONLY if it is already an
    action the user wrote, phrased faithfully from the input — NEVER invent tasks.
    Leave context and reference lines exactly as they are.
+   Keep existing "- [ ]" and "- [x]" lines exactly as written.
 4. Suggest 2-3 relevant tags
 
 ${INJECTION_GUARD}

@@ -1,0 +1,183 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { keepsUserLines, withUserLines } from "./noteLineGuard";
+
+const FM = "---\ncreated: 2026-09-29\ntags: [note, errands]\n---\n";
+
+function fixture(name: string): { input: string; content: string } {
+  const raw = JSON.parse(
+    readFileSync(join(__dirname, "../../test/fixtures/omniroute", name), "utf8"),
+  ) as { input: string; choices: Array<{ message: { content: string } }> };
+  return { input: raw.input, content: raw.choices[0].message.content };
+}
+
+describe("keepsUserLines — compliant replies pass", () => {
+  it("accepts the repro fixture: a new title from the first line, actions as checkboxes", () => {
+    const { input, content } = fixture("note-tasklist.json");
+    expect(keepsUserLines(input, content)).toBe(true);
+  });
+
+  it("allows a plain or bulleted line to become a checkbox", () => {
+    const input = "call the dentist\n- buy stamps\n* post the letter\n+ fetch the car";
+    const out = `${FM}# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n- [ ] post the letter\n- [ ] fetch the car\n`;
+    expect(keepsUserLines(input, out)).toBe(true);
+  });
+
+  it("allows a new title that is not one of the user's lines", () => {
+    expect(keepsUserLines("call the dentist", `${FM}# Errands\n\n- [ ] call the dentist\n`)).toBe(true);
+  });
+
+  it("allows a new title while the same text is also kept as a line", () => {
+    const input = "Weekend errands\ncall the dentist";
+    const out = `${FM}# Weekend errands\n\nWeekend errands\n- [ ] call the dentist\n`;
+    expect(keepsUserLines(input, out)).toBe(true);
+  });
+
+  it("passes a re-enrich whose note already has the same # Title", () => {
+    const input = "# Weekend errands\n\n- [ ] call the dentist\n- [x] buy stamps";
+    const out = `${FM}# Weekend errands\n\n- [ ] call the dentist\n- [x] buy stamps\n`;
+    expect(keepsUserLines(input, out)).toBe(true);
+  });
+
+  it("ignores blank lines, trailing whitespace, CRLF and indentation", () => {
+    const input = "call the dentist   \r\n\r\n  - buy stamps\r\n";
+    const out = `${FM}# Errands\n\n\n- [ ] call the dentist\n\n- [ ] buy stamps  \n\n`;
+    expect(keepsUserLines(input, out)).toBe(true);
+  });
+
+  it("treats - [X] and - [x] as the same checked state", () => {
+    expect(keepsUserLines("- [X] buy stamps", `${FM}# Stamps\n\n- [x] buy stamps\n`)).toBe(true);
+  });
+
+  it("parses a reply with an empty or missing frontmatter block", () => {
+    expect(keepsUserLines("call the dentist", "---\n---\n# Errands\n\n- [ ] call the dentist\n")).toBe(true);
+    expect(keepsUserLines("call the dentist", "# Errands\n\n- [ ] call the dentist\n")).toBe(true);
+  });
+});
+
+describe("keepsUserLines — expansions fail", () => {
+  it("fails a dropped line", () => {
+    expect(keepsUserLines("call the dentist\nbuy stamps", `${FM}# Errands\n\n- [ ] call the dentist\n`)).toBe(false);
+  });
+
+  it("fails a reworded line", () => {
+    expect(
+      keepsUserLines("call the dentist", `${FM}# Errands\n\n- [ ] Call the dentist to book a cleaning\n`),
+    ).toBe(false);
+  });
+
+  it("fails an added prose line", () => {
+    const out = `${FM}# Errands\n\nHere are your errands for the weekend.\n- [ ] call the dentist\n`;
+    expect(keepsUserLines("call the dentist", out)).toBe(false);
+  });
+
+  it("fails an added task", () => {
+    const out = `${FM}# Errands\n\n- [ ] call the dentist\n- [ ] floss daily\n`;
+    expect(keepsUserLines("call the dentist", out)).toBe(false);
+  });
+
+  it("fails a duplicated line", () => {
+    const out = `${FM}# Errands\n\n- [ ] call the dentist\n- [ ] call the dentist\n`;
+    expect(keepsUserLines("call the dentist", out)).toBe(false);
+  });
+
+  it("fails reordered lines", () => {
+    const out = `${FM}# Errands\n\n- [ ] buy stamps\n- [ ] call the dentist\n`;
+    expect(keepsUserLines("call the dentist\nbuy stamps", out)).toBe(false);
+  });
+
+  it("fails an un-ticked done todo", () => {
+    expect(keepsUserLines("- [x] buy stamps", `${FM}# Stamps\n\n- [ ] buy stamps\n`)).toBe(false);
+    expect(keepsUserLines("- [x] buy stamps", `${FM}# Stamps\n\nbuy stamps\n`)).toBe(false);
+  });
+
+  it("fails a todo the model ticked on the user's behalf", () => {
+    expect(keepsUserLines("- [ ] buy stamps", `${FM}# Stamps\n\n- [x] buy stamps\n`)).toBe(false);
+    expect(keepsUserLines("buy stamps", `${FM}# Stamps\n\n- [x] buy stamps\n`)).toBe(false);
+  });
+
+  it("allows only one new heading — a second added heading is prose", () => {
+    const out = `${FM}# Errands\n\n## Health\n- [ ] call the dentist\n`;
+    expect(keepsUserLines("call the dentist", out)).toBe(false);
+  });
+
+  it("does not read the reply's frontmatter as body lines", () => {
+    // `tags: [note, errands]` is not one of the user's lines, and must not be
+    // required to be one either.
+    expect(keepsUserLines("call the dentist", `${FM}- [ ] call the dentist\n`)).toBe(true);
+  });
+});
+
+describe("withUserLines — the fallback", () => {
+  it("keeps the model's frontmatter and title, and the user's lines verbatim", () => {
+    const input = "call the dentist\n\nbuy stamps  ";
+    const expanded = `${FM}# Errands\n\nYou should call the dentist soon.\n- [ ] buy stamps\n`;
+    expect(withUserLines(input, expanded)).toBe(`${FM}# Errands\n\ncall the dentist\n\nbuy stamps\n`);
+  });
+
+  it("uses the title in place of an identical first line rather than repeating it", () => {
+    // Keeps an H1 in the file: injectImageEmbed puts an attachment under the
+    // H1, and above the whole document (frontmatter included) when there is none.
+    const input = "Weekend errands\n\ncall the dentist";
+    const expanded = `${FM}# Weekend errands\n\nA busy weekend ahead.\n- [ ] call the dentist\n`;
+    expect(withUserLines(input, expanded)).toBe(`${FM}# Weekend errands\n\ncall the dentist\n`);
+  });
+
+  it("does not stack a second H1 on a note that already starts with one", () => {
+    const input = "# Groceries\n- [ ] milk\n- [x] eggs";
+    const expanded = `${FM}# Shopping list\n\n- [ ] milk\n- [ ] eggs\n- [ ] bread\n`;
+    expect(withUserLines(input, expanded)).toBe(`${FM}# Groceries\n- [ ] milk\n- [x] eggs\n`);
+  });
+
+  it("writes the user's lines alone when the reply has no title", () => {
+    expect(withUserLines("call the dentist", `${FM}Sure! Call the dentist.\n`)).toBe(
+      `${FM}call the dentist\n`,
+    );
+  });
+
+  it("writes the user's lines alone when the reply has no frontmatter", () => {
+    expect(withUserLines("call the dentist", "# Errands\n\nCall them.\n")).toBe(
+      "# Errands\n\ncall the dentist\n",
+    );
+  });
+
+  it("never merges the closing fence into the body", () => {
+    expect(withUserLines("call the dentist", "---\ntags: [note]\n---")).toBe(
+      "---\ntags: [note]\n---\ncall the dentist\n",
+    );
+  });
+
+  it("always satisfies keepsUserLines itself (property over the fixtures)", () => {
+    const tasklist = fixture("note-tasklist.json");
+    const inputs = [
+      tasklist.input,
+      "Weekend errands\ncall the dentist",
+      "# Groceries\n- [ ] milk\n- [x] eggs",
+      "## Monday\n- [ ] call the dentist\n## Tuesday\n- [X] buy stamps",
+      "- [x] done already\nstill to do",
+      "  indented line\n\n\nlast line  ",
+      "one line",
+    ];
+    const replies = [
+      tasklist.content,
+      `${FM}# Weekend errands\n\nExpanded prose.\n`,
+      `${FM}# Groceries\n\nExpanded prose.\n`,
+      `${FM}# Something new\n\nExpanded prose.\n`,
+      `${FM}No title, only prose.\n`,
+      "# No frontmatter\n\nprose\n",
+      "---\n---\n",
+      "",
+    ];
+    for (const input of inputs) {
+      for (const reply of replies) {
+        expect({ input, reply, ok: keepsUserLines(input, withUserLines(input, reply)) }).toEqual({
+          input,
+          reply,
+          ok: true,
+        });
+      }
+    }
+  });
+});
