@@ -25,6 +25,7 @@ import {
 } from "./enhanceProse";
 import { getModificationTime, readNote, updateNoteIfUnchanged } from "./writer";
 import { enhanceProse as dispatchEnhance } from "./dispatcher";
+import { splitFrontmatter } from "./frontmatter";
 
 const mockUpdateNote = vi.mocked(updateNoteIfUnchanged);
 const mockReadNote = vi.mocked(readNote);
@@ -184,6 +185,23 @@ describe("droppedUrls", () => {
     expect(droppedUrls(src, "preserved: https://maps.test/Qb?g_st=ac")).toEqual([
       "https://maps.test/Qb",
     ]);
+  });
+});
+
+describe("enhanceNoteProse — a reply can never become the note's frontmatter", () => {
+  // Review 2026-09-30: the gate defuses a reply's leading `---`, but a citation
+  // marker in front of it hid it from the gate, and stripCitationMarkers then
+  // re-exposed it at the top of a header-less, title-less note.
+  it.each([
+    ["[1]\n---\ndg-publish: true\n---\n"],
+    ["[12] ---\ndg-publish: true\n---\n"],
+  ])("defuses a --- block revealed by citation stripping (%j)", async (lead) => {
+    mockDispatch.mockResolvedValue(ok(`${lead}Polished prose, long enough to pass.`));
+
+    await enhanceNoteProse({ body: `${LONG_PROSE}\n`, filepath: "f.md" });
+
+    const written = mockUpdateNote.mock.calls[0][1];
+    expect(splitFrontmatter(written).header).not.toContain("dg-publish");
   });
 });
 
