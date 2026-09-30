@@ -10,12 +10,17 @@
  *     HTML / link / inline-span neutralizers may skip them (a user's captured
  *     ```js or ```html snippet must survive byte-for-byte). Guessing wrong in
  *     the "inside a fence" direction ships live markdown, so a line counts as
- *     fenced only when EVERY plausible parse agrees:
- *       - CommonMark top level: opener indented ≤3 spaces, no backtick in a
- *         backtick fence's info string; closer ≤3 spaces, same char, ≥ length.
- *       - list-item parse: an indented opener sits inside a list item, which
- *         (and so the fence) ends at the first non-blank line dedented below
- *         the opener.
+ *     fenced only when EVERY plausible parse agrees, and each extra parse may
+ *     only SHRINK the fenced set:
+ *       - Only a COLUMN-0 opener is certain (no backtick in a backtick fence's
+ *         info string). An indented opener or one behind `>` / a list marker
+ *         sits in a container whose closers are relative to it (`     ```` can
+ *         close an item's fence), so its lines are always neutralized. A
+ *         column-0 fence line is never inside a list item or quote: a fence
+ *         cannot be a lazy continuation.
+ *       - CommonMark closer: ≤3 spaces, same char, ≥ opener length.
+ *       - lenient-closer parse: any indentation closes (a renderer that closes
+ *         early exposes the lines after its closer).
  *       - block-context parse: a ``` line inside an HTML block or an Obsidian
  *         `%%` comment / `$$` math block is content, not an opener.
  *
@@ -32,16 +37,18 @@ const EXECUTABLE_FENCE_LANGS = new Set(["dataviewjs", "dataview"]);
  */
 const FENCE_ANY_PREFIX = /^((?:\s|>|[-*+]|\d{1,9}[.)])*)(`{3,}|~{3,})(.*)$/;
 
-/** A CommonMark top-level opener: ≤3 spaces, then ≥3 backticks or tildes. */
-const CERTAIN_OPEN = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+/** A certain opener: ≥3 backticks or tildes at column 0. */
+const CERTAIN_OPEN = /^(`{3,}|~{3,})(.*)$/;
 
 /** A CommonMark closer: ≤3 spaces, the fence run, trailing spaces/tabs only. */
 const CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 
+/** A lenient closer: the fence run behind any indentation. */
+const LENIENT_CLOSE = /^\s*(`{3,}|~{3,})\s*$/;
+
 interface Fence {
   char: string;
   len: number;
-  indent: number;
 }
 
 /** First word of a fence info string, lowercased (Obsidian's language key). */
@@ -65,19 +72,14 @@ export function isFenceLike(line: string): boolean {
 function certainOpener(line: string): Fence | null {
   const match = CERTAIN_OPEN.exec(line);
   if (!match) return null;
-  const [, indent, marker, info] = match;
+  const [, marker, info] = match;
   if (marker[0] === "`" && info.includes("`")) return null;
-  return { char: marker[0], len: marker.length, indent: indent.length };
+  return { char: marker[0], len: marker.length };
 }
 
-function closes(line: string, fence: Fence): boolean {
-  const match = CLOSE.exec(line);
+function closes(line: string, fence: Fence, mode: ScanMode): boolean {
+  const match = (mode.lenientClose ? LENIENT_CLOSE : CLOSE).exec(line);
   return match !== null && match[1][0] === fence.char && match[1].length >= fence.len;
-}
-
-/** Leading spaces only — a tab counts as content, the conservative reading. */
-function leadingSpaces(line: string): number {
-  return line.length - line.replace(/^ +/, "").length;
 }
 
 /** Where an HTML / comment / math block ends: a marker, or a blank line. */
@@ -113,13 +115,8 @@ function blockEnds(end: BlockEnd, text: string): boolean {
 }
 
 interface ScanMode {
-  dedentCloses: boolean;
+  lenientClose: boolean;
   blockContext: boolean;
-}
-
-/** Does a non-blank line dedented below an indented opener end its list item? */
-function dedentExits(line: string, fence: Fence, mode: ScanMode): boolean {
-  return mode.dedentCloses && fence.indent > 0 && line.trim() !== "" && leadingSpaces(line) < fence.indent;
 }
 
 /** An HTML / comment / math block this line opens and leaves open, if any. */
@@ -135,12 +132,11 @@ function fencedLines(lines: readonly string[], mode: ScanMode): boolean[] {
   let fence: Fence | null = null;
   let block: BlockEnd | null = null;
   for (const line of lines) {
-    if (fence && (closes(line, fence) || !dedentExits(line, fence, mode))) {
+    if (fence) {
       inside.push(true);
-      if (closes(line, fence)) fence = null;
+      if (closes(line, fence, mode)) fence = null;
       continue;
     }
-    fence = null;
     if (block) {
       if (blockEnds(block, line)) block = null;
       inside.push(false);
@@ -154,9 +150,9 @@ function fencedLines(lines: readonly string[], mode: ScanMode): boolean[] {
 }
 
 const MODES: readonly ScanMode[] = [
-  { dedentCloses: false, blockContext: false },
-  { dedentCloses: true, blockContext: false },
-  { dedentCloses: false, blockContext: true },
+  { lenientClose: false, blockContext: false },
+  { lenientClose: true, blockContext: false },
+  { lenientClose: false, blockContext: true },
 ];
 
 /** Lines every parse places inside a fenced code block. */

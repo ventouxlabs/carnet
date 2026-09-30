@@ -192,6 +192,34 @@ describe("extras — fences in containers, fake openers, quote-delimited on*=", 
     expect(s("- a\n  ```js\n<script>x</script>\n  ```\n")).not.toContain("<script");
   });
 
+  it("review HIGH-3a: a list item's fence closes at a closer valid relative to the item", () => {
+    const out = s("- a\n  ```js\n     ```\n\n  `= this.file.name`\n\n  <img src=x onerror=alert(1)>\n");
+    expect(out).toContain("`inert: = this.file.name`");
+    expect(out).not.toMatch(/onerror/i);
+  });
+
+  it("review HIGH-3b: an item's closer is not read as a new certain opener", () => {
+    expect(s("- ```js\n  x\n  ```\n  <img src=x onerror=alert(1)>\n")).not.toMatch(/onerror/i);
+    expect(s("1. ~~~\n   ~~~\n   <iframe src=x></iframe>\n")).not.toMatch(/<iframe/i);
+    const out = s(
+      "- ```js\n  ```\n  [x](javascript:alert(1)) `= this.file.name` <img src=x onerror=alert(1)> <script>alert(2)</script>",
+    );
+    expect(out).not.toMatch(/javascript:|onerror|<script/i);
+    expect(out).toContain("`inert: = this.file.name`");
+  });
+
+  it("review HIGH-3: relative closers in ordered-list and nested fences (probe1)", () => {
+    expect(s("1. a\n   ```js\n      ```\n   <img src=x onerror=alert(1)>\n")).not.toMatch(/onerror/i);
+    const out = s("- a\n  ```js\n  x\n     ```\n  <img src=x onerror=alert(1)>\n  <script>alert(1)</script>\n");
+    expect(out).not.toMatch(/onerror|<script/i);
+    expect(s("- a\n  ```js\n     ```\n  ~~~js\n  ok\n  ~~~\n  [x](javascript:alert(1))\n")).not.toContain("javascript:");
+  });
+
+  it("a top-level fence whose closer a lenient renderer would accept early", () => {
+    // Strict CommonMark keeps `    ```` as content; a lenient one closes there.
+    expect(s("```js\n    ```\n<script>alert(1)</script>\n```\n")).not.toContain("<script");
+  });
+
   it("a fence line inside an HTML block is HTML, not a fence opener", () => {
     expect(s("<div>\n```js\n<img src=x onerror=alert(1)>\n```\n")).not.toMatch(/onerror/i);
   });
