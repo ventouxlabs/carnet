@@ -141,6 +141,35 @@ describe("withUserLines — the fallback", () => {
     );
   });
 
+  // B3 (enrichSanitize) leaves fence bodies alone, so a heading inside a fence
+  // is unsanitized model text. Lifting it into the title would make it live.
+  describe("takes only an H1 outside any code fence as the title", () => {
+    const PAYLOAD = "# <img src=x onerror=alert(1)> [x](javascript:alert(2))";
+
+    it.each([
+      ["a ``` fence", `${FM}\`\`\`js\n${PAYLOAD}\n\`\`\`\nbuy milk\n`],
+      ["an unclosed ``` fence", `${FM}buy milk\n\`\`\`\n${PAYLOAD}\n`],
+      ["a ~~~ fence", `${FM}~~~\n${PAYLOAD}\n~~~\nbuy milk\n`],
+      ["a longer fence closed only by a matching run", `${FM}\`\`\`\`\n\`\`\`\n${PAYLOAD}\n\`\`\`\`\nbuy milk\n`],
+    ])("never lifts a heading out of %s", (_, reply) => {
+      expect(withUserLines("buy milk", reply)).toBe(`${FM}buy milk\n`);
+    });
+
+    it("never lifts a heading out of a fence when the reply has no frontmatter", () => {
+      const reply = `\`\`\`text\nignored\n\`\`\`\n\`\`\`js\n${PAYLOAD}\n\`\`\`\nbuy milk\n`;
+      expect(withUserLines("buy milk", reply)).not.toContain("onerror");
+    });
+
+    it("skips a fenced H1 and takes the first H1 after the fence", () => {
+      const reply = `${FM}\`\`\`\n${PAYLOAD}\n\`\`\`\n# Errands\n\nprose\n`;
+      expect(withUserLines("buy milk", reply)).toBe(`${FM}# Errands\n\nbuy milk\n`);
+    });
+
+    it("does not take a ## heading as the title", () => {
+      expect(withUserLines("buy milk", `${FM}## Shelf\n\nprose\n`)).toBe(`${FM}buy milk\n`);
+    });
+  });
+
   it("does not stack a second H1 on a note that already starts with one", () => {
     const input = "# Groceries\n- [ ] milk\n- [x] eggs";
     const expanded = `${FM}# Shopping list\n\n- [ ] milk\n- [ ] eggs\n- [ ] bread\n`;

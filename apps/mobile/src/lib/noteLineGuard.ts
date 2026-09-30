@@ -19,6 +19,8 @@ const TODO = /^- \[[ xX]\] /;
 const CHECKED = /^- \[[xX]\] /;
 const ATX_HEADING = /^#{1,6} /;
 const H1 = /^# /;
+/** A fence opener, as enrichSanitize.ts FENCE_OPEN reads one. */
+const FENCE_OPEN = /^\s*(`{3,}|~{3,})/;
 
 interface BodyLine {
   /** The line with whitespace and one leading marker removed. */
@@ -111,18 +113,43 @@ function titledLines(title: string | undefined, userLines: readonly string[]): r
   return [title, "", ...userLines];
 }
 
+/** True when `line` closes a fence opened by `marker` (same character, at
+ * least as long) — enrichSanitize.ts's close rule. */
+function closesFence(line: string, marker: string): boolean {
+  return new RegExp(`^\\s*${marker[0]}{${marker.length},}\\s*$`).test(line);
+}
+
+/**
+ * The reply's first H1 outside any code fence. enrichSanitize (B3) leaves a
+ * fence body untouched, so a heading inside one is unsanitized model text:
+ * lifting it out would make it live. Fences follow B3's own rules, including
+ * an unclosed fence running to the end. Only `# ` counts — `## Shelf` is a
+ * section, not a title.
+ */
+function fallbackTitle(body: string): string | undefined {
+  let fence: string | null = null;
+  for (const line of body.split("\n")) {
+    if (fence !== null) {
+      if (closesFence(line, fence)) fence = null;
+      continue;
+    }
+    const open = FENCE_OPEN.exec(line);
+    if (open) fence = open[1];
+    else if (H1.test(line)) return line.trimEnd();
+  }
+  return undefined;
+}
+
 /**
  * The fallback for a reply that fails keepsUserLines: the reply's frontmatter
- * block and first ATX heading, then the user's lines verbatim (trimmed as a
- * whole, as the save-first raw stub trims them). Satisfies keepsUserLines.
+ * block and its first H1 outside any fence, then the user's lines verbatim
+ * (trimmed as a whole, as the save-first raw stub trims them). Satisfies
+ * keepsUserLines. The caller re-sanitizes the result (dispatcher.enrichNote).
  */
 export function withUserLines(input: string, enrichedMarkdown: string): string {
   const { header, body } = splitFrontmatterBlock(enrichedMarkdown);
   const head = header && !header.endsWith("\n") ? `${header}\n` : header;
-  const title = body
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => ATX_HEADING.test(line));
+  const title = fallbackTitle(body);
   const trimmed = input.trim();
   const userLines = trimmed ? trimmed.split("\n") : [];
   return `${head}${titledLines(title, userLines).join("\n")}\n`;

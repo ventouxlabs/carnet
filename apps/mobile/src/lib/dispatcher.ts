@@ -63,8 +63,10 @@ import {
   getFrontmatterTags,
   normalizeTag,
   setFrontmatterTags,
+  splitFrontmatter,
   upsertFrontmatterField,
 } from "./frontmatter";
+import { sanitizeMarkdown } from "./enrichSanitize";
 import { keepsUserLines, withUserLines } from "./noteLineGuard";
 import {
   readNote,
@@ -325,11 +327,26 @@ export async function enrichIdea(
 
 /** The note prompt's hard rule — never expand — enforced on the reply rather
  * than trusted: a reply that drops, rewords, reorders or adds lines keeps its
- * frontmatter and title, and gets the user's own lines back verbatim. No new
- * status and no retry. A compliant reply is returned untouched. */
+ * frontmatter and title, and gets the user's own lines back. No new status
+ * and no retry. A compliant reply is returned untouched.
+ *
+ * Both sides go through B3 (enrichSanitize.sanitizeMarkdown), the one set of
+ * neutralization rules. The reply already has, so it is judged against what B3
+ * leaves of the user's text — a sanitizer-altered line is then not a spurious
+ * mismatch. The fallback is sanitized too: every enriched note has passed B3,
+ * whichever path built it (the raw save-first stub is the only exception, as
+ * before). */
 function keepNoteLines(text: string, result: EnrichResult): EnrichResult {
-  if (keepsUserLines(text, result.markdown)) return result;
-  return { ...result, markdown: withUserLines(text, result.markdown) };
+  if (keepsUserLines(sanitizeMarkdown(text), result.markdown)) return result;
+  return { ...result, markdown: sanitizeFallback(withUserLines(text, result.markdown)) };
+}
+
+/** B3 over the fallback, frontmatter and body separately: a fence opener
+ * hiding in a reply's frontmatter would otherwise mark the whole body as a
+ * code fence, which B3 leaves unsanitized. */
+function sanitizeFallback(markdown: string): string {
+  const { header, body } = splitFrontmatter(markdown);
+  return sanitizeMarkdown(header) + sanitizeMarkdown(body);
 }
 
 /** The tag every captured note carries (buildNotePrompt asks for it first). */

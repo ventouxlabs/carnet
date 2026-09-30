@@ -862,8 +862,11 @@ describe("dispatcher enrichNote keeps the user's lines", () => {
     expect(result.markdown).toBe(compliant);
   });
 
-  it("compares against the user's raw text, so a line the sanitizer altered comes back whole (R6)", async () => {
-    // neutralizeText's on*= stripper eats ` once = daily` from plain text.
+  it("judges the reply against what B3 leaves of the user's text, so a sanitizer-altered line keeps its checkbox (R6)", async () => {
+    // neutralizeText's on*= stripper eats ` once = daily` from the echoed
+    // line. Compared against the raw text, that forced a fallback that threw
+    // away every checkbox in the note; compared against sanitizeMarkdown(text)
+    // it matches, and the line reads exactly as any enriched note would.
     fetchMock.mockResolvedValueOnce(
       makeOkResponse(
         "---\ncreated: 2026-09-29\ntags: [note, plants]\n---\n# Plants\n\n- [ ] water the ferns once = daily\n",
@@ -873,8 +876,63 @@ describe("dispatcher enrichNote keeps the user's lines", () => {
     const result = await enrichNote("water the ferns once = daily");
 
     expect(result.markdown).toBe(
-      "---\ncreated: 2026-09-29\ntags: [note, plants]\n---\n# Plants\n\nwater the ferns once = daily\n",
+      "---\ncreated: 2026-09-29\ntags: [note, plants]\n---\n# Plants\n\n- [ ] water the ferns\n",
     );
+  });
+
+  // Security review 2026-09-29 (HIGH): B3 leaves fence bodies unsanitized, and
+  // the fallback used to lift the first `#` line from anywhere — a fenced one
+  // included — into a live title.
+  describe("never lifts unsanitized model text into the fallback", () => {
+    const PAYLOAD = "# <img src=x onerror=alert(1)> [x](javascript:alert(2)) `= this.file.name`";
+    const FM = "---\ncreated: 2026-09-29\ntags: [note]\n---\n";
+
+    it.each([
+      ["a ```js fence", `${FM}\`\`\`js\n${PAYLOAD}\n\`\`\`\nbuy milk`],
+      ["an unclosed fence", `${FM}buy milk\n\`\`\`\n${PAYLOAD}`],
+      ["a ~~~ fence", `${FM}~~~\n${PAYLOAD}\n~~~\nbuy milk`],
+    ])("a heading inside %s never becomes the title", async (_, reply) => {
+      fetchMock.mockResolvedValueOnce(makeOkResponse(reply));
+
+      const result = await enrichNote("buy milk");
+
+      expect(result.markdown).toBe(`${FM}buy milk\n`);
+    });
+
+    it("a heading inside a fence never becomes the title when the reply has no frontmatter", async () => {
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse(`\`\`\`text\nignored\n\`\`\`\n\`\`\`js\n${PAYLOAD}\n\`\`\`\nbuy milk`),
+      );
+
+      const result = await enrichNote("buy milk");
+
+      expect(result.markdown).not.toMatch(/onerror|javascript:|`= this/);
+      expect(result.markdown).toContain("buy milk");
+    });
+
+    it("sanitizes the fallback's body even when the reply's frontmatter hides a fence opener", async () => {
+      // A bare ``` line in the frontmatter makes B3 treat the whole body as
+      // fenced (pre-existing, all modes — TODO.md). No `created`, so
+      // normalization fails and the ``` survives into the fallback's header.
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse(`---\ntags: [note]\n\`\`\`\n---\n${PAYLOAD}\n\nA long expansion.\n`),
+      );
+
+      const result = await enrichNote("buy milk");
+
+      expect(result.markdown).not.toMatch(/onerror|javascript:|`= this/);
+      expect(result.markdown).toContain("\nbuy milk\n");
+    });
+
+    it("runs the fallback's user lines through B3 too, like every enriched note", async () => {
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse(`${FM}# Shopping\n\nA long expansion.\n`),
+      );
+
+      const result = await enrichNote("buy milk <% tp.system.prompt('x') %>");
+
+      expect(result.markdown).toBe(`${FM}# Shopping\n\nbuy milk [templater expression removed]\n`);
+    });
   });
 
   it("adds #note when the model's tags leave it out", async () => {
