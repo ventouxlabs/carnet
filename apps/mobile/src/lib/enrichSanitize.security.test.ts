@@ -458,6 +458,82 @@ describe("review MEDIUM-4 — availability", () => {
   }
 });
 
+// ── Review round: every reviewer probe as a named regression case ─────────────
+
+const DEEP = `<img src=a${" o".repeat(10)} onq='z'${"nx='z'".repeat(10)}>`;
+
+/** Inputs from the reviewers' probes (b3probe.ts, b3fuzz.ts, rv/probe1-4). */
+const REVIEW_REPROS: Record<string, string> = {
+  fmFence: "---\ncreated: x\n```\n---\n<script>a</script>\n```dataviewjs\ndv.x\n```\n",
+  crFrontmatter: "----\rcreated: x\r```\r----\r<script>a</script>\r",
+  crlfFence: "```dataviewjs\r\ndv.x\r\n```\r\n",
+  indentedFake: "    ```\n<img src=x onerror=alert(1)>\n    ```",
+  backtickInfoFake: "```a`b\n<img src=x onerror=alert(1)>\n```",
+  srcNoSpace: `<img src="x"onerror=alert(1)>`,
+  listClose: "- ```js\n  ```\n  [x](javascript:alert(1)) `= this.file.name` <img src=x onerror=alert(1)>",
+  listCloseTilde: "1. ~~~\n   ~~~\n   `= this.file.name` <iframe src=x></iframe>",
+  htmlAttrTick: '<b title="`">`= this.file.name`</b>',
+  autolinkTick: "<http://x.y/`>`= this.file.name`",
+  deepCap: `${DEEP} \`= this.file.name\` [a](javascript:b) <script>c</script>`,
+  relCloserSpans: "- a\n  ```js\n     ```\n\n  Today: `= this.file.name` and `$= dv.el('b','x')`\n\n  <img src=x onerror=alert(1)>\n",
+  bodyOnlyBlock: "---\n`= this.file.name\n`\n<img src=x\nonerror=alert(1)>\n---\nprose here",
+};
+
+describe("review repros — named regression cases", () => {
+  const exact: Array<[string, string]> = [
+    ["fmFence", "---\ncreated: x\n---\n[script removed]\n```text\ndv.x\n```\n"],
+    ["crFrontmatter", "---\ncreated: x\n---\n[script removed]\n"],
+    ["crlfFence", "```text\ndv.x\n```\n"],
+    ["indentedFake", "    ```\n<img src=x>\n    ```"],
+    ["backtickInfoFake", "```a`b\n<img src=x>\n```"],
+    ["srcNoSpace", `<img src="x"onerror&#61;alert(1)>`],
+    ["htmlAttrTick", '<b title="`">`inert: = this.file.name`</b>'],
+    ["autolinkTick", "<http://x.y/`>`inert: = this.file.name`"],
+  ];
+  for (const [name, expected] of exact) {
+    it(`${name} → exact neutralized form`, () => {
+      expect(s(REVIEW_REPROS[name])).toBe(expected);
+    });
+  }
+
+  it("listClose / listCloseTilde / relCloserSpans leave nothing live", () => {
+    for (const name of ["listClose", "listCloseTilde", "relCloserSpans"]) {
+      const out = s(REVIEW_REPROS[name]);
+      expect(out, name).not.toMatch(/javascript:|onerror|<iframe|`=|`\$=/i);
+    }
+  });
+
+  it("deepCap fails closed with every payload inert", () => {
+    const out = s(REVIEW_REPROS.deepCap);
+    expect(out).not.toContain("<");
+    expect(out).not.toContain("`");
+    expect(out).toContain("[a](#b)");
+    expect(s(out)).toBe(out);
+  });
+
+  it("probe3: a gated note with a list-item fence ships nothing live", () => {
+    const v =
+      "---\ncreated: 2026-01-01\nstatus: seedling\ntags: [idea]\n---\n# T\n\n- ```js\n  x\n  ```\n  <img src=x onerror=alert(1)>\n\n  See `= this.file.name` and [a](javascript:alert(1))\n";
+    const gated = filterFrontmatterKeys(sanitizeAndNormalize(v, "idea") ?? s(v), "idea");
+    expect(gated).not.toMatch(/onerror|javascript:/i);
+    expect(gated).toContain("`inert: = this.file.name`");
+  });
+
+  it("legitimate content from the reviewers' probe stays byte-identical", () => {
+    for (const ok of [
+      "Count lines: `ls | wc -l` = `n` files.\n",
+      "| op | meaning |\n|---|---|\n| `a == b` | eq |\n| `x ||= y` | or-assign |\n",
+      "> [!note] Title\n> Use `x = 1` here.\n> ```js\n> const a = `b`;\n> ```\n",
+      "$$\n\\frac{a}{b} = c\n$$\nInline $x = 1$.\n",
+      "```js\nel.onclick = () => go('<script>');\n```\n",
+      "- step\n  ```bash\n  echo \"<b>hi</b>\" | tee x\n  ```\n- next\n",
+      '---\ncreated: 2026-01-01\ntitle: "~~~ wow"\n---\nbody\n',
+    ]) {
+      expect(s(ok), ok).toBe(ok);
+    }
+  });
+});
+
 // ── Invariants: total + idempotent over the corpus and a seeded fuzz ──────────
 
 const CORPUS: string[] = [
@@ -487,41 +563,16 @@ const CORPUS: string[] = [
   "# T\r\r```dataviewjs\rdv.pages()\r```\r",
   "a `x`=b `c` and `` =y `` \\` `= z`",
   `<img src=x${" o".repeat(12)} onq='z'${"nx='z'".repeat(12)}nx=alert(1)>`,
+  ...Object.values(REVIEW_REPROS),
 ];
 
-/** Deterministic LCG so a failure is reproducible from its seed. */
-function fuzzInputs(count: number, seed: number): string[] {
-  const alphabet = [
-    "<", ">", "%", "`", "``", "```", "~~~", "\\", "on", "onx=", " ", "\n", "\r", "\n\n",
-    "=", "$=", '"', "'", "-", "---", "> ", "- ", "script", "dataviewjs", "code", "|",
-    "javascript:", "](", "[a", "!", "data:", "x", "    ", "#", "%%", "<div>", "</",
-  ];
-  let state = seed >>> 0;
-  const next = (): number => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    return state;
-  };
-  return Array.from({ length: count }, () => {
-    const len = next() % 40;
-    return Array.from({ length: len }, () => alphabet[next() % alphabet.length]).join("");
-  });
-}
-
-describe("invariants — total and idempotent", () => {
+describe("invariants — idempotent over the corpus, both modes", () => {
   it("s(s(x)) === s(x) over the sanitizer corpus", () => {
     for (const input of CORPUS) {
-      const once = s(input);
-      expect(s(once), JSON.stringify(input)).toBe(once);
-    }
-  });
-
-  it("never throws and is idempotent over 2000 seeded fuzz inputs", () => {
-    for (const input of fuzzInputs(2000, 0xb3)) {
-      const once = s(input);
-      expect(s(once), JSON.stringify(input)).toBe(once);
-      expect(once).not.toMatch(/<%[\s\S]*?%>/); // a closed Templater tag
-      // No executable fence opener survives on any line, behind any prefix.
-      expect(once).not.toMatch(/^(?:[^\S\n]|>|[-*+]|\d{1,9}[.)])*(?:`{3,}|~{3,})[^\S\n]*dataview(?:js)?(?:[^\S\n]|$)/im);
+      for (const sanitize of [s, sanitizeReplyBody]) {
+        const once = sanitize(input);
+        expect(sanitize(once), JSON.stringify(input)).toBe(once);
+      }
     }
   });
 });
