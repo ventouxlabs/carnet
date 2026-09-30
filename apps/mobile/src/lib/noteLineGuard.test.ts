@@ -93,6 +93,12 @@ describe("keepsUserLines — expansions fail", () => {
     expect(keepsUserLines("- [x] buy stamps", `${FM}# Stamps\n\nbuy stamps\n`)).toBe(false);
   });
 
+  it("fails an open todo that lost its checkbox — it would drop out of Todos", () => {
+    expect(keepsUserLines("- [ ] buy stamps", `${FM}# Stamps\n\nbuy stamps\n`)).toBe(false);
+    expect(keepsUserLines("- [ ] buy stamps", `${FM}# Stamps\n\n- buy stamps\n`)).toBe(false);
+    expect(keepsUserLines("- [ ] buy stamps", `${FM}# buy stamps\n`)).toBe(false);
+  });
+
   it("fails a todo the model ticked on the user's behalf", () => {
     expect(keepsUserLines("- [ ] buy stamps", `${FM}# Stamps\n\n- [x] buy stamps\n`)).toBe(false);
     expect(keepsUserLines("buy stamps", `${FM}# Stamps\n\n- [x] buy stamps\n`)).toBe(false);
@@ -123,6 +129,16 @@ describe("withUserLines — the fallback", () => {
     const input = "Weekend errands\n\ncall the dentist";
     const expanded = `${FM}# Weekend errands\n\nA busy weekend ahead.\n- [ ] call the dentist\n`;
     expect(withUserLines(input, expanded)).toBe(`${FM}# Weekend errands\n\ncall the dentist\n`);
+  });
+
+  it("never turns a first-line todo or bullet into the title", () => {
+    // Swapping the title in for `- [ ] call the dentist` would delete the todo.
+    expect(
+      withUserLines("- [ ] call the dentist", `${FM}# call the dentist\n\nBook a cleaning.\n`),
+    ).toBe(`${FM}# call the dentist\n\n- [ ] call the dentist\n`);
+    expect(withUserLines("- buy milk", `${FM}# buy milk\n\nWhole milk.\n`)).toBe(
+      `${FM}# buy milk\n\n- buy milk\n`,
+    );
   });
 
   it("does not stack a second H1 on a note that already starts with one", () => {
@@ -159,9 +175,13 @@ describe("withUserLines — the fallback", () => {
       "- [x] done already\nstill to do",
       "  indented line\n\n\nlast line  ",
       "one line",
+      "- [ ] call the dentist\nbuy stamps",
+      "- buy milk",
     ];
     const replies = [
       tasklist.content,
+      `${FM}# call the dentist\n\nExpanded prose.\n`,
+      `${FM}# buy milk\n\nExpanded prose.\n`,
       `${FM}# Weekend errands\n\nExpanded prose.\n`,
       `${FM}# Groceries\n\nExpanded prose.\n`,
       `${FM}# Something new\n\nExpanded prose.\n`,

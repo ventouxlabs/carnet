@@ -15,6 +15,7 @@
 /** One leading list/checkbox marker or ATX heading marker — the only
  * formatting a note reply may change on a user's line. */
 const LINE_MARKER = /^(?:- \[[ xX]\] |[-*+] |#{1,6} )/;
+const TODO = /^- \[[ xX]\] /;
 const CHECKED = /^- \[[xX]\] /;
 const ATX_HEADING = /^#{1,6} /;
 const H1 = /^# /;
@@ -22,8 +23,12 @@ const H1 = /^# /;
 interface BodyLine {
   /** The line with whitespace and one leading marker removed. */
   readonly text: string;
+  /** A `- [ ]` or `- [x]` todo — what the Todos screen collects. */
+  readonly todo: boolean;
   /** A ticked `- [x]` todo. */
   readonly checked: boolean;
+  /** No marker at all: a plain line of text. */
+  readonly plain: boolean;
   readonly heading: boolean;
 }
 
@@ -41,7 +46,9 @@ function toBodyLine(line: string): BodyLine {
   const trimmed = line.trim();
   return {
     text: trimmed.replace(LINE_MARKER, ""),
+    todo: TODO.test(trimmed),
     checked: CHECKED.test(trimmed),
+    plain: !LINE_MARKER.test(trimmed),
     heading: ATX_HEADING.test(trimmed),
   };
 }
@@ -54,14 +61,20 @@ function bodyLines(text: string): BodyLine[] {
     .map(toBodyLine);
 }
 
-/** Same words, and the same ticked state: a model may turn a line into a
- * `- [ ]` todo, but never tick one or un-tick a done one. */
-function sameLine(a: BodyLine, b: BodyLine): boolean {
-  return a.text === b.text && a.checked === b.checked;
+/** Whether the reply's line keeps the user's: same words and the same ticked
+ * state, and a todo stays a todo. A model may turn a plain or bulleted line
+ * into `- [ ]`, but never tick one, un-tick a done one, or strip a checkbox
+ * (which would drop an open todo out of the Todos screen). Directional. */
+function keepsLine(user: BodyLine, reply: BodyLine): boolean {
+  return (
+    user.text === reply.text &&
+    user.checked === reply.checked &&
+    (!user.todo || reply.todo)
+  );
 }
 
 function sameSequence(expected: readonly BodyLine[], actual: readonly BodyLine[]): boolean {
-  return expected.length === actual.length && expected.every((line, i) => sameLine(line, actual[i]));
+  return expected.length === actual.length && expected.every((line, i) => keepsLine(line, actual[i]));
 }
 
 /**
@@ -85,14 +98,16 @@ function withoutLeadingBlanks(lines: readonly string[]): readonly string[] {
 }
 
 /** The user's lines under the model's title — or under their own H1, which a
- * re-enriched note already has, rather than stacking a second one. */
+ * re-enriched note already has, rather than stacking a second one. The title
+ * stands in for an identical first line only when that line is plain text: a
+ * first-line todo or bullet is kept, never turned into the heading. */
 function titledLines(title: string | undefined, userLines: readonly string[]): readonly string[] {
   if (!title || userLines.length === 0) return userLines;
-  const first = userLines[0];
-  if (sameLine(toBodyLine(first), toBodyLine(title))) {
+  const first = toBodyLine(userLines[0]);
+  if (first.plain && keepsLine(first, toBodyLine(title))) {
     return [title, "", ...withoutLeadingBlanks(userLines.slice(1))];
   }
-  if (H1.test(first)) return userLines;
+  if (H1.test(userLines[0])) return userLines;
   return [title, "", ...userLines];
 }
 
