@@ -152,10 +152,19 @@ import {
   usesSaveFirst,
   writeRawIdea,
 } from "./ideaSaveFirst";
-import { getModificationTime, updateNoteIfUnchanged, readNote } from "./writer";
+import { getModificationTime, updateNoteIfUnchanged, readNote, type AttachmentRef } from "./writer";
 import { extractFrontmatterField } from "./frontmatter";
 import { getVaultTagStrings } from "./vaultTagHint";
 import { resolveProfileRoot } from "./vaultRoot";
+// Real, not mocked: Finish/Re-enrich send the on-disk body (embeds included)
+// through enrichIdeaInPlace, which re-injects the same embeds.
+import { finishPendingEnrichment, reEnrichNoteInPlace } from "./finishEnrichment";
+
+const PHOTO: AttachmentRef = { kind: "image", rel: "../Photos/a.jpg", filename: "a.jpg" };
+
+function embedCount(markdown: string): number {
+  return markdown.split("![](../Photos/a.jpg)").length - 1;
+}
 
 function clearFiles(): void {
   _files.clear();
@@ -227,6 +236,32 @@ describe("buildRawIdeaMarkdown", () => {
     );
     expect(buildRawIdeaMarkdown({ mode: "idea", text: "My raw idea", tags: ["work"] }, NOW, "r1")).toBe(
       "---\ncreated: 2026-07-04T12:00:00.000Z\nstatus: pending-enrich\nrev: r1\ntags: [work]\n---\nMy raw idea\n",
+    );
+  });
+
+  // Regression (pre-existing on main for Idea + photo): with no `# ` line in
+  // the text, injectImageEmbed prepended the embed ABOVE the frontmatter, so
+  // the stub no longer read as pending-enrich and Finish enrichment refused it.
+  it("keeps an Idea raw stub's frontmatter at byte 0 when a photo is attached and the text has no # line", () => {
+    const md = buildRawIdeaMarkdown(
+      { text: "look at this", tags: [], attachments: [PHOTO] },
+      NOW,
+      "r1",
+    );
+    expect(md).toBe(
+      "---\ncreated: 2026-07-04T12:00:00.000Z\nstatus: pending-enrich\nrev: r1\n---\n![](../Photos/a.jpg)\n\nlook at this\n",
+    );
+    expect(extractFrontmatterField(md, "status")).toBe(PENDING_ENRICH_STATUS);
+  });
+
+  it("keeps a Note raw stub's frontmatter at byte 0 when a photo is attached and the text has no # line", () => {
+    const md = buildRawIdeaMarkdown(
+      { mode: "note", text: "- [ ] frame this", tags: [], attachments: [PHOTO] },
+      NOW,
+      "r1",
+    );
+    expect(md).toBe(
+      "---\ncreated: 2026-07-04T12:00:00.000Z\nstatus: pending-enrich\nrev: r1\ntags: [note]\n---\n![](../Photos/a.jpg)\n\n- [ ] frame this\n",
     );
   });
 
@@ -813,5 +848,56 @@ describe("save-first note mode", () => {
       "A Drive Inbox receipt can only be written as an idea.",
     );
     expect(_files.size).toBe(0);
+  });
+});
+
+// ── embeds survive Finish and Re-enrich exactly once (code review H1/H2) ─────
+
+describe("a note's photo embed through Finish and Re-enrich", () => {
+  const FM = "---\ncreated: 2026-09-29\ntags: [note]\n---\n";
+
+  /** A model that keeps every line it is sent, titling untitled text. */
+  function echoingModel(): void {
+    enrichNoteMock.mockImplementation(async (text: string) => ({
+      markdown: text.startsWith("# ") ? `${FM}${text}\n` : `${FM}# Milk\n\n${text}\n`,
+      model: "test",
+    }));
+  }
+
+  it("leaves exactly one embed after one Re-enrich and after a second", async () => {
+    const filepath = "file:///data/carnet/Notes/milk.md";
+    _files.set(filepath, { content: `${FM}# Milk\n\n![](../Photos/a.jpg)\n\n- [ ] buy milk\n`, mtime: ++_clock });
+    echoingModel();
+
+    const first = await reEnrichNoteInPlace({ body: "", filepath, mode: "note" });
+    expect(first.kind).toBe("updated");
+    expect(embedCount(_files.get(filepath)!.content)).toBe(1);
+
+    const second = await reEnrichNoteInPlace({ body: "", filepath, mode: "note" });
+    expect(second.kind).toBe("updated");
+    expect(embedCount(_files.get(filepath)!.content)).toBe(1);
+  });
+
+  it("leaves exactly one embed when the model drops it and the line guard puts it back", async () => {
+    const filepath = "file:///data/carnet/Notes/milk.md";
+    _files.set(filepath, { content: `${FM}# Milk\n\n![](../Photos/a.jpg)\n\n- [ ] buy milk\n`, mtime: ++_clock });
+    enrichNoteMock.mockResolvedValue({ markdown: `${FM}# Milk\n\n- [ ] buy milk\n`, model: "test" });
+
+    await reEnrichNoteInPlace({ body: "", filepath, mode: "note" });
+
+    expect(embedCount(_files.get(filepath)!.content)).toBe(1);
+  });
+
+  it("finishes a pending note captured with a photo and no # line, with one embed", async () => {
+    const { filepath } = await writeRawIdea({ mode: "note", text: "- [ ] buy milk", tags: [], attachments: [PHOTO] });
+    echoingModel();
+
+    const outcome = await finishPendingEnrichment({ body: "", filepath, mode: "note" });
+
+    expect(outcome.kind).toBe("updated");
+    const content = _files.get(filepath)!.content;
+    expect(content.startsWith("---\n")).toBe(true);
+    expect(extractFrontmatterField(content, "status")).toBeNull();
+    expect(embedCount(content)).toBe(1);
   });
 });

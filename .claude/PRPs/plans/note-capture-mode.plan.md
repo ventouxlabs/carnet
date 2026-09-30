@@ -3007,6 +3007,9 @@ Step 6's push/PR. Every commit ends with the mobile gate and the Drive Inbox gat
 - Review fix A: the fallback is re-sanitized through `sanitizeMarkdown`, with frontmatter and body done **separately**. A bare fence line in a reply's frontmatter makes B3 treat the whole body as a fence (pre-existing in all modes; see `TODO.md`), and a single pass would inherit that.
 - Review fix A: the user's lines in the fallback now go through B3 as well (Templater `<%…%>` is neutralized, and R6 `once = daily` loses its tail). So every enriched note has passed B3 whichever path built it, matching the compliant path, where the model echoes the same lines. The raw save-first stub stays unsanitized, as on `main`.
 - Review fix A: to match, the guard judges the reply against `sanitizeMarkdown(text)`, not the raw text. A sanitizer-altered line no longer forces a fallback that throws away every checkbox in the note.
+- Review fix B: `injectImageEmbed` (`writerMarkdown.ts`) is idempotent: an embed already in the note is not added again. It is also frontmatter-aware: it finds the H1 in the body only, and with no H1 the embed opens the body after the frontmatter. This also fixes the pre-existing `main` bug for an Idea with a photo. For a Note it was worse: the tag merge synthesized a second frontmatter block above the embed.
+- Review fix B: output changes only when there is frontmatter and no body H1, or a `# ` line inside the frontmatter, or the embed is already present. A scratch old-vs-new differential over the vault and omniroute fixtures plus synthetic shapes matched byte-for-byte in 56 of 56 eligible cases. No existing `writerMarkdown` test line changed.
+- Review fix B: the idempotence test covers images only. `## Files` already upserts one section, and re-upserting a section at end-of-file drops its trailing newline, which is pre-existing and cosmetic.
 
 ---
 

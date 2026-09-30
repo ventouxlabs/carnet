@@ -54,6 +54,38 @@ describe("injectImageEmbed", () => {
     // frontmatter preserved
     expect(out.startsWith("---\nkind: photo\n---\n")).toBe(true);
   });
+
+  // The save-first raw stub has frontmatter and (usually) no H1. Prepending
+  // the embed above `---` broke the frontmatter: the stub stopped reading as
+  // pending-enrich, so Finish enrichment refused it.
+  it("puts the embed at the start of the body — after the frontmatter — when the body has no H1", () => {
+    const md = "---\ncreated: 2026-09-29\nstatus: pending-enrich\n---\nlook at this\n";
+    expect(injectImageEmbed(md, "../Photos/a.jpg")).toBe(
+      "---\ncreated: 2026-09-29\nstatus: pending-enrich\n---\n![](../Photos/a.jpg)\n\nlook at this\n",
+    );
+  });
+
+  it("never merges the embed into a closing fence with no trailing newline", () => {
+    expect(injectImageEmbed("---\nkind: photo\n---", "../Photos/a.jpg")).toBe(
+      "---\nkind: photo\n---\n![](../Photos/a.jpg)\n\n",
+    );
+  });
+
+  it("looks for the H1 in the body only — a # line inside the frontmatter is not it", () => {
+    const md = "---\n# a YAML comment\ncreated: 2026-09-29\n---\n# Body Title\n\nbody\n";
+    expect(injectImageEmbed(md, "../Photos/a.jpg")).toBe(
+      "---\n# a YAML comment\ncreated: 2026-09-29\n---\n# Body Title\n\n![](../Photos/a.jpg)\n\nbody\n",
+    );
+  });
+
+  // Re-enrich and Finish send the on-disk body (embeds included) to the model
+  // and then re-inject the same embeds; each run added another copy.
+  it("is idempotent: never adds an embed the note already contains", () => {
+    const withH1 = "# Title\n\n![](../Photos/a.jpg)\n\nbody\n";
+    expect(injectImageEmbed(withH1, "../Photos/a.jpg")).toBe(withH1);
+    const noH1 = "---\ncreated: 2026-09-29\n---\n![](../Photos/a.jpg)\n\nbody\n";
+    expect(injectImageEmbed(noH1, "../Photos/a.jpg")).toBe(noH1);
+  });
 });
 
 // ── injectAttachments ─────────────────────────────────────────────────────────
@@ -73,6 +105,13 @@ describe("injectAttachments", () => {
   it("returns the body unchanged for an empty attachment list", () => {
     const md = "# T\n\nbody\n";
     expect(injectAttachments(md, [])).toBe(md);
+  });
+
+  it("never doubles an image embed when the same images are injected twice", () => {
+    // Files already upsert (one `## Files` section); images used to stack.
+    const refs = [img("../Photos/a.jpg", "a.jpg"), img("../Photos/b.jpg", "b.jpg")];
+    const once = injectAttachments("# T\n\nbody\n", refs);
+    expect(injectAttachments(once, refs)).toBe(once);
   });
 
   it("injects a single image embed under the H1", () => {
