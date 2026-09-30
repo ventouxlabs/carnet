@@ -41,7 +41,7 @@ describe("sanitizeMarkdown — executable fences", () => {
     const input = ideaNote("# Title\n\nToday: `= this.file.name` here.\n");
     const out = sanitizeMarkdown(input);
     expect(out).not.toContain("`= this.file.name`");
-    expect(out).toContain("[inline dataview removed]");
+    expect(out).toContain("`inert: = this.file.name`");
   });
 
   it("(1t) renames a ```dataviewjs fence AND neutralizes Templater hidden in its body", () => {

@@ -19,51 +19,51 @@ const s = sanitizeMarkdown;
 // ── Item 1: inline Dataview spans are made inert, not deleted (decision 2) ────
 
 describe("item 1 — inline Dataview spans made inert", () => {
-  it.fails("rewrites `= …` to the inert form, keeping the content visible", () => {
+  it("rewrites `= …` to the inert form, keeping the content visible", () => {
     const input = ideaNote("# Title\n\nToday: `= this.file.name` here.\n");
     expect(s(input)).toBe(ideaNote("# Title\n\nToday: `inert: = this.file.name` here.\n"));
   });
 
-  it.fails("covers the inline DataviewJS prefix `$=`", () => {
+  it("covers the inline DataviewJS prefix `$=`", () => {
     const input = ideaNote("# T\n\n`$= dv.el('b', 'pwned')`\n");
     expect(s(input)).toBe(ideaNote("# T\n\n`inert: $= dv.el('b', 'pwned')`\n"));
   });
 
-  it.fails("covers a double-backtick span with a leading space (Dataview trims)", () => {
+  it("covers a double-backtick span with a leading space (Dataview trims)", () => {
     expect(s("x `` =this.file.name `` y")).toBe("x ``inert:  =this.file.name `` y");
   });
 
-  it.fails("covers a single-backtick span with a leading space", () => {
+  it("covers a single-backtick span with a leading space", () => {
     expect(s("a ` =x` b")).toBe("a `inert:  =x` b");
   });
 
-  it.fails("pairs spans instead of matching a regex — `x`=b is not a query", () => {
+  it("pairs spans instead of matching a regex — `x`=b is not a query", () => {
     const input = "a `x`=b `c` and `k` = `v`";
     expect(s(input)).toBe(input);
   });
 
-  it.fails("honors a backslash-escaped backtick before the real opener", () => {
+  it("honors a backslash-escaped backtick before the real opener", () => {
     // `\`` is a literal backtick, so the NEXT run opens the live `= x` span.
     expect(s("\\` `= x`")).toBe("\\` `inert: = x`");
   });
 
-  it.fails("does not pair across a heading boundary", () => {
+  it("does not pair across a heading boundary", () => {
     expect(s("# Head `a\n`= x`\n")).toContain("`inert: = x`");
   });
 
-  it.fails("does not pair across a blank line", () => {
+  it("does not pair across a blank line", () => {
     expect(s("x `a\n\n`= evil`\n")).toContain("`inert: = evil`");
   });
 
-  it.fails("catches a span that crosses a soft line break", () => {
+  it("catches a span that crosses a soft line break", () => {
     expect(s("`= this\nfile.name`")).toBe("`inert: = this\nfile.name`");
   });
 
-  it.fails("catches a span in a table cell", () => {
+  it("catches a span in a table cell", () => {
     expect(s("| `a | `= x` |\n")).toContain("`inert: = x`");
   });
 
-  it.fails("escapes a raw HTML <code> element (Dataview reads every <code>)", () => {
+  it("escapes a raw HTML <code> element (Dataview reads every <code>)", () => {
     const out = s("# T\n\n<code>$= dv.el('b', 'x')</code> and <CODE>= 1</CODE>\n");
     expect(out).not.toMatch(/<code/i);
     expect(out).toContain("&lt;code>$= dv.el('b', 'x')");

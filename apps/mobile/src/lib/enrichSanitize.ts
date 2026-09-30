@@ -5,7 +5,7 @@
  *
  * THREAT MODEL — the vault is a code-execution surface. Obsidian executes:
  *   - ```dataviewjs fenced blocks (Dataview plugin — near-ubiquitous)
- *   - ```dataview / inline `=…` DQL queries
+ *   - ```dataview / inline `=…` DQL and `$=…` DataviewJS queries (any <code>)
  *   - Templater `<%…%>` expressions (executes JS)
  *   - raw <script>/<iframe>, on*= handler attributes, javascript: link targets
  *
@@ -20,8 +20,11 @@
  *     code fences, so a `<%…%>` hidden inside ```js / ```dataviewjs executes
  *     regardless. It is Templater's own execution syntax, never legitimate
  *     captured content, so byte-for-byte fence preservation does not apply to it.
- *   - Neutralize raw HTML (<script>/<iframe> removed, on*= handlers stripped),
- *     javascript: link targets, and data: targets in NON-image link contexts.
+ *   - Neutralize raw HTML (<script>/<iframe> removed, on*= handlers stripped,
+ *     <code> escaped), javascript: link targets, and data: targets in
+ *     NON-image link contexts.
+ *   - Inline Dataview query spans are made INERT, content kept visible:
+ *     `= x` → `inert: = x` (sanitizeInlineCode.ts).
  *   - #60 inline images (`![alt](data:image/…)`) MUST survive — data: rewriting
  *     is scoped to `[text](data:…)` links only, never image sources.
  *
@@ -31,6 +34,7 @@
 
 import { parseFrontmatter, splitFrontmatter } from "./frontmatter";
 import { certainlyFencedLines, isFenceLike, renameExecutableFence } from "./sanitizeFences";
+import { makeInlineQueriesInert } from "./sanitizeInlineCode";
 
 export type NoteType = "idea" | "journal" | "person" | "shared";
 
@@ -164,7 +168,7 @@ function sanitizeBody(body: string): string {
 
 /** Everything that neutralizes a non-code text segment. */
 function neutralizeSegment(text: string): string {
-  return neutralizeText(text);
+  return makeInlineQueriesInert(neutralizeText(text));
 }
 
 /**
@@ -195,8 +199,11 @@ function neutralizeText(text: string): string {
     delim === '"' || delim === "'" ? delim : "",
   );
 
-  // Inline Dataview DQL query span: a code span whose content starts with `=`.
-  s = s.replace(/`=\s*[^`]*`/g, "`[inline dataview removed]`");
+  // Raw HTML <code> element: Dataview evaluates EVERY rendered <code> whose
+  // text starts with `=` / `$=`, not only markdown code spans. Escape the tag
+  // opener rather than inspecting the content — entities (`&#61;`) and nested
+  // tags defeat any content check. Markdown spans: makeInlineQueriesInert.
+  s = s.replace(/<code\b/gi, "&lt;code");
 
   return neutralizeLinks(s);
 }
