@@ -13,14 +13,17 @@
  *
  * Which backtick runs pair into a span depends on block structure (a span
  * never crosses a blank line, heading or table cell, but does cross a soft
- * line break) and on backslash escapes. A regex cannot pair spans, and a
- * single tokenization can be fooled by a boundary it does not see, so every
- * text segment is tokenized CommonMark-style (equal-length runs pair, left to
- * right) under several segmentations and both escape readings, and a span
- * that is live under ANY of them is made inert.
+ * line break or a pipe outside a table), on backslash escapes, and on raw
+ * HTML / autolinks that start first (a backtick inside `<b title="`">` opens
+ * nothing). A regex cannot pair spans, and a single tokenization can be fooled
+ * by a boundary it does not see, so every text segment is tokenized
+ * CommonMark-style (equal-length runs pair, left to right) under several
+ * segmentations and readings, and a span live under ANY of them is made inert.
  *
  * Pure and total: no I/O, never throws.
  */
+
+import { htmlSpanMatcher } from "./inlineHtml";
 
 const INERT_MARKER = "inert: ";
 
@@ -57,26 +60,43 @@ function findCloser(text: string, from: number, end: number, len: number): numbe
   return -1;
 }
 
-/** Offsets just past each opener whose span is a live query, within a range. */
-function liveOpeners(text: string, range: Range, honorEscapes: boolean): number[] {
+/** How a renderer might read one segment. The union of all readings is used. */
+interface Reading {
+  /** CommonMark: `\`` is a literal backtick and opens nothing. */
+  honorEscapes: boolean;
+  /** CommonMark: raw HTML / an autolink that starts first hides its backticks. */
+  htmlAware: boolean;
+}
+
+const READINGS: readonly Reading[] = [
+  { honorEscapes: true, htmlAware: true },
+  { honorEscapes: true, htmlAware: false },
+  { honorEscapes: false, htmlAware: true },
+  { honorEscapes: false, htmlAware: false },
+];
+
+/** Offsets (into `seg`) just past each opener whose span is a live query. */
+function liveOpeners(seg: string, reading: Reading): number[] {
   const found: number[] = [];
-  let i = range.start;
-  while (i < range.end) {
-    if (honorEscapes && text[i] === "\\") {
+  const htmlEnd = reading.htmlAware ? htmlSpanMatcher(seg) : null;
+  let i = 0;
+  while (i < seg.length) {
+    if (reading.honorEscapes && seg[i] === "\\") {
       i += 2; // `\x` is a literal x, so an escaped backtick opens nothing
       continue;
     }
-    if (text[i] !== "`") {
-      i++;
+    const skipTo = htmlEnd && seg[i] === "<" ? htmlEnd(i) : -1;
+    if (skipTo !== -1 || seg[i] !== "`") {
+      i = skipTo !== -1 ? skipTo : i + 1;
       continue;
     }
-    const open = runEnd(text, i, range.end);
-    const close = findCloser(text, open, range.end, open - i);
+    const open = runEnd(seg, i, seg.length);
+    const close = findCloser(seg, open, seg.length, open - i);
     if (close === -1) {
       i = open; // unmatched run: literal backticks
       continue;
     }
-    if (isQuery(text.slice(open, close))) found.push(open);
+    if (isQuery(seg.slice(open, close))) found.push(open);
     i = close + (open - i);
   }
   return found;
@@ -126,9 +146,29 @@ function groupLines(text: string, split: (prev: string, line: string) => boolean
   return groups;
 }
 
-/** Each line, and each `|`-separated cell of it (GFM splits cells first). */
+/** A GFM table delimiter row (`|---|:-:|`), behind any `>` quoting. */
+const DELIMITER_ROW = /^[ \t]*(?:>[ \t]*)*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+
+/** Flags the lines of every blank-line-separated chunk that holds a table. */
+function tableLines(lines: readonly string[]): boolean[] {
+  const flags = lines.map(() => false);
+  let start = 0;
+  for (let i = 0; i <= lines.length; i++) {
+    if (i < lines.length && lines[i].trim() !== "") continue;
+    const chunk = lines.slice(start, i);
+    if (chunk.some((line) => line.includes("|") && DELIMITER_ROW.test(line))) flags.fill(true, start, i);
+    start = i + 1;
+  }
+  return flags;
+}
+
+/** Each line — split into its `|` cells when it belongs to a GFM table, since
+ * GFM splits cells before parsing spans (outside a table a pipe inside a span
+ * is just text, so splitting there would invent spans). */
 function cellRanges(text: string): Range[] {
-  return lineRanges(text).flatMap(({ start, end }) => {
+  const inTable = tableLines(text.split("\n"));
+  return lineRanges(text).flatMap(({ start, end }, lineIndex) => {
+    if (!inTable[lineIndex]) return [{ start, end }];
     const cells: Range[] = [];
     let from = start;
     for (let i = start; i <= end; i++) {
@@ -146,9 +186,10 @@ export function makeInlineQueriesInert(text: string): string {
   if (!text.includes("`")) return text;
   const segmentations = [groupLines(text, () => false), groupLines(text, startsNewBlock), cellRanges(text)];
   const positions = new Set<number>();
-  for (const range of segmentations.flat()) {
-    for (const honorEscapes of [true, false]) {
-      liveOpeners(text, range, honorEscapes).forEach((at) => positions.add(at));
+  for (const { start, end } of segmentations.flat()) {
+    const seg = text.slice(start, end);
+    for (const reading of READINGS) {
+      liveOpeners(seg, reading).forEach((at) => positions.add(start + at));
     }
   }
   const cuts = [...positions].sort((a, b) => a - b);

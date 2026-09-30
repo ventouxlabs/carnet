@@ -66,8 +66,26 @@ describe("item 1 — inline Dataview spans made inert", () => {
     expect(s("`= this\nfile.name`")).toBe("`inert: = this\nfile.name`");
   });
 
-  it("catches a span in a table cell", () => {
-    expect(s("| `a | `= x` |\n")).toContain("`inert: = x`");
+  it("catches a span in a table cell (GFM splits cells before spans)", () => {
+    expect(s("| h | i |\n|---|---|\n| `a | `= x` |\n")).toContain("`inert: = x`");
+  });
+
+  it("review LOW-8: a pipe inside a span outside any table is not a cell split", () => {
+    const prose = "Count lines: `ls | wc -l` = `n` files.\n";
+    expect(s(prose)).toBe(prose);
+  });
+
+  it("review HIGH-2: a backtick inside a raw HTML attribute does not open a span", () => {
+    expect(s('<b title="`">`= this.file.name`</b>')).toBe('<b title="`">`inert: = this.file.name`</b>');
+  });
+
+  it("review HIGH-2: a backtick inside an autolink does not open a span", () => {
+    expect(s("<http://x.y/`>`= this.file.name`")).toBe("<http://x.y/`>`inert: = this.file.name`");
+  });
+
+  it("review HIGH-2: a span that starts first still wins over a later tag", () => {
+    const prose = "`a <b title='` then `k` = 1";
+    expect(s(prose)).toBe(prose);
   });
 
   it("escapes a raw HTML <code> element (Dataview reads every <code>)", () => {
