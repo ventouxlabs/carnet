@@ -43,6 +43,7 @@ import {
   isPermanentError,
 } from "./dispatcher";
 import type { VaultContext } from "./vaultContext";
+import { subdirForUri } from "./noteSubdirs";
 import { saveFirstModeOf, type SaveFirstTextMode } from "./saveFirstRouting";
 
 // Defined in the leaf ./saveFirstRouting (its header says why); re-exported so
@@ -312,7 +313,8 @@ export interface EnrichIdeaInPlaceInput {
   filepath: string;
   expectedMtime: number | null;
   /** Which prompt enriches it: "note" → enrichNote (tidy, never expand);
-   * absent or "idea" → enrichIdea. Must match the mode of the raw write. */
+   * absent or "idea" → enrichIdea — except that a file in Notes/ always gets
+   * the note prompt (see enrichModeOf). Must match the mode of the raw write. */
   mode?: SaveFirstTextMode;
   /** Content baseline for SAF vaults — see ApplyEnrichedIdeaInput. */
   expectedContent?: string | null;
@@ -343,6 +345,14 @@ export type EnrichIdeaOutcome =
   | { kind: "conflict" }
   | { kind: "failed"; transient: boolean; reason: string };
 
+/** The prompt a save-first file is enriched with. Notes/ never holds an idea
+ * (writeIdea writes Ideas/), so a file there gets the note prompt whatever the
+ * caller said: a missing mode, finishPendingEnrichment's "idea" default, or a
+ * cached index row still saying "idea" (plan R2) must not expand a note. */
+function enrichModeOf(input: EnrichIdeaInPlaceInput): SaveFirstTextMode {
+  return subdirForUri(input.filepath) === "Notes" ? "note" : saveFirstModeOf(input);
+}
+
 /**
  * Enrich a save-first Idea and update its file in place. The raw note already
  * exists on disk (writeRawIdea ran first), so any failure here is recoverable:
@@ -353,7 +363,7 @@ export async function enrichIdeaInPlace(
 ): Promise<EnrichIdeaOutcome> {
   let enriched: string;
   try {
-    const enrich = saveFirstModeOf(input) === "note" ? enrichNote : enrichIdea;
+    const enrich = enrichModeOf(input) === "note" ? enrichNote : enrichIdea;
     const result = await enrich(input.text, { vaultContext: input.vaultContext });
     enriched = result.markdown;
   } catch (e: unknown) {

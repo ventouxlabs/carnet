@@ -735,6 +735,42 @@ describe("save-first note mode", () => {
     expect(_files.get(filepath)!.content).toBe(onDisk);
   });
 
+  it("enriches a Notes/ file with the note prompt when the caller omits mode", async () => {
+    const { filepath, mtime } = await writeRawIdea({ mode: "note", text: "call the dentist", tags: [] });
+    enrichNoteMock.mockResolvedValue({ markdown: NOTE_MD, model: "test" });
+    enrichIdeaMock.mockResolvedValue({ markdown: "---\nstatus: seedling\n---\n# Expanded\n\nprose\n", model: "test" });
+
+    const outcome = await enrichIdeaInPlace({ filepath, expectedMtime: mtime, text: "call the dentist", tags: [] });
+
+    expect(enrichIdeaMock).not.toHaveBeenCalled();
+    expect(enrichNoteMock).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({ kind: "updated", markdown: NOTE_MD });
+  });
+
+  it("enriches a Notes/ file with the note prompt even when a stale mode says idea", async () => {
+    // finishPendingEnrichment turns a missing mode into "idea", and a cached
+    // index row can still say "idea" for a Notes/ file (plan R2). Notes/ never
+    // holds an idea, so the folder decides.
+    const { filepath, mtime } = await writeRawIdea({ mode: "note", text: "call the dentist", tags: [] });
+    enrichNoteMock.mockResolvedValue({ markdown: NOTE_MD, model: "test" });
+
+    await enrichIdeaInPlace({ mode: "idea", filepath, expectedMtime: mtime, text: "call the dentist", tags: [] });
+
+    expect(enrichIdeaMock).not.toHaveBeenCalled();
+    expect(enrichNoteMock).toHaveBeenCalledTimes(1);
+    expect(_files.get(filepath)!.content).toBe(NOTE_MD);
+  });
+
+  it("still enriches an Ideas/ file with the idea prompt when mode is omitted", async () => {
+    const { filepath, mtime } = await writeRawIdea({ text: "build a kite", tags: [] });
+    enrichIdeaMock.mockResolvedValue({ markdown: "---\nstatus: seedling\n---\n# Kite\n\nbuild a kite\n", model: "test" });
+
+    await enrichIdeaInPlace({ filepath, expectedMtime: mtime, text: "build a kite", tags: [] });
+
+    expect(enrichNoteMock).not.toHaveBeenCalled();
+    expect(enrichIdeaMock).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the note's captured profile tags after the active profile changes", async () => {
     const { filepath, mtime } = await writeRawIdea({ mode: "note", text: "personal note", tags: [] });
     vi.mocked(getVaultTagStrings).mockImplementation(async (profileIdOrLimit?: string | number) =>
