@@ -30,6 +30,7 @@
  */
 
 import { parseFrontmatter, splitFrontmatter } from "./frontmatter";
+import { certainlyFencedLines, isFenceLike, renameExecutableFence } from "./sanitizeFences";
 
 export type NoteType = "idea" | "journal" | "person" | "shared";
 
@@ -61,64 +62,75 @@ const REQUIRED_KEYS: Record<NoteType, readonly string[]> = {
 
 // ── Sanitize (neutralize executable content) ──────────────────────────────────
 
-/** Matches a fenced-code opening line: optional indent, ``` or ~~~ (>=3), info. */
-const FENCE_OPEN = /^(\s*)(`{3,}|~{3,})(.*)$/;
-
-/** Fence languages Obsidian executes — renamed to `text` (body preserved). */
-const EXECUTABLE_FENCE_LANGS = new Set(["dataviewjs", "dataview"]);
+const TEMPLATER = /<%[\s\S]*?%>/g;
+const TEMPLATER_REMOVED = "[templater expression removed]";
 
 /**
- * Neutralize executable content in a markdown document. Fence-aware: the HTML /
- * templater / link transforms run ONLY on text OUTSIDE fenced code blocks, so a
- * user's captured ```js or ```html snippet is never mutated. Executable fence
- * languages are renamed in place. Pure and total — never returns null.
+ * Neutralize executable content in a markdown document. Frontmatter-aware and
+ * fence-aware: the header is neutralized line by line and re-emitted with
+ * exact `---` delimiters, then the body is scanned for fences from a clean
+ * state. The HTML / link transforms skip only lines that are CERTAINLY inside
+ * a fenced code block (see sanitizeFences.ts), so a user's captured ```js or
+ * ```html snippet is never mutated. Executable fence languages are renamed on
+ * every line. Pure and total — never returns null, never throws.
  */
 export function sanitizeMarkdown(markdown: string): string {
-  // Templater `<%…%>` executes JS and ignores code fences (raw find-and-replace),
-  // so it must die EVERYWHERE — inside ```js/```html/```dataviewjs bodies too,
-  // not just the outside-fence text neutralizeText() handles. Strip it globally
-  // up front, before the fence-aware pass preserves any remaining fence bodies.
-  const lines = markdown
-    .replace(/<%[\s\S]*?%>/g, "[templater expression removed]")
-    .split("\n");
-  const out: string[] = [];
-  let textBuf: string[] = [];
+  return sanitizePass(markdown);
+}
 
-  const flushText = (): void => {
-    if (textBuf.length > 0) {
-      out.push(neutralizeText(textBuf.join("\n")));
-      textBuf = [];
-    }
-  };
+/**
+ * One full pass. Line endings are normalized to LF first: Obsidian treats a
+ * lone CR or CRLF as a line break, so a `\r`-terminated ```dataviewjs line
+ * is a live fence there but was invisible to a `\n`-only scan.
+ *
+ * Templater `<%…%>` executes JS and ignores code fences (raw find-and-replace),
+ * so it must die EVERYWHERE — inside ```js/```html/```dataviewjs bodies and the
+ * frontmatter too. Strip it globally before anything is preserved verbatim.
+ */
+function sanitizePass(markdown: string): string {
+  const text = markdown.replace(/\r\n?/g, "\n").replace(TEMPLATER, TEMPLATER_REMOVED);
+  const { header, body } = splitFrontmatter(text);
+  return header ? sanitizeHeader(header) + sanitizeBody(body) : sanitizeBody(text);
+}
 
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const fence = FENCE_OPEN.exec(line);
-    if (fence) {
-      flushText();
-      const [, indent, marker, info] = fence;
-      const lang = info.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
-      const isExecutable = EXECUTABLE_FENCE_LANGS.has(lang);
-      out.push(isExecutable ? `${indent}${marker}text` : line);
-      i++;
-      // Consume the block body verbatim up to (and including) a matching close.
-      const closeRe = new RegExp(`^\\s*${marker[0]}{${marker.length},}\\s*$`);
-      while (i < lines.length && !closeRe.test(lines[i])) {
-        out.push(lines[i]);
-        i++;
-      }
-      if (i < lines.length) {
-        out.push(lines[i]); // closing fence
-        i++;
-      }
-      continue;
-    }
-    textBuf.push(line);
-    i++;
-  }
-  flushText();
-  return out.join("\n");
+/**
+ * Neutralize a frontmatter block one line at a time and re-emit it with
+ * exact `---` delimiters (splitFrontmatter accepts a loose `----` closer that
+ * Obsidian does not). A header line that is — or becomes, once neutralized —
+ * a `---` line or a fence marker is dropped: parseFrontmatter would drop it
+ * anyway, and a fence line here used to flip the body scan's fence parity so
+ * the whole body shipped unsanitized.
+ */
+function sanitizeHeader(header: string): string {
+  const closedByNewline = header.endsWith("\n");
+  const lines = (closedByNewline ? header.slice(0, -1) : header).split("\n");
+  const inner = lines
+    .slice(1, -1)
+    .map(neutralizeSegment)
+    .filter((line) => !line.trimStart().startsWith("---") && !isFenceLike(line));
+  return ["---", ...inner, "---"].join("\n") + (closedByNewline ? "\n" : "");
+}
+
+/** Rename executable fences everywhere, then neutralize every line that is not
+ * certainly inside a fenced code block, one contiguous text run at a time (so
+ * multi-line constructs such as a `<script>` body are seen whole). */
+function sanitizeBody(body: string): string {
+  const lines = body.split("\n").map(renameExecutableFence);
+  const fenced = certainlyFencedLines(lines);
+  const runs: Array<{ fenced: boolean; lines: string[] }> = [];
+  lines.forEach((line, i) => {
+    const last = runs[runs.length - 1];
+    if (last && last.fenced === fenced[i]) last.lines.push(line);
+    else runs.push({ fenced: fenced[i], lines: [line] });
+  });
+  return runs
+    .map((run) => (run.fenced ? run.lines.join("\n") : neutralizeSegment(run.lines.join("\n"))))
+    .join("\n");
+}
+
+/** Everything that neutralizes a non-code text segment. */
+function neutralizeSegment(text: string): string {
+  return neutralizeText(text);
 }
 
 /**
@@ -130,7 +142,7 @@ function neutralizeText(text: string): string {
   let s = text;
 
   // Templater — executes JS. `<%= tp.date.now() %>`, `<% … %>`.
-  s = s.replace(/<%[\s\S]*?%>/g, "[templater expression removed]");
+  s = s.replace(TEMPLATER, TEMPLATER_REMOVED);
 
   // <script>…</script> and a lone/unclosed opening tag.
   s = s.replace(/<script\b[\s\S]*?<\/script\s*>/gi, "[script removed]");
@@ -142,9 +154,12 @@ function neutralizeText(text: string): string {
 
   // on*= inline event-handler attributes (onclick=, onload=, …). Strip the
   // whole attribute, quoted or bare, leaving the surrounding tag inert. The
-  // leading delimiter is whitespace OR `/` so tag-slash forms without a space
-  // (`<svg/onload=…>`, `<img/onerror=…>`) are caught, not just ` onload=…`.
-  s = s.replace(/[\s/]on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  // leading delimiter is whitespace, `/` (`<svg/onload=…>`) or the closing
+  // quote of the previous attribute (`src="x"onerror=…`, no space at all). A
+  // quote delimiter is kept so the previous attribute stays balanced.
+  s = s.replace(/([\s/"'])on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (_attr, delim: string) =>
+    delim === '"' || delim === "'" ? delim : "",
+  );
 
   // Inline Dataview DQL query span: a code span whose content starts with `=`.
   s = s.replace(/`=\s*[^`]*`/g, "`[inline dataview removed]`");

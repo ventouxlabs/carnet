@@ -78,7 +78,7 @@ describe("item 1 — inline Dataview spans made inert", () => {
 // ── Item 3: a fence line in the frontmatter must not hide the body ────────────
 
 describe("item 3 — frontmatter-aware fence scan", () => {
-  it.fails("drops a fence line from the header and scans the body from a clean state", () => {
+  it("drops a fence line from the header and scans the body from a clean state", () => {
     const input =
       "---\ncreated: 2026-07-04\n```\nstatus: seedling\ntags: [idea]\n---\n# T\n\n```dataviewjs\ndv.pages()\n```\n\n<script>x</script>\n";
     const out = s(input);
@@ -88,12 +88,12 @@ describe("item 3 — frontmatter-aware fence scan", () => {
     expect(sanitizeAndNormalize(input, "idea")).toBe(out);
   });
 
-  it.fails("rewrites a loose `----` closer to exactly `---`", () => {
+  it("rewrites a loose `----` closer to exactly `---`", () => {
     const input = "---\ncreated: 2026-07-04\n```\n----\n# T\n\n<script>x</script>\n";
     expect(s(input)).toBe("---\ncreated: 2026-07-04\n---\n# T\n\n[script removed]\n");
   });
 
-  it.fails("normalizes CRLF so a ```dataviewjs\\r opener is renamed", () => {
+  it("normalizes CRLF so a ```dataviewjs\\r opener is renamed", () => {
     const input =
       "---\r\ncreated: 2026-07-04\r\nstatus: seedling\r\ntags: [idea]\r\n---\r\n# T\r\n\r\n```dataviewjs\r\ndv.pages()\r\n```\r\n";
     expect(s(input)).toBe(
@@ -101,7 +101,7 @@ describe("item 3 — frontmatter-aware fence scan", () => {
     );
   });
 
-  it.fails("normalizes lone-CR line endings", () => {
+  it("normalizes lone-CR line endings", () => {
     expect(s("# T\r\r```dataviewjs\rdv.pages()\r```\r")).toBe("# T\n\n```text\ndv.pages()\n```\n");
   });
 });
@@ -148,30 +148,30 @@ describe("item 4 — fixed point", () => {
 // ── Extras (decision 3) ───────────────────────────────────────────────────────
 
 describe("extras — fences in containers, fake openers, quote-delimited on*=", () => {
-  it.fails("renames executable fences after a list marker or a callout `>`", () => {
+  it("renames executable fences after a list marker or a callout `>`", () => {
     const input = "- ```dataviewjs\n  dv.x()\n  ```\n\n> ```dataview\n> LIST\n> ```\n\n> - 1. ~~~DataviewJS\n";
     expect(s(input)).toBe(
       "- ```text\n  dv.x()\n  ```\n\n> ```text\n> LIST\n> ```\n\n> - 1. ~~~text\n",
     );
   });
 
-  it.fails("a 4-space-indented ``` is not a fence opener (it hid what followed)", () => {
+  it("a 4-space-indented ``` is not a fence opener (it hid what followed)", () => {
     expect(s("# T\n\n    ```\n<script>alert(1)</script>\n")).not.toContain("<script");
   });
 
-  it.fails("a backtick fence with a backtick in its info string is not an opener", () => {
+  it("a backtick fence with a backtick in its info string is not an opener", () => {
     expect(s("# T\n\n```a`b\n<script>alert(1)</script>\n")).not.toContain("<script");
   });
 
-  it.fails("a fence in a list item closes when the item does (dedented line)", () => {
+  it("a fence in a list item closes when the item does (dedented line)", () => {
     expect(s("- a\n  ```js\n<script>x</script>\n  ```\n")).not.toContain("<script");
   });
 
-  it.fails("a fence line inside an HTML block is HTML, not a fence opener", () => {
+  it("a fence line inside an HTML block is HTML, not a fence opener", () => {
     expect(s("<div>\n```js\n<img src=x onerror=alert(1)>\n```\n")).not.toMatch(/onerror/i);
   });
 
-  it.fails("strips an on*= attribute glued to a closing quote — src=\"x\"onerror=", () => {
+  it("strips an on*= attribute glued to a closing quote — src=\"x\"onerror=", () => {
     expect(s(`# T\n\n<img src="x"onerror="alert(1)">\n`)).toBe(`# T\n\n<img src="x">\n`);
   });
 });
