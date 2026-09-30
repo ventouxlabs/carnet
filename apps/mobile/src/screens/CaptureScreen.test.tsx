@@ -1001,6 +1001,25 @@ describe("CaptureScreen — no Contact fallthrough", () => {
 // ── Note capture (note-capture-mode Task 8) ───────────────────────────────────
 
 describe("CaptureScreen (note)", () => {
+  // Every note is captured while Work is the active vault, so the pinned
+  // root and the vaultContext below are Work's — not the default profile's
+  // internal root, which is what an unpinned write would silently fall to.
+  const WORK_CONTEXT = { profileId: "work", rootUri: "file:///work" };
+  const NOTE_PATH = "file:///work/Notes/call-the-dentist.md";
+  const RAW_NOTE = "---\nstatus: pending-enrich\ntags: [note]\n---\n- [ ] call the dentist\n";
+
+  function workSettings(previewBeforeSave = false) {
+    return {
+      previewBeforeSave,
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>;
+  }
+
   // The Edit test at ~:836 installs a PERSISTENT enrichIdeaInPlace
   // implementation (mockReturnValue(deferred)), and vi.clearAllMocks keeps
   // implementations — without this reset every test appended after it
@@ -1010,9 +1029,16 @@ describe("CaptureScreen (note)", () => {
       kind: "updated",
       markdown: "---\n---\n# My Idea\n\nmy idea\n",
     });
+    vi.mocked(getSettings).mockResolvedValue(workSettings());
+    vi.mocked(writeRawIdea).mockResolvedValueOnce({
+      filepath: NOTE_PATH,
+      slug: "call-the-dentist",
+      mtime: 111,
+      markdown: RAW_NOTE,
+    });
   });
 
-  it("save-first Send writes the raw note as a note and enriches it with the note prompt", async () => {
+  it("save-first Send writes the raw note as a note into the pinned vault and enriches it with the note prompt", async () => {
     const { navigation } = renderScreen("note");
     const input = await screen.findByPlaceholderText("What's on your mind?");
     fireEvent.change(input, { target: { value: "Weekend errands\n- [ ] call the dentist" } });
@@ -1021,23 +1047,23 @@ describe("CaptureScreen (note)", () => {
     await waitFor(() => expect(navigation.goBack).toHaveBeenCalled());
     expect(writeRawIdea).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "note", text: "Weekend errands\n- [ ] call the dentist" }),
-      expect.anything(),
-      expect.anything(),
+      expect.any(Date),
+      expect.objectContaining({ uri: "file:///work" }),
     );
-    expect(enrichIdeaInPlace).toHaveBeenCalledWith(expect.objectContaining({ mode: "note" }));
+    expect(enrichIdeaInPlace).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "note", filepath: NOTE_PATH, vaultContext: WORK_CONTEXT }),
+    );
     expect(recordCapture).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "note", title: "Weekend errands" }),
-      "default",
+      expect.objectContaining({ mode: "note", title: "Weekend errands", filepath: NOTE_PATH }),
+      "work",
     );
     expect(enrichIdea).not.toHaveBeenCalled();
     expect(enrichPerson).not.toHaveBeenCalled();
-    expect(clearDraft).toHaveBeenCalledWith("note", "default");
+    expect(clearDraft).toHaveBeenCalledWith("note", "work");
   });
 
   it("stays save-first with previewBeforeSave on — a Note never enters the idea preview", async () => {
-    vi.mocked(getSettings).mockResolvedValue({
-      previewBeforeSave: true,
-    } as Awaited<ReturnType<typeof getSettings>>);
+    vi.mocked(getSettings).mockResolvedValue(workSettings(true));
     const { navigation } = renderScreen("note");
     const input = await screen.findByPlaceholderText("What's on your mind?");
     fireEvent.change(input, { target: { value: "- [ ] call the dentist" } });
@@ -1046,8 +1072,8 @@ describe("CaptureScreen (note)", () => {
     await waitFor(() => expect(navigation.goBack).toHaveBeenCalled());
     expect(writeRawIdea).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "note", text: "- [ ] call the dentist" }),
-      expect.anything(),
-      expect.anything(),
+      expect.any(Date),
+      expect.objectContaining({ uri: "file:///work" }),
     );
     // The preview path's blocking enrichIdea (→ confirmSaveIdea → Ideas/) never runs.
     expect(enrichIdea).not.toHaveBeenCalled();
@@ -1064,9 +1090,19 @@ describe("CaptureScreen (note)", () => {
     fireEvent.change(input, { target: { value: "- [ ] call the dentist" } });
     fireEvent.click(screen.getByText("Send"));
 
+    // An in-place retry of the raw note already on disk, in the vault it was
+    // captured into — the drain must neither write a twin nor follow a later
+    // profile switch.
     await waitFor(() =>
       expect(enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({ mode: "note", text: "- [ ] call the dentist" }),
+        expect.objectContaining({
+          mode: "note",
+          text: "- [ ] call the dentist",
+          filepath: NOTE_PATH,
+          baselineMtime: 111,
+          baselineContent: RAW_NOTE,
+          vaultContext: WORK_CONTEXT,
+        }),
       ),
     );
   });

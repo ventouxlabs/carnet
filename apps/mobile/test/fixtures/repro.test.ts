@@ -126,6 +126,7 @@ import {
 import { getFrontmatterTags } from "../../src/lib/frontmatter";
 import { sanitizeAndNormalize } from "../../src/lib/enrichSanitize";
 import { extractChecklistLines } from "../../src/lib/checklist";
+import { keepsUserLines } from "../../src/lib/noteLineGuard";
 
 beforeEach(() => {
   _files.clear();
@@ -315,9 +316,10 @@ describe("repro: note capture keeps every line (note-tasklist.json)", () => {
     expect(filepath).toBe("file:///data/carnet/Notes/weekend-errands.md");
     const written = await readNote(filepath);
 
-    for (const line of fixture.input.split("\n").map((l) => l.trim()).filter(Boolean)) {
-      expect(written).toContain(line);
-    }
+    // Line by line, in order, one-for-one — the same check dispatcher.enrichNote
+    // enforces. A whole-document toContain would also pass a reply that kept
+    // every line and then added prose, or reordered them.
+    expect(keepsUserLines(fixture.input, written)).toBe(true);
     // A context line is never turned into a task.
     expect(written).not.toContain("- [ ] the car is in the east lot");
     expect(extractChecklistLines(written).map((t) => t.text)).toEqual([

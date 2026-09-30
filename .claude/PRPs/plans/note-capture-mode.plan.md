@@ -2862,9 +2862,11 @@ Then confirm that no stale claims remain:
 ```bash
 grep -rn "no mode of its own\|mode reports idea\|Idea\" for a \`Notes/\`\|Five capture modes" \
   apps/mobile/src docs/CODEMAPS README.md
+# AC7: the writeSynthesis docstring no longer calls Notes/ "computed artifacts" (Task 2).
+grep -n "computed artifacts" apps/mobile/src/lib/writer.ts
 ```
 
-Expected: no output.
+Expected: no output from either.
 
 - [ ] **Step 4: Record it in `TODO.md`**
 
@@ -3000,6 +3002,7 @@ Step 6's push/PR. Every commit ends with the mobile gate and the Drive Inbox gat
 - Item 3: the raw note stub did **not** already carry `note` (no `mode` branch in `buildRawIdeaMarkdown`); it now does, merged through `mergeUserTags` → `setFrontmatterTags`. In both places `note` goes first, matching the prompt's `tags: [note, …]`, and a reply that already has it (any spelling) is left byte-for-byte.
 - Item 4: `const _exhaustive: never = mode` alone fails `tsc` under `noUnusedLocals` (TS6133), so each `default` binds `unknownMode: never` and reads it with `void`. The throw came from `modeStamp` returning `undefined`, so one `default` there fixes `NoteCard`, `NoteMetaRow`, `RelatedNotesCard`, `SearchScreen` and `HomeScreen:532`; `formatMode` gets the same `default` ("undefined · captured …" in File info). Neither `NoteMetaRow.tsx` nor `HomeScreen.tsx` needed editing. The test is a new `components/NoteCard.test.tsx` plus a `recentDetailView.test.ts` case.
 - Item 5: "mode omitted" is almost unreachable, because `finishPendingEnrichment` turns a missing mode into an explicit `"idea"`, and Re-enrich passes the entry's mode, which can be a stale cached `"idea"` (R2). So in `enrichIdeaInPlace` a `Notes/` file gets the note prompt **whatever** mode the caller passed. `Notes/` never holds an idea, because `writeIdea` writes to `Ideas/`.
+- Item 6: the CaptureScreen note tests now run with Work as the active profile, because the default mock pins nothing, so a dropped root would go unnoticed. They assert the pinned root by its `uri` (`Root.fs` is a backend object), `vaultContext` equal to Work's, and the queued row's `filepath` and baselines. A mutation that drops the root or the `vaultContext` fails all three tests.
 
 ---
 
