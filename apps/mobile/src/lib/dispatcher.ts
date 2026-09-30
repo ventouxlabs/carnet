@@ -63,7 +63,6 @@ import {
   getFrontmatterTags,
   normalizeTag,
   setFrontmatterTags,
-  splitFrontmatter,
   upsertFrontmatterField,
 } from "./frontmatter";
 import { sanitizeMarkdown } from "./enrichSanitize";
@@ -330,23 +329,17 @@ export async function enrichIdea(
  * frontmatter and title, and gets the user's own lines back. No new status
  * and no retry. A compliant reply is returned untouched.
  *
- * Both sides go through B3 (enrichSanitize.sanitizeMarkdown), the one set of
- * neutralization rules. The reply already has, so it is judged against what B3
- * leaves of the user's text — a sanitizer-altered line is then not a spurious
- * mismatch. The fallback is sanitized too: every enriched note has passed B3,
- * whichever path built it (the raw save-first stub is the only exception, as
- * before). */
+ * The reply is judged against the user's text exactly as typed: typed text is
+ * never lost (the human's call, 2026-09-30), so a line B3 altered in the
+ * model's echo (R6 `once = daily`, a Templater expression) also falls back,
+ * at the cost of that capture's checkboxes. In the fallback B3
+ * (enrichSanitize.sanitizeMarkdown) runs on the model-controlled parts — its
+ * frontmatter and title, separately, so a fence opener hiding in the
+ * frontmatter can't shield the title — and never on the user's own lines, which
+ * the raw save-first stub already stores unsanitized. */
 function keepNoteLines(text: string, result: EnrichResult): EnrichResult {
-  if (keepsUserLines(sanitizeMarkdown(text), result.markdown)) return result;
-  return { ...result, markdown: sanitizeFallback(withUserLines(text, result.markdown)) };
-}
-
-/** B3 over the fallback, frontmatter and body separately: a fence opener
- * hiding in a reply's frontmatter would otherwise mark the whole body as a
- * code fence, which B3 leaves unsanitized. */
-function sanitizeFallback(markdown: string): string {
-  const { header, body } = splitFrontmatter(markdown);
-  return sanitizeMarkdown(header) + sanitizeMarkdown(body);
+  if (keepsUserLines(text, result.markdown)) return result;
+  return { ...result, markdown: withUserLines(text, result.markdown, sanitizeMarkdown) };
 }
 
 /** The tag every captured note carries (buildNotePrompt asks for it first). */

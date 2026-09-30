@@ -163,16 +163,28 @@ function frontmatterOf(header: string): string {
   return header.endsWith("\n") ? header : `${header}\n`;
 }
 
+/** Neutralizes model-controlled text. Injected rather than imported so this
+ * leaf keeps no app imports; dispatcher.enrichNote passes B3's sanitizeMarkdown. */
+export type ModelTextSanitizer = (markdown: string) => string;
+
+const keepAsIs: ModelTextSanitizer = (markdown) => markdown;
+
 /**
  * The fallback for a reply that fails keepsUserLines: the reply's frontmatter
  * block and its first H1 outside any fence, then the user's lines verbatim
  * (trimmed as a whole, as the save-first raw stub trims them). Satisfies
- * keepsUserLines. The caller re-sanitizes the result (dispatcher.enrichNote).
+ * keepsUserLines. `sanitizeModelText` runs on the model's frontmatter and title
+ * only — never on the user's lines, which are theirs as typed.
  */
-export function withUserLines(input: string, enrichedMarkdown: string): string {
+export function withUserLines(
+  input: string,
+  enrichedMarkdown: string,
+  sanitizeModelText: ModelTextSanitizer = keepAsIs,
+): string {
   const { header, body } = splitFrontmatterBlock(toLf(enrichedMarkdown));
-  const title = fallbackTitle(body);
+  const rawTitle = fallbackTitle(body);
+  const title = rawTitle === undefined ? undefined : sanitizeModelText(rawTitle);
   const trimmed = toLf(input).trim();
   const userLines = trimmed ? trimmed.split("\n") : [];
-  return `${frontmatterOf(header)}${titledLines(title, userLines).join("\n")}\n`;
+  return `${frontmatterOf(sanitizeModelText(header))}${titledLines(title, userLines).join("\n")}\n`;
 }

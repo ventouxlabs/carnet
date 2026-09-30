@@ -862,11 +862,11 @@ describe("dispatcher enrichNote keeps the user's lines", () => {
     expect(result.markdown).toBe(compliant);
   });
 
-  it("judges the reply against what B3 leaves of the user's text, so a sanitizer-altered line keeps its checkbox (R6)", async () => {
+  it("falls back to a line exactly as typed when B3 alters the model's echo of it (R6)", async () => {
     // neutralizeText's on*= stripper eats ` once = daily` from the echoed
-    // line. Compared against the raw text, that forced a fallback that threw
-    // away every checkbox in the note; compared against sanitizeMarkdown(text)
-    // it matches, and the line reads exactly as any enriched note would.
+    // line. The reply is judged against the user's raw text (the human's
+    // decision, 2026-09-30: never lose typed text), so the note keeps the
+    // line whole — at the cost of that capture's checkboxes.
     fetchMock.mockResolvedValueOnce(
       makeOkResponse(
         "---\ncreated: 2026-09-29\ntags: [note, plants]\n---\n# Plants\n\n- [ ] water the ferns once = daily\n",
@@ -876,7 +876,7 @@ describe("dispatcher enrichNote keeps the user's lines", () => {
     const result = await enrichNote("water the ferns once = daily");
 
     expect(result.markdown).toBe(
-      "---\ncreated: 2026-09-29\ntags: [note, plants]\n---\n# Plants\n\n- [ ] water the ferns\n",
+      "---\ncreated: 2026-09-29\ntags: [note, plants]\n---\n# Plants\n\nwater the ferns once = daily\n",
     );
   });
 
@@ -932,14 +932,29 @@ describe("dispatcher enrichNote keeps the user's lines", () => {
       expect(result.markdown).toBe("---\ntags: [note]\n---\n---\nfoo: bar\n---\nbuy milk\n");
     });
 
-    it("runs the fallback's user lines through B3 too, like every enriched note", async () => {
+    it("keeps the fallback's user lines exactly as typed, even ones B3 would neutralize", async () => {
+      // B3 defuses model output; the user's own lines are theirs (the raw
+      // save-first stub already stores them unsanitized).
       fetchMock.mockResolvedValueOnce(
         makeOkResponse(`${FM}# Shopping\n\nA long expansion.\n`),
       );
 
       const result = await enrichNote("buy milk <% tp.system.prompt('x') %>");
 
-      expect(result.markdown).toBe(`${FM}# Shopping\n\nbuy milk [templater expression removed]\n`);
+      expect(result.markdown).toBe(`${FM}# Shopping\n\nbuy milk <% tp.system.prompt('x') %>\n`);
+    });
+
+    it("sanitizes the model's title but not the user's lines in the same fallback", async () => {
+      // The frontmatter fence hides the body from B3, so PAYLOAD reaches the
+      // fallback as a raw H1 — only the model-controlled title is neutralized.
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse(`---\ntags: [note]\n\`\`\`\n---\n${PAYLOAD}\n\nA long expansion.\n`),
+      );
+
+      const result = await enrichNote("buy milk <% tp.date.now() %>");
+
+      expect(result.markdown).not.toMatch(/onerror|javascript:|`= this/);
+      expect(result.markdown).toContain("\nbuy milk <% tp.date.now() %>\n");
     });
   });
 

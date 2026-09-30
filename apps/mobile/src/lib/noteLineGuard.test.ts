@@ -144,6 +144,14 @@ describe("withUserLines — the fallback", () => {
     expect(withUserLines(input, expanded)).toBe(`${FM}# Errands\n\ncall the dentist\n\nbuy stamps\n`);
   });
 
+  it("applies the injected sanitizer to the model's frontmatter and title only, never the user's lines", () => {
+    const upper = (markdown: string) => markdown.toUpperCase();
+    const expanded = "---\ntags: [note]\n---\n# Shopping\n\nA long expansion.\n";
+    expect(withUserLines("buy milk <% x %>", expanded, upper)).toBe(
+      "---\nTAGS: [NOTE]\n---\n# SHOPPING\n\nbuy milk <% x %>\n",
+    );
+  });
+
   it("uses the title in place of an identical first line rather than repeating it", () => {
     // Keeps an H1 in the file: injectImageEmbed puts an attachment under the
     // H1, and above the whole document (frontmatter included) when there is none.
