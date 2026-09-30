@@ -134,4 +134,13 @@ bytes; that's verified in the differential below.
 - `promoteIdea` re-applies all of the current note's non-canonical fields (`preserveFrontmatterFields(…, CANONICAL_ORDER.idea)`, as in the mapping), not only `fallback`.
 - `findCollisionFreeName`'s signature change is a branded `DirLock` first parameter, and it is no longer exported; the unused `writeBinaryBytes` helper was removed.
 - Enhance and Ask now pass NoteType `null` (body-only, no frontmatter contract), in a follow-up `fix(llm)` commit. Commit 5's allowlist, applied to them as "journal", deleted the prose between two leading `---` rules in their replies. Their output lands below an app-owned header, so that block is prose, not properties.
-- New finding, logged in `TODO.md` and not fixed: Dataview's default `inlineQueriesInCodeblocks: true` also evaluates a whole fenced or indented code block whose text starts with `=`/`$=`.
+- New finding, logged in `TODO.md` (resolved in the review round by `4e3cde0`, human decision): Dataview's default `inlineQueriesInCodeblocks: true` also evaluates a whole fenced or indented code block whose text starts with `=`/`$=`.
+- Review round, 2026-09-30:
+  - Body-only replies (Enhance, Ask) get their own mode, `sanitizeReplyBody`: it never splits frontmatter and turns a leading `---` into `***`.
+  - The "certain fence" rule now counts only column-0 openers. The list-dedent parse is removed, since it can no longer fire, and a lenient-closer parse is added.
+  - Inline tokenizer readings are now escapes × HTML-awareness (CommonMark raw-HTML/autolink precedence). `|` cells are split only in chunks with a GFM delimiter row.
+  - Code blocks that Dataview would run as queries get `inert: ` on their first content line, per the human decision. That covers fenced blocks (any container) and indented code blocks; indented blocks go beyond the fenced-only wording, because they render as the same `<pre><code>`.
+  - A quote-glued `on*=` is now entity-encoded instead of stripped; the whitespace and `/` forms still strip.
+  - Link neutralization moves to `sanitizeLinks.ts`: entity-decoded schemes; `<`, reference definition and autolink forms; `javascript:`/`data:` in raw `href`. An inline image is detected by bracket-matching back from `]`, within a 1000-character window. Longer alt text fails closed: the image is neutralized.
+  - `executeChat` refuses replies over 256 KiB as a status-200 `LlmClientError`, the same class as a malformed reply (fallback-eligible). Templater, `<script>` and `<iframe>` removal is now linear.
+  - `appendJournal` takes the `dir:` lock inside its file lock.

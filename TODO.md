@@ -169,21 +169,39 @@ branch commits (squash-merge will collapse them).
 - [x] `342a7db` A prompt override keeps `INJECTION_GUARD`.
 - [x] `c0e14bb` `writeUniqueFile`: choose-name/create/write under one `dir:` lock (file://
   create-only race).
-- [x] Follow-up `fix(llm)`: Enhance/Ask replies are body-only (NoteType `null`), so the
-  key allowlist no longer deletes prose between two leading `---` rules.
-- [ ] **Header-less Enhance can still set frontmatter** (pre-existing, unchanged here) — a
-  note with no frontmatter and no `# ` title puts the Enhance reply at file start, so a
-  leading `---`…`---` block in it becomes the note's properties.
+- [x] `6415736` Enhance/Ask replies are body-only (NoteType `null`), so the key allowlist
+  no longer deletes prose between two leading `---` rules.
+
+Review round (independent code + security review, 2026-09-30):
+
+- [x] `53c3dae` Body-only mode (`sanitizeReplyBody`) for Enhance and Ask: it never splits
+  frontmatter, and a leading `---` becomes `***`. **Resolves header-less Enhance**: a
+  note with no frontmatter and no `# ` title used to take a `---\ndg-publish: true\n---`
+  reply as its live properties.
+- [x] `0d6446c` Inline spans respect raw-HTML/autolink precedence; `|` cells only in GFM
+  tables.
+- [x] `380d8ab` Only column-0 fence openers are certain, which closes the list-item fence
+  bypasses. A lenient-closer parse is added.
+- [x] `4e3cde0` **Resolves "Dataview evaluates whole code blocks"** (human decision
+  2026-09-30): a fenced or indented code block whose text starts with `=`/`$=` gets
+  `inert: ` on its first content line. Every other block stays byte-identical.
+- [x] `d531e82` Quote-glued `on*=` is entity-encoded, never deleted. Link schemes are read
+  entity-decoded behind `<`, in reference definitions, autolinks and raw `href`.
+- [x] `a2a09a0` Replies over 256 KiB are refused, and every sanitizer rule runs in linear
+  time.
+- [x] `79199c8` `appendJournal` creates under the `dir:` lock too (file → dir order).
+- [x] `aab5fc6` Oracle-checked fuzz for both modes; every reviewer repro is a named case.
 - [ ] **Custom Dataview inline prefixes** (decision 4, deferred) — only the defaults `=` and
   `$=` are covered. A vault whose `.obsidian/plugins/dataview/data.json` sets other
   `inlineQueryPrefix`/`inlineJsQueryPrefix` values is not protected.
-- [ ] **Dataview evaluates whole code BLOCKS too** (found during this work, not fixed) —
-  Dataview's default `inlineQueriesInCodeblocks: true` (upstream `src/settings.ts`) makes
-  it evaluate a fenced or indented code block whose entire text, trimmed, starts with `=`
-  (or `$=`, which also needs the non-default `enableInlineDataviewJs`). The sanitizer keeps
-  fence bodies byte-for-byte by policy, so this is open. Default-settings impact is
-  read-only DQL. Needs a human call: it conflicts with the "```js survives byte-for-byte"
-  rule.
+- [x] **Dataview evaluates whole code BLOCKS too** — resolved by `4e3cde0` (see above).
+  Dataview's default `inlineQueriesInCodeblocks: true` evaluates a code block whose
+  trimmed text starts with `=` (or `$=` with `enableInlineDataviewJs`).
+- [ ] **Image re-enrich drops app-owned frontmatter** (pre-existing, logged by the review,
+  not fixed) — `noteReprocess.ts` (~:69-77) writes `injectImageEmbed(result.markdown, …)`
+  over the whole note, with no `preserveFrontmatterFields`, so re-enriching a photo note
+  loses its `location` and `karakeepId` (and anything else not in the model's reply).
+  Mirror `personInPlace.ts`/`ideaSaveFirst.ts`, which carry the original's fields across.
 
 ## Deferred to v0.3
 
