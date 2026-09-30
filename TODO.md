@@ -120,10 +120,15 @@ own change to the shared B3 sanitizer or writer, with its own tests.
   `sanitizeMarkdown` is fence-aware but not frontmatter-aware: a bare `` ``` `` line
   in the frontmatter opens a "fence" that runs to the end, so the body is skipped.
   `normalizeFrontmatter` then drops that line, and the body ships live and
-  unsanitized. Found while fixing the note fallback, which now sanitizes the
-  frontmatter and body separately. The compliant path, and every other mode, still
-  has the hole. Fix: in `sanitizeMarkdown`, split the frontmatter off first and
-  fence-scan the body from a clean state.
+  unsanitized. Found while fixing the note fallback, which now sanitizes the model's
+  frontmatter one line at a time and its title on its own. The compliant path, and
+  every other mode, still has the hole. Fix: in `sanitizeMarkdown`, split the
+  frontmatter off first and fence-scan the body from a clean state.
+- [ ] **`neutralizeText` is not idempotent, so one pass can assemble a live tag.**
+  Stripping an `on*=` attribute joins what surrounds it: `<sc onx="y"ript>` comes out
+  as `<script>`, and `o onq='z'nx=` comes out as ` onx=`, which a second pass then
+  strips again. Fix: repeat the neutralizers until the output stops changing (a
+  fixed point), with a pass cap.
 - [ ] **The `file://` create-only write can race and overwrite.** `vaultFs.ts`'s
   `file://` backend `createFile` only builds a path, and `writeString` then writes
   it. Two writers that pick the same free name both "create" it, and the second

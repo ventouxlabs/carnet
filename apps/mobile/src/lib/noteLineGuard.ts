@@ -169,6 +169,26 @@ export type ModelTextSanitizer = (markdown: string) => string;
 
 const keepAsIs: ModelTextSanitizer = (markdown) => markdown;
 
+/** Any line that would close frontmatter (splitFrontmatterBlock's `\n---`). */
+const DELIMITER = /^---/;
+
+/**
+ * The model's frontmatter with each inner line sanitized on its own, under
+ * fixed `---` delimiters. Sanitizing the block whole let B3 read across lines:
+ * an `on*=` value could run over the newline and eat the closing `---` (pulling
+ * the title and the user's lines into the frontmatter), and a ``` line opened a
+ * "fence" that shielded every header line after it. A line that sanitizes into
+ * a delimiter is dropped rather than closing the block early.
+ */
+function sanitizeHeader(header: string, sanitize: ModelTextSanitizer): string {
+  if (!header) return header;
+  const inner = header.replace(/\n$/, "").split("\n").slice(1, -1);
+  const clean = inner
+    .flatMap((line) => sanitize(line).split("\n"))
+    .filter((line) => !DELIMITER.test(line));
+  return ["---", ...clean, "---"].join("\n") + "\n";
+}
+
 /**
  * The fallback for a reply that fails keepsUserLines: the reply's frontmatter
  * block and its first H1 outside any fence, then the user's lines verbatim
@@ -186,5 +206,6 @@ export function withUserLines(
   const title = rawTitle === undefined ? undefined : sanitizeModelText(rawTitle);
   const trimmed = toLf(input).trim();
   const userLines = trimmed ? trimmed.split("\n") : [];
-  return `${frontmatterOf(sanitizeModelText(header))}${titledLines(title, userLines).join("\n")}\n`;
+  const safeHeader = sanitizeHeader(header, sanitizeModelText);
+  return `${frontmatterOf(safeHeader)}${titledLines(title, userLines).join("\n")}\n`;
 }

@@ -113,6 +113,7 @@ import {
   isNotConfiguredError,
 } from "./dispatcher";
 import * as llmClient from "./llmClient";
+import { splitFrontmatter } from "./frontmatter";
 import { getSettings, getPromptOverrides } from "./settings";
 import { getVaultTagStrings } from "./vaultTagHint";
 
@@ -921,6 +922,35 @@ describe("dispatcher enrichNote keeps the user's lines", () => {
       const result = await enrichNote("buy milk");
 
       expect(result.markdown).not.toMatch(/onerror|javascript:|`= this/);
+      expect(result.markdown).toContain("\nbuy milk\n");
+    });
+
+    // Security re-check 2026-09-30: B3 over the header as ONE block could read
+    // across lines. Both replies below skip normalization (no `created`), so
+    // the model's header reaches the fallback as the model wrote it.
+    it("never lets a sanitized header line swallow the frontmatter's closing ---", async () => {
+      // B3's first pass turns `o onq='z'nx=` into ` onx=`; a second pass over
+      // the whole block then ate ` onx=\n---`, pulling the title and the
+      // user's lines into the frontmatter.
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse("---\ntags: [note]\no: o onq='z'nx=\n---\n# T\n\nA long expansion.\n"),
+      );
+
+      const result = await enrichNote("buy milk\n---\nsecret line");
+
+      const { body } = splitFrontmatter(result.markdown);
+      expect(body).toContain("buy milk\n---\nsecret line");
+      expect(body).toContain("# T");
+    });
+
+    it("sanitizes every header line, even after a fence opener inside the frontmatter", async () => {
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse("---\ntags: [note]\n```\nevil: <img src=x onerror=alert(9)>\n---\n# T\n\nA long expansion.\n"),
+      );
+
+      const result = await enrichNote("buy milk");
+
+      expect(result.markdown).not.toMatch(/onerror/);
       expect(result.markdown).toContain("\nbuy milk\n");
     });
 
