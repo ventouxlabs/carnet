@@ -169,6 +169,11 @@ branch commits (squash-merge will collapse them).
 - [x] `342a7db` A prompt override keeps `INJECTION_GUARD`.
 - [x] `c0e14bb` `writeUniqueFile`: choose-name/create/write under one `dir:` lock (file://
   create-only race).
+- [x] Follow-up `fix(llm)`: Enhance/Ask replies are body-only (NoteType `null`), so the
+  key allowlist no longer deletes prose between two leading `---` rules.
+- [ ] **Header-less Enhance can still set frontmatter** (pre-existing, unchanged here) — a
+  note with no frontmatter and no `# ` title puts the Enhance reply at file start, so a
+  leading `---`…`---` block in it becomes the note's properties.
 - [ ] **Custom Dataview inline prefixes** (decision 4, deferred) — only the defaults `=` and
   `$=` are covered. A vault whose `.obsidian/plugins/dataview/data.json` sets other
   `inlineQueryPrefix`/`inlineJsQueryPrefix` values is not protected.

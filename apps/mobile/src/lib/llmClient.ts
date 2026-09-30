@@ -691,14 +691,12 @@ export async function promoteIdea(
  * owns splitting off frontmatter and the `# Title` heading and re-attaching
  * them afterwards, so neither is ever exposed to the model.
  *
- * The `"journal"` NoteType is inert for this call, and deliberately so:
- * executeChat feeds it to sanitizeAndNormalize, whose normalizeFrontmatter
- * bails at its first check (`if (!header) return null`) because prose-only
- * output has no frontmatter block. The per-type REQUIRED_KEYS/CANONICAL_ORDER
- * tables are therefore never consulted and no frontmatter can be fabricated
- * onto the body — it falls through to plain sanitizeMarkdown, which still
- * neutralizes Templater/HTML/dataviewjs. Any NoteType member would behave
- * identically here; do NOT add an "enhance" member just for this.
+ * NoteType `null`: the reply is body text with no frontmatter contract, so
+ * executeChat runs only sanitizeMarkdown (Templater/HTML/dataviewjs are still
+ * neutralized) — no normalization and no key allowlist. A reply that opens
+ * with a `---` rule is prose here; filtering it as a journal note's header
+ * deleted the lines up to the next `---` (B3 hardening). Do NOT add an
+ * "enhance" NoteType member for this.
  */
 export async function enhanceProse(
   body: string,
@@ -715,7 +713,7 @@ export async function enhanceProse(
     config.apiKey,
     model,
     withSystemOverride(buildEnhanceProsePrompt(body), override),
-    "journal",
+    null,
     config.label,
     ENHANCE_TIMEOUT_MS,
     config.allowInsecureTransport ?? false,
@@ -725,11 +723,9 @@ export async function enhanceProse(
 /**
  * Synthesize an answer to `question` over `notes`.
  *
- * The `"journal"` NoteType is inert for this call, and deliberately so — same
- * reasoning as enhanceProse above (see the comment at the top of that
- * function): the response is bare prose with no frontmatter, and
- * chatCompletion's sanitize pass neutralizes Templater/HTML/dataviewjs
- * regardless of which NoteType member is passed.
+ * NoteType `null` for the same reason as enhanceProse above: the answer is
+ * bare prose that lands below the synthesis note's own header, so it gets
+ * sanitizeMarkdown only, with no frontmatter normalization or key allowlist.
  *
  * Reuses ENHANCE_TIMEOUT_MS: the payload is larger than an enrich call but of
  * the same order, and the request shape is identical.
@@ -747,7 +743,7 @@ export async function askRetrospective(
     config.apiKey,
     model,
     withSystemOverride(buildRetrospectivePrompt(question, notes), override),
-    "journal",
+    null,
     config.label,
     ENHANCE_TIMEOUT_MS,
     config.allowInsecureTransport ?? false,

@@ -7,7 +7,12 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { filterFrontmatterKeys, sanitizeAndNormalize, sanitizeMarkdown } from "./enrichSanitize";
+import {
+  filterFrontmatterKeys,
+  sanitizeAndNormalize,
+  sanitizeMarkdown,
+  type NoteType,
+} from "./enrichSanitize";
 import { executeChat } from "./llmHttp";
 
 function ideaNote(body: string): string {
@@ -183,7 +188,7 @@ describe("item 2 — strict frontmatter allowlist on executeChat's two branches"
     vi.unstubAllGlobals();
   });
 
-  async function chat(content: string): Promise<string> {
+  async function chat(content: string, noteType: NoteType | null = "idea"): Promise<string> {
     const body = JSON.stringify({ model: "m", choices: [{ message: { role: "assistant", content } }] });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status: 200 })));
     const { markdown } = await executeChat(
@@ -191,7 +196,7 @@ describe("item 2 — strict frontmatter allowlist on executeChat's two branches"
       "k",
       "m",
       [{ role: "user", content: "x" }],
-      "idea",
+      noteType,
       "Test",
     );
     return markdown;
@@ -214,6 +219,14 @@ describe("item 2 — strict frontmatter allowlist on executeChat's two branches"
       '---\ncreated: 2026-07-04\ntags:\n  - idea\n"dg-publish": true\n? publish\n: true\ndg publish: true\ncssclasses : [x]\n---\n# T\n',
     );
     expect(md).toBe("---\ncreated: 2026-07-04\ntags:\n  - idea\n---\n# T\n");
+  });
+
+  it("a body-only reply (noteType null) is sanitized but never key-filtered", async () => {
+    // Enhance / Ask: a leading `---` block is prose below an app-owned header.
+    const prose = "---\nIntro paragraph\n\nSummary: the gist\n---\nMore <script>x</script>\n";
+    expect(await chat(prose, null)).toBe(
+      "---\nIntro paragraph\n\nSummary: the gist\n---\nMore [script removed]\n",
+    );
   });
 
   it("sanitizeMarkdown alone keeps app-written stub keys (source/mime/size)", () => {

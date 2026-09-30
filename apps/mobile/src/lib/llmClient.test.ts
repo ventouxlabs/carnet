@@ -60,6 +60,7 @@ import {
   enrichPerson,
   enrichSharedImage,
   enrichSharedLink,
+  enhanceProse,
   promoteIdea,
   LlmClientError,
   isPermanentError,
@@ -653,6 +654,34 @@ describe("enrichSharedLink", () => {
     const userContent = body.messages[1].content;
     expect(userContent).not.toContain("Site:");
     expect(userContent).not.toContain("Page title:");
+  });
+});
+
+// ── Body-only replies carry no frontmatter contract (B3 allowlist) ────────────
+
+describe("body-only calls are not frontmatter-filtered", () => {
+  // Enhance and Ask return BODY text that lands below an app-owned header. A
+  // reply that opens with a `---` rule is prose, not properties: filtering it
+  // against a note type's key allowlist deleted every line in between.
+  const reply = "---\nIntro paragraph\n\nSummary: the gist\n---\nMore\n";
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  it("enhanceProse keeps prose between two leading `---` rules", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse(reply));
+    const { markdown } = await enhanceProse("some body prose to enhance", CONFIG);
+    expect(markdown).toBe(reply);
+  });
+
+  it("askRetrospective keeps prose between two leading `---` rules", async () => {
+    fetchMock.mockResolvedValueOnce(makeOkResponse(reply));
+    const notes: SelectedNote[] = [
+      { uri: "file:///v/Ideas/a.md", title: "A", body: "notes", truncated: false },
+    ];
+    const { markdown } = await askRetrospective("q?", notes, CONFIG);
+    expect(markdown).toBe(reply);
   });
 });
 

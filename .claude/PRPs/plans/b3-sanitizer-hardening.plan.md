@@ -133,4 +133,5 @@ bytes; that's verified in the differential below.
 - Commit 4 also escapes raw HTML `<code` (`&lt;code`): Dataview evaluates every rendered `<code>`, so this is item 1's threat in HTML syntax.
 - `promoteIdea` re-applies all of the current note's non-canonical fields (`preserveFrontmatterFields(…, CANONICAL_ORDER.idea)`, as in the mapping), not only `fallback`.
 - `findCollisionFreeName`'s signature change is a branded `DirLock` first parameter, and it is no longer exported; the unused `writeBinaryBytes` helper was removed.
+- Enhance and Ask now pass NoteType `null` (body-only, no frontmatter contract), in a follow-up `fix(llm)` commit. Commit 5's allowlist, applied to them as "journal", deleted the prose between two leading `---` rules in their replies. Their output lands below an app-owned header, so that block is prose, not properties.
 - New finding, logged in `TODO.md` and not fixed: Dataview's default `inlineQueriesInCodeblocks: true` also evaluates a whole fenced or indented code block whose text starts with `=`/`$=`.
