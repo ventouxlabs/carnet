@@ -218,6 +218,26 @@ describe("buildRawIdeaMarkdown", () => {
     expect(md).toContain("tags: [work, urgent]");
     expect(md).toContain("location: 38.90000,-77.00000");
   });
+
+  // #note must not depend on the model: the raw note carries it from the
+  // first write. An idea's raw stub is byte-for-byte what it always was.
+  it("keeps an idea's raw stub byte-for-byte unchanged", () => {
+    expect(buildRawIdeaMarkdown({ text: "My raw idea", tags: [] }, NOW, "r1")).toBe(
+      "---\ncreated: 2026-07-04T12:00:00.000Z\nstatus: pending-enrich\nrev: r1\n---\nMy raw idea\n",
+    );
+    expect(buildRawIdeaMarkdown({ mode: "idea", text: "My raw idea", tags: ["work"] }, NOW, "r1")).toBe(
+      "---\ncreated: 2026-07-04T12:00:00.000Z\nstatus: pending-enrich\nrev: r1\ntags: [work]\n---\nMy raw idea\n",
+    );
+  });
+
+  it("tags a raw note #note ahead of the user's tags, never twice", () => {
+    expect(buildRawIdeaMarkdown({ mode: "note", text: "call the dentist", tags: [] }, NOW, "r1")).toBe(
+      "---\ncreated: 2026-07-04T12:00:00.000Z\nstatus: pending-enrich\nrev: r1\ntags: [note]\n---\ncall the dentist\n",
+    );
+    expect(
+      buildRawIdeaMarkdown({ mode: "note", text: "call the dentist", tags: ["errands", "Note"] }, NOW, "r1"),
+    ).toContain("\ntags: [note, errands]\n");
+  });
 });
 
 // ── writeRawIdea — the save-first write lands immediately ─────────────────────

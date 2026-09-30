@@ -877,6 +877,43 @@ describe("dispatcher enrichNote keeps the user's lines", () => {
     );
   });
 
+  it("adds #note when the model's tags leave it out", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse(
+        "---\ncreated: 2026-09-29\ntags: [errands]\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n",
+      ),
+    );
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-29\ntags: [note, errands]\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n",
+    );
+  });
+
+  it("adds a tags field carrying #note when the reply has none", async () => {
+    // No `tags` fails note normalization, so the sanitized reply arrives as-is.
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse("---\ncreated: 2026-09-29\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n"),
+    );
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-29\ntags: [note]\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n",
+    );
+  });
+
+  it("leaves a reply that already carries #note, in any spelling, byte-for-byte unchanged", async () => {
+    const tagged =
+      "---\ncreated: 2026-09-29\ntags: [Errands, Note]\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n";
+    fetchMock.mockResolvedValueOnce(makeOkResponse(tagged));
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(tagged);
+  });
+
   it("keeps the fallback-provider marker when it falls back to the user's lines", async () => {
     vi.mocked(getSettings).mockResolvedValueOnce({
       ...BASE_SETTINGS,

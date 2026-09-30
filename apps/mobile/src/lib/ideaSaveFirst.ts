@@ -142,6 +142,11 @@ export function deriveRawIdeaSlug(text: string, mode: SaveFirstTextMode = "idea"
   return slugify(firstLine.slice(0, 80)) || mode;
 }
 
+/** Every captured note carries #note from its first write, so it never depends
+ * on the model emitting it (dispatcher.enrichNote guarantees it on the enriched
+ * note too). */
+const NOTE_TAG = "note";
+
 /**
  * Build the deterministic client-side markdown written immediately on Save,
  * before any enrichment. Frontmatter carries `created` (ISO),
@@ -169,7 +174,7 @@ export function buildRawIdeaMarkdown(
   // Order matches confirmSave: attachments first (so the tag/location merges see
   // the final body), then user tags, then location.
   md = injectAttachments(md, input.attachments ?? []);
-  md = mergeUserTags(md, input.tags);
+  md = mergeUserTags(md, saveFirstModeOf(input) === "note" ? [NOTE_TAG, ...input.tags] : input.tags);
   if (input.location) md = upsertFrontmatterField(md, "location", input.location);
   return md;
 }

@@ -59,7 +59,12 @@ import * as llmClient from "./llmClient";
 import type { EnrichResult, ProviderConfig } from "./llmClient";
 import type { SelectedNote } from "./retrospective";
 import { isLocalNetworkUrl } from "./netAllowlist";
-import { upsertFrontmatterField } from "./frontmatter";
+import {
+  getFrontmatterTags,
+  normalizeTag,
+  setFrontmatterTags,
+  upsertFrontmatterField,
+} from "./frontmatter";
 import { keepsUserLines, withUserLines } from "./noteLineGuard";
 import {
   readNote,
@@ -327,6 +332,18 @@ function keepNoteLines(text: string, result: EnrichResult): EnrichResult {
   return { ...result, markdown: withUserLines(text, result.markdown) };
 }
 
+/** The tag every captured note carries (buildNotePrompt asks for it first). */
+const NOTE_TAG = "note";
+
+/** Guarantee #note without trusting the model to emit it. A reply that already
+ * carries it, in any spelling, is returned untouched; otherwise it is merged
+ * in first through setFrontmatterTags, never duplicated. */
+function withNoteTag(result: EnrichResult): EnrichResult {
+  const tags = getFrontmatterTags(result.markdown);
+  if (tags.some((tag) => normalizeTag(tag) === NOTE_TAG)) return result;
+  return { ...result, markdown: setFrontmatterTags(result.markdown, [NOTE_TAG, ...tags]) };
+}
+
 /** Every note enrichment — submit (ideaSaveFirst.enrichIdeaInPlace), the
  * queue drain, Finish enrichment and Re-enrich — comes through here, so the
  * line guard lives here once. */
@@ -346,7 +363,7 @@ export async function enrichNote(
     llmClient.enrichNote(text, config, overrides.note, availableTags),
   );
   // withFallbackChain throws on failure, so this is always a successful reply.
-  return keepNoteLines(text, withFallbackMarker(outcome));
+  return withNoteTag(keepNoteLines(text, withFallbackMarker(outcome)));
 }
 
 export async function enrichJournal(

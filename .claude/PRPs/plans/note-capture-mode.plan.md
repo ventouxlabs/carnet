@@ -2997,6 +2997,7 @@ Step 6's push/PR. Every commit ends with the mobile gate and the Drive Inbox gat
 - Item 1: checked state must match both ways: a model that ticks a todo fails like one that un-ticks it.
 - Item 1: indentation is ignored along with trailing whitespace (the line is trimmed before its marker is stripped).
 - Item 1: `withUserLines` puts the model's title *in place of* an identical first input line instead of dropping it, so the note keeps an H1 (`injectImageEmbed` puts attachments above the frontmatter when there is none). It does not stack the model's title on an input that already starts with its own `# ` H1 (re-enrich).
+- Item 3: the raw note stub did **not** already carry `note` (no `mode` branch in `buildRawIdeaMarkdown`); it now does, merged through `mergeUserTags` → `setFrontmatterTags`. In both places `note` goes first, matching the prompt's `tags: [note, …]`, and a reply that already has it (any spelling) is left byte-for-byte.
 
 ---
 
