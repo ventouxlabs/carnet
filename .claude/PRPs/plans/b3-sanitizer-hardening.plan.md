@@ -144,3 +144,4 @@ bytes; that's verified in the differential below.
   - Link neutralization moves to `sanitizeLinks.ts`: entity-decoded schemes; `<`, reference definition and autolink forms; `javascript:`/`data:` in raw `href`. An inline image is detected by bracket-matching back from `]`, within a 1000-character window. Longer alt text fails closed: the image is neutralized.
   - `executeChat` refuses replies over 256 KiB as a status-200 `LlmClientError`, the same class as a malformed reply (fallback-eligible). Templater, `<script>` and `<iframe>` removal is now linear.
   - `appendJournal` takes the `dir:` lock inside its file lock.
+  - The link scheme check has no raw window: it decodes `\`-escaped punctuation, zero-padded entities and padding of any length. The fuzz adds a deterministic link-grammar sweep, because random tokens cannot reach those spellings.

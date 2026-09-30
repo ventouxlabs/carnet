@@ -187,6 +187,8 @@ Review round (independent code + security review, 2026-09-30):
   `inert: ` on its first content line. Every other block stays byte-identical.
 - [x] `d531e82` Quote-glued `on*=` is entity-encoded, never deleted. Link schemes are read
   entity-decoded behind `<`, in reference definitions, autolinks and raw `href`.
+- [x] `194148b` Link schemes also decode backslash escapes (`javascript\:`), padding of
+  any length, and zero-padded entities (`&#0000106;`).
 - [x] `a2a09a0` Replies over 256 KiB are refused, and every sanitizer rule runs in linear
   time.
 - [x] `79199c8` `appendJournal` creates under the `dir:` lock too (file → dir order).
