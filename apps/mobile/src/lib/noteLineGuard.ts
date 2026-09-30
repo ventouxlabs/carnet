@@ -12,11 +12,13 @@
  * mirrors frontmatter.ts `splitFrontmatter` byte-for-byte for that reason.
  */
 
+/** A list item's bullet: `-`, `*`, `+`, or CommonMark's `1.` / `1)`. */
+const BULLET = String.raw`(?:[-*+]|\d{1,9}[.)])`;
 /** One leading list/checkbox marker or ATX heading marker — the only
  * formatting a note reply may change on a user's line. */
-const LINE_MARKER = /^(?:- \[[ xX]\] |[-*+] |#{1,6} )/;
-const TODO = /^- \[[ xX]\] /;
-const CHECKED = /^- \[[xX]\] /;
+const LINE_MARKER = new RegExp(String.raw`^(?:${BULLET} \[[ xX]\] |${BULLET} |#{1,6} )`);
+const TODO = new RegExp(String.raw`^${BULLET} \[[ xX]\] `);
+const CHECKED = new RegExp(String.raw`^${BULLET} \[[xX]\] `);
 const ATX_HEADING = /^#{1,6} /;
 const H1 = /^# /;
 /** A fence opener, as enrichSanitize.ts FENCE_OPEN reads one. */
@@ -25,7 +27,7 @@ const FENCE_OPEN = /^\s*(`{3,}|~{3,})/;
 interface BodyLine {
   /** The line with whitespace and one leading marker removed. */
   readonly text: string;
-  /** A `- [ ]` or `- [x]` todo — what the Todos screen collects. */
+  /** A `- [ ]` / `- [x]` todo (or `*`, `+`, `1.` — Obsidian renders them all). */
   readonly todo: boolean;
   /** A ticked `- [x]` todo. */
   readonly checked: boolean;
@@ -65,13 +67,15 @@ function bodyLines(text: string): BodyLine[] {
 
 /** Whether the reply's line keeps the user's: same words and the same ticked
  * state, and a todo stays a todo. A model may turn a plain or bulleted line
- * into `- [ ]`, but never tick one, un-tick a done one, or strip a checkbox
- * (which would drop an open todo out of the Todos screen). Directional. */
+ * into `- [ ]`, but never tick one, un-tick a done one, strip a checkbox
+ * (which would drop an open todo out of the Todos screen), or turn the user's
+ * heading into a task. Directional. */
 function keepsLine(user: BodyLine, reply: BodyLine): boolean {
   return (
     user.text === reply.text &&
     user.checked === reply.checked &&
-    (!user.todo || reply.todo)
+    (!user.todo || reply.todo) &&
+    !(user.heading && reply.todo)
   );
 }
 
@@ -140,6 +144,19 @@ function fallbackTitle(body: string): string | undefined {
   return undefined;
 }
 
+/** CRLF and a lone CR are line breaks too; the fallback writes LF only. */
+function toLf(text: string): string {
+  return text.replace(/\r\n?/g, "\n");
+}
+
+/** The reply's frontmatter block — or an empty one when it had none, so a
+ * user's own leading `---` block can never be read as the note's frontmatter
+ * (dispatcher's #note merge then fills it). */
+function frontmatterOf(header: string): string {
+  if (!header) return "---\n---\n";
+  return header.endsWith("\n") ? header : `${header}\n`;
+}
+
 /**
  * The fallback for a reply that fails keepsUserLines: the reply's frontmatter
  * block and its first H1 outside any fence, then the user's lines verbatim
@@ -147,10 +164,9 @@ function fallbackTitle(body: string): string | undefined {
  * keepsUserLines. The caller re-sanitizes the result (dispatcher.enrichNote).
  */
 export function withUserLines(input: string, enrichedMarkdown: string): string {
-  const { header, body } = splitFrontmatterBlock(enrichedMarkdown);
-  const head = header && !header.endsWith("\n") ? `${header}\n` : header;
+  const { header, body } = splitFrontmatterBlock(toLf(enrichedMarkdown));
   const title = fallbackTitle(body);
-  const trimmed = input.trim();
+  const trimmed = toLf(input).trim();
   const userLines = trimmed ? trimmed.split("\n") : [];
-  return `${head}${titledLines(title, userLines).join("\n")}\n`;
+  return `${frontmatterOf(header)}${titledLines(title, userLines).join("\n")}\n`;
 }

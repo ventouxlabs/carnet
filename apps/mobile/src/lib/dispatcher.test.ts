@@ -924,6 +924,14 @@ describe("dispatcher enrichNote keeps the user's lines", () => {
       expect(result.markdown).toContain("\nbuy milk\n");
     });
 
+    it("never tags a user's own --- block as the note's frontmatter", async () => {
+      fetchMock.mockResolvedValueOnce(makeOkResponse("Sure, here you go."));
+
+      const result = await enrichNote("---\nfoo: bar\n---\nbuy milk");
+
+      expect(result.markdown).toBe("---\ntags: [note]\n---\n---\nfoo: bar\n---\nbuy milk\n");
+    });
+
     it("runs the fallback's user lines through B3 too, like every enriched note", async () => {
       fetchMock.mockResolvedValueOnce(
         makeOkResponse(`${FM}# Shopping\n\nA long expansion.\n`),

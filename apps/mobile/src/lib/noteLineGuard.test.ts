@@ -47,6 +47,17 @@ describe("keepsUserLines — compliant replies pass", () => {
     expect(keepsUserLines(input, out)).toBe(true);
   });
 
+  it("treats a numbered list marker like any other marker", () => {
+    const out = `${FM}# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n`;
+    expect(keepsUserLines("1. call the dentist\n2) buy stamps", out)).toBe(true);
+  });
+
+  it("reads * and + checkboxes as todos, with their ticked state", () => {
+    expect(keepsUserLines("* [ ] buy stamps\n+ [x] post it", `${FM}# T\n\n- [ ] buy stamps\n- [x] post it\n`)).toBe(true);
+    expect(keepsUserLines("* [x] post it", `${FM}# T\n\n- [ ] post it\n`)).toBe(false);
+    expect(keepsUserLines("+ [ ] buy stamps", `${FM}# T\n\nbuy stamps\n`)).toBe(false);
+  });
+
   it("treats - [X] and - [x] as the same checked state", () => {
     expect(keepsUserLines("- [X] buy stamps", `${FM}# Stamps\n\n- [x] buy stamps\n`)).toBe(true);
   });
@@ -97,6 +108,11 @@ describe("keepsUserLines — expansions fail", () => {
     expect(keepsUserLines("- [ ] buy stamps", `${FM}# Stamps\n\nbuy stamps\n`)).toBe(false);
     expect(keepsUserLines("- [ ] buy stamps", `${FM}# Stamps\n\n- buy stamps\n`)).toBe(false);
     expect(keepsUserLines("- [ ] buy stamps", `${FM}# buy stamps\n`)).toBe(false);
+  });
+
+  it("fails a heading turned into a todo", () => {
+    const out = `${FM}- [ ] Errands\n- [ ] buy milk\n`;
+    expect(keepsUserLines("# Errands\nbuy milk", out)).toBe(false);
   });
 
   it("fails a todo the model ticked on the user's behalf", () => {
@@ -182,10 +198,29 @@ describe("withUserLines — the fallback", () => {
     );
   });
 
-  it("writes the user's lines alone when the reply has no frontmatter", () => {
+  it("opens with an empty frontmatter block when the reply has none", () => {
+    // So the user's own text can never be read as the note's frontmatter
+    // (below); dispatcher's #note merge then fills this block.
     expect(withUserLines("call the dentist", "# Errands\n\nCall them.\n")).toBe(
-      "# Errands\n\ncall the dentist\n",
+      "---\n---\n# Errands\n\ncall the dentist\n",
     );
+  });
+
+  it("never lets a user's own --- block become the note's frontmatter", () => {
+    expect(withUserLines("---\nfoo: bar\n---\nbuy milk", "Sure, here you go.\n")).toBe(
+      "---\n---\n---\nfoo: bar\n---\nbuy milk\n",
+    );
+  });
+
+  it("writes LF line endings only, whatever the input or reply used", () => {
+    expect(withUserLines("call the dentist\r\nbuy stamps\r\n", `${FM}# Errands\n\nprose\n`)).toBe(
+      `${FM}# Errands\n\ncall the dentist\nbuy stamps\n`,
+    );
+    expect(withUserLines("buy milk", "---\r\ncreated: y\r\n---\r\n# T\r\n\r\nprose\r\n")).toBe(
+      "---\ncreated: y\n---\n# T\n\nbuy milk\n",
+    );
+    // A lone CR is a line break too — it must not smuggle text into the title.
+    expect(withUserLines("buy milk", `${FM}# T\rtags: [evil]\nextra\n`)).toBe(`${FM}# T\n\nbuy milk\n`);
   });
 
   it("never merges the closing fence into the body", () => {
@@ -206,6 +241,9 @@ describe("withUserLines — the fallback", () => {
       "one line",
       "- [ ] call the dentist\nbuy stamps",
       "- buy milk",
+      "1. call the dentist\n2) buy stamps\n* [x] post it",
+      "---\nfoo: bar\n---\nbuy milk",
+      "call the dentist\r\nbuy stamps\r\n",
     ];
     const replies = [
       tasklist.content,

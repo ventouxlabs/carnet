@@ -3010,6 +3010,11 @@ Step 6's push/PR. Every commit ends with the mobile gate and the Drive Inbox gat
 - Review fix B: `injectImageEmbed` (`writerMarkdown.ts`) is idempotent: an embed already in the note is not added again. It is also frontmatter-aware: it finds the H1 in the body only, and with no H1 the embed opens the body after the frontmatter. This also fixes the pre-existing `main` bug for an Idea with a photo. For a Note it was worse: the tag merge synthesized a second frontmatter block above the embed.
 - Review fix B: output changes only when there is frontmatter and no body H1, or a `# ` line inside the frontmatter, or the embed is already present. A scratch old-vs-new differential over the vault and omniroute fixtures plus synthetic shapes matched byte-for-byte in 56 of 56 eligible cases. No existing `writerMarkdown` test line changed.
 - Review fix B: the idempotence test covers images only. `## Files` already upserts one section, and re-upserting a section at end-of-file drops its trailing newline, which is pre-existing and cosmetic.
+- Review fix C (M1): a marker is `-`, `*`, `+` or CommonMark's `1.`/`1)` (up to 9 digits). Todo and checked accept that same whole set, numbered todos (`1. [ ] x`) included, which goes slightly beyond the review's `[-*+]`.
+- Review fix C (L1): a user's heading may not come back as a todo.
+- Review fix C (L3): `withUserLines` normalizes CRLF **and a lone CR** to LF in both the input and the reply. A lone CR in a reply's title (`# T\rtags: …`) can no longer carry text along with the title.
+- Review fix C (L4): the fallback always opens with a frontmatter block, an empty `---\n---\n` when the reply had none, so a user's leading `---` block is always body. After the `#note` merge the bytes are identical to the old no-frontmatter output, because `upsertFrontmatterField` synthesized the same block. One of this branch's `withUserLines` tests changed its expected value accordingly.
+- Review L2 (nesting is not checked) stays as documented under item 1 (indentation is ignored).
 
 ---
 
