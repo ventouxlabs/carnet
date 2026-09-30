@@ -62,10 +62,11 @@ import { isLocalNetworkUrl } from "./netAllowlist";
 import {
   getFrontmatterTags,
   normalizeTag,
+  preserveFrontmatterFields,
   setFrontmatterTags,
   upsertFrontmatterField,
 } from "./frontmatter";
-import { sanitizeMarkdown } from "./enrichSanitize";
+import { CANONICAL_ORDER, sanitizeMarkdown } from "./enrichSanitize";
 import { keepsUserLines, withUserLines } from "./noteLineGuard";
 import {
   readNote,
@@ -336,7 +337,10 @@ export async function enrichIdea(
  * (enrichSanitize.sanitizeMarkdown) runs on the model-controlled parts — its
  * frontmatter and title, separately, so a fence opener hiding in the
  * frontmatter can't shield the title — and never on the user's own lines, which
- * the raw save-first stub already stores unsanitized. */
+ * the raw save-first stub already stores unsanitized. The fallback's header is
+ * the reply's, which already passed executeChat's key allowlist (#223); it is
+ * NOT re-filtered here, because by now withFallbackMarker has added the
+ * app-owned `fallback` key, which the note allowlist would drop. */
 function keepNoteLines(text: string, result: EnrichResult): EnrichResult {
   if (keepsUserLines(text, result.markdown)) return result;
   return { ...result, markdown: withUserLines(text, result.markdown, sanitizeMarkdown) };
@@ -470,7 +474,15 @@ export async function promoteIdea(
   const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
     llmClient.promoteIdea(currentMarkdown, target, config),
   );
-  return withFallbackMarker(outcome);
+  // The B3 key allowlist drops every non-idea key the model echoes back, so
+  // re-apply the note's OWN app-owned fields (`fallback` provenance,
+  // `location`, …) explicitly; the model still owns the canonical ones.
+  const markdown = preserveFrontmatterFields(
+    outcome.result.markdown,
+    currentMarkdown,
+    CANONICAL_ORDER.idea,
+  );
+  return withFallbackMarker({ ...outcome, result: { ...outcome.result, markdown } });
 }
 
 /**

@@ -17,6 +17,7 @@
  */
 
 import { enhanceProse as dispatchEnhance, FALLBACK_PROVIDER_FIELD } from "./dispatcher";
+import { sanitizeReplyBody } from "./enrichSanitize";
 import { splitFrontmatter, upsertFrontmatterField } from "./frontmatter";
 import {
   getModificationTime,
@@ -252,12 +253,16 @@ export async function enhanceNoteProse(input: {
 
     const outcome = await dispatchEnhance(rest);
     // Already fence-stripped AND security-sanitized upstream: executeChat runs
-    // stripCodeFences, then sanitizeAndNormalize(...) ?? sanitizeMarkdown(...),
-    // and prose-only output falls through to the latter because
-    // normalizeFrontmatter bails on a missing header. Re-sanitizing here would
-    // be redundant, and reaching for sanitizeMarkdown to strip fences would be
-    // wrong — it preserves fence bodies verbatim by design.
-    const cleaned = stripCitationMarkers(outcome.result.markdown.trim()).trim();
+    // stripCodeFences, then sanitizeReplyBody (enhanceProse passes NoteType
+    // null — body text, no frontmatter contract, leading `---` defused so a
+    // header-less note cannot gain live frontmatter). But stripping citation
+    // markers can re-expose a `---` the gate saw behind `[1]`, at the very top
+    // of a header-less, title-less note — so the (idempotent) body gate runs
+    // once more on the stripped text. Never sanitizeMarkdown here: it would
+    // split that `---` block off as frontmatter instead of defusing it.
+    const cleaned = sanitizeReplyBody(
+      stripCitationMarkers(outcome.result.markdown.trim()).trim(),
+    ).trim();
     if (!cleaned) {
       throw new Error("The model returned nothing — the note was left unchanged.");
     }

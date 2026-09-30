@@ -246,6 +246,26 @@ describe("AskScreen", () => {
     expect(written).not.toContain("• ");
   });
 
+  it("sanitizes the answer as BODY text — a leading `---` block is not a header", async () => {
+    askVault.mockResolvedValue({
+      result: {
+        markdown: "---\n`= this.file.name\n`\n<img src=x\nonerror=alert(1)>\n---\nprose here",
+        model: "m",
+      },
+      usedFallback: false,
+      fallbackProviderId: null,
+      providerLabel: "Test",
+    });
+    renderScreen();
+    await waitFor(() => screen.getByText(/prose here/));
+    fireEvent.click(screen.getByLabelText("Save answer to vault"));
+
+    await waitFor(() => expect(writeSynthesis).toHaveBeenCalled());
+    const written = writeSynthesis.mock.calls[0][1] as string;
+    expect(written).toContain("`inert: = this.file.name");
+    expect(written).not.toContain("onerror");
+  });
+
   it("surfaces an ask failure instead of a permanently empty answer", async () => {
     askVault.mockRejectedValue(new Error("timed out after 30s"));
     renderScreen();

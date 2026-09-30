@@ -81,9 +81,10 @@ export function PromptOverridesSection({
       </Text>
       <HelperText type="info" visible>
         Override how your active provider structures each capture mode. Leave a section
-        empty to use the default. Removing the frontmatter format or injection
-        guard can drop captures to a stub note — use "Reset to default" to
-        recover.
+        empty to use the default. Only each mode's standard frontmatter keys are
+        kept — custom keys an override asks for are dropped. The injection guard
+        is always appended to an override. Removing the frontmatter format can
+        drop captures to a stub note — use "Reset to default" to recover.
       </HelperText>
       {PROMPT_MODES.map(({ key, label, icon }) => {
         const isExpanded = expanded === key;

@@ -104,40 +104,12 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   refuses it and "Finish enrichment" is unavailable. Follow-up: detect/repair that shape
   (move a leading embed below the frontmatter) on read or via a one-shot sweep.
 
-## Security follow-ups (from the note-capture review, 2026-09-29) — pre-existing, all modes
+## Security follow-ups (from the note-capture review, 2026-09-29) — resolved
 
-None of these came from Note mode; the review of that branch surfaced them. Each needs its
-own change to the shared B3 sanitizer or writer, with its own tests.
-
-- [ ] **Inline DataviewJS passes B3.** `` `$= dv.el(…)` `` survives `neutralizeText`: the
-  inline-DQL rule (`enrichSanitize.ts` ~:154) only matches `` `=…` ``. A fix such as
-  `` /`\$?=\s*[^`]*`/ `` covers the default prefixes, but Dataview's inline prefixes
-  are user-configurable, so a prefix-agnostic rule may be needed.
-- [ ] **Model-emitted extra frontmatter keys are kept.** `normalizeFrontmatter`
-  (`enrichSanitize.ts` ~:208-212) appends every unknown key, so a model can set
-  `dg-publish`, `publish` or `cssclasses`. Fix: keep only `CANONICAL_ORDER[noteType]`.
-- [ ] **A fence line inside the model's frontmatter hides the whole body from B3.**
-  `sanitizeMarkdown` is fence-aware but not frontmatter-aware: a bare `` ``` `` line
-  in the frontmatter opens a "fence" that runs to the end, so the body is skipped.
-  `normalizeFrontmatter` then drops that line, and the body ships live and
-  unsanitized. Found while fixing the note fallback, which now sanitizes the model's
-  frontmatter one line at a time and its title on its own. The compliant path, and
-  every other mode, still has the hole. Fix: in `sanitizeMarkdown`, split the
-  frontmatter off first and fence-scan the body from a clean state.
-- [ ] **`neutralizeText` is not idempotent, so one pass can assemble a live tag.**
-  Stripping an `on*=` attribute joins what surrounds it: `<sc onx="y"ript>` comes out
-  as `<script>`, and `o onq='z'nx=` comes out as ` onx=`, which a second pass then
-  strips again. Fix: repeat the neutralizers until the output stops changing (a
-  fixed point), with a pass cap.
-- [ ] **The `file://` create-only write can race and overwrite.** `vaultFs.ts`'s
-  `file://` backend `createFile` only builds a path, and `writeString` then writes
-  it. Two writers that pick the same free name both "create" it, and the second
-  clobbers the first. SAF's `createFileAsync` renames instead, so SAF vaults are not
-  affected.
-- [ ] **A prompt override drops `INJECTION_GUARD`.** `withSystemOverride`
-  (`llmClient.ts`) replaces the whole system prompt, the guard included. The note
-  override matches idea's behaviour here. Fix: always append the guard to an
-  overridden system prompt.
+The six pre-existing, all-mode weaknesses this review surfaced (inline DataviewJS, extra
+model frontmatter keys, a fence line in frontmatter hiding the body, `neutralizeText`
+non-idempotence, the `file://` create race, overrides dropping `INJECTION_GUARD`) were
+fixed in #223. See the B3 sanitizer hardening section below.
 
 ## Landed, device verification complete (benefit not yet measured)
 
@@ -208,6 +180,60 @@ canonicalizer is needed.
   enabled, and both test Idea files deleted. See Attempt 5 in the plan. This confirms
   on-device behavior but **does not establish causal benefit** over content-only
   tagging; do not infer a canonicalizer need from these samples.
+
+## B3 sanitizer hardening (branch `fix/b3-sanitizer-hardening`, 2026-09-30)
+
+Plan: `.claude/PRPs/plans/b3-sanitizer-hardening.plan.md`. Pre-existing bypasses that the
+Note-capture (#222) security review surfaced; they affect every capture mode. Hashes are
+branch commits (squash-merge will collapse them).
+
+- [x] `dc60d7a` RED suite `enrichSanitize.security.test.ts` (in `verify:capture-flow`).
+- [x] `e7ed615` LF normalization; frontmatter split before the fence scan (a fence line in
+  the header no longer hides the body); exact `---` delimiters; executable fences renamed
+  behind `>`/list prefixes; only *certain* fences skip neutralization; `src="x"onerror=`.
+- [x] `a43bf23` Sanitizer iterates to a fixed point (cap 8) and fails closed — idempotent.
+- [x] `8b4aee0` Inline `=`/`$=` code spans paired CommonMark-style and made inert
+  (`` `inert: = x` ``), not deleted; raw `<code>` escaped.
+- [x] `dbd58d1` Strict frontmatter key allowlist on both `executeChat` branches;
+  `promoteIdea` re-applies the note's own `fallback`/`location`.
+- [x] `342a7db` A prompt override keeps `INJECTION_GUARD`.
+- [x] `c0e14bb` `writeUniqueFile`: choose-name/create/write under one `dir:` lock (file://
+  create-only race).
+- [x] `6415736` Enhance/Ask replies are body-only (NoteType `null`), so the key allowlist
+  no longer deletes prose between two leading `---` rules.
+
+Review round (independent code + security review, 2026-09-30):
+
+- [x] `53c3dae` Body-only mode (`sanitizeReplyBody`) for Enhance and Ask: it never splits
+  frontmatter, and a leading `---` becomes `***`. **Resolves header-less Enhance**: a
+  note with no frontmatter and no `# ` title used to take a `---\ndg-publish: true\n---`
+  reply as its live properties.
+- [x] `0d6446c` Inline spans respect raw-HTML/autolink precedence; `|` cells only in GFM
+  tables.
+- [x] `380d8ab` Only column-0 fence openers are certain, which closes the list-item fence
+  bypasses. A lenient-closer parse is added.
+- [x] `4e3cde0` **Resolves "Dataview evaluates whole code blocks"** (human decision
+  2026-09-30): a fenced or indented code block whose text starts with `=`/`$=` gets
+  `inert: ` on its first content line. Every other block stays byte-identical.
+- [x] `d531e82` Quote-glued `on*=` is entity-encoded, never deleted. Link schemes are read
+  entity-decoded behind `<`, in reference definitions, autolinks and raw `href`.
+- [x] `194148b` Link schemes also decode backslash escapes (`javascript\:`), padding of
+  any length, and zero-padded entities (`&#0000106;`).
+- [x] `a2a09a0` Replies over 256 KiB are refused, and every sanitizer rule runs in linear
+  time.
+- [x] `79199c8` `appendJournal` creates under the `dir:` lock too (file → dir order).
+- [x] `aab5fc6` Oracle-checked fuzz for both modes; every reviewer repro is a named case.
+- [ ] **Custom Dataview inline prefixes** (decision 4, deferred) — only the defaults `=` and
+  `$=` are covered. A vault whose `.obsidian/plugins/dataview/data.json` sets other
+  `inlineQueryPrefix`/`inlineJsQueryPrefix` values is not protected.
+- [x] **Dataview evaluates whole code BLOCKS too** — resolved by `4e3cde0` (see above).
+  Dataview's default `inlineQueriesInCodeblocks: true` evaluates a code block whose
+  trimmed text starts with `=` (or `$=` with `enableInlineDataviewJs`).
+- [ ] **Image re-enrich drops app-owned frontmatter** (pre-existing, logged by the review,
+  not fixed) — `noteReprocess.ts` (~:69-77) writes `injectImageEmbed(result.markdown, …)`
+  over the whole note, with no `preserveFrontmatterFields`, so re-enriching a photo note
+  loses its `location` and `karakeepId` (and anything else not in the model's reply).
+  Mirror `personInPlace.ts`/`ideaSaveFirst.ts`, which carry the original's fields across.
 
 ## Deferred to v0.3
 

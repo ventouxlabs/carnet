@@ -58,18 +58,29 @@ const MAX_COLLISION_VARIANTS = 100;
 // the backends that use it; re-exported below so importers of ./writer are
 // unaffected.
 
+declare const heldDirLock: unique symbol;
+
+/** Proof the caller holds `parentUri`'s `dir:` lock. Minted only inside
+ * writeUniqueFile, so choosing a name outside the lock fails to compile. */
+interface DirLock {
+  readonly parentUri: string;
+  readonly [heldDirLock]: true;
+}
+
 /**
  * Resolve a collision-free filename of shape `{base}{ext}` or `{base}-N{ext}`.
  * Lists the directory once and probes against an in-memory Set so the SAF
- * backend doesn't pay one IPC round-trip per probe.
+ * backend doesn't pay one IPC round-trip per probe. Takes a DirLock: a name
+ * is only free until someone else takes it, so it must be chosen, created and
+ * written under one lock — use writeUniqueFile.
  */
 async function findCollisionFreeName(
-  parentUri: string,
+  lock: DirLock,
   base: string,
   ext: string,
   fs: VaultFs,
 ): Promise<string> {
-  const children = await fs.listChildren(parentUri);
+  const children = await fs.listChildren(lock.parentUri);
   const existing = new Set(children.map((c) => c.name));
   const first = `${base}${ext}`;
   if (!existing.has(first)) return first;
@@ -85,7 +96,8 @@ async function findCollisionFreeName(
 /** Create a new markdown file in `parentUri` with `filename` and write
  * `content`. Returns the URI of the new file (SAF may hand back a renamed URI,
  * but a `.md` name already carries the canonical extension, so it doesn't
- * here). Caller must guarantee `filename` is collision-free. */
+ * here). For a FIXED name the caller has already checked under its own lock
+ * (appendJournal); a CHOSEN name goes through writeUniqueFile instead. */
 async function writeNewFile(
   parentUri: string,
   filename: string,
@@ -105,19 +117,6 @@ async function readByUri(uri: string): Promise<string> {
 /** Overwrite a file by its URI. */
 async function writeByUri(uri: string, content: string): Promise<void> {
   await fsForUri(uri).writeString(uri, content);
-}
-
-/** Write a base64-encoded binary into `parentUri/filename` (generic mime).
- * Used by the archive flow when relocating a paired binary. */
-async function writeBinaryBytes(
-  parentUri: string,
-  filename: string,
-  base64: string,
-  fs: VaultFs,
-): Promise<string> {
-  const fileUri = await fs.createFile(parentUri, filename, "application/octet-stream");
-  await fs.writeBinaryBytes(fileUri, base64);
-  return fileUri;
 }
 
 // Frontmatter parse/serialize logic lives in ./frontmatter — a pure, native-free
@@ -157,6 +156,41 @@ async function serialize<T>(filepath: string, fn: () => Promise<T>): Promise<T> 
   }
 }
 
+/**
+ * Create a NEW file `{stem}{ext}` (or `{stem}-N{ext}` on a collision) in
+ * `parentUri` and fill it with `write`, holding the directory's lock across
+ * choosing the name, creating the file and writing it. The file:// backend's
+ * createFile only builds a path, so two writers that chose the same free name
+ * outside a lock both "created" it and the second clobbered the first (two
+ * same-first-line notification ideas, say). Every site that picks a name and
+ * then writes goes through here.
+ *
+ * The key lives in its own `dir:` namespace: appendJournal serializes on the
+ * FILE path, and nesting two waits on one key deadlocks (serialize's chain
+ * would queue the inner call behind the outer one it is part of). Lock order
+ * is always file → dir: appendJournal takes `dir:` inside its file lock for
+ * its create branch, and nothing holding `dir:` ever waits on a file key.
+ *
+ * Returns the created URI and the name that was chosen (SAF may still rename
+ * on create; callers that link the name derive it from the URI).
+ */
+export async function writeUniqueFile(
+  parentUri: string,
+  stem: string,
+  ext: string,
+  mime: string,
+  fs: VaultFs,
+  write: (uri: string) => Promise<void>,
+): Promise<{ uri: string; name: string }> {
+  return serialize(`dir:${parentUri}`, async () => {
+    const lock = { parentUri } as DirLock;
+    const name = await findCollisionFreeName(lock, stem, ext, fs);
+    const uri = await fs.createFile(parentUri, name, mime);
+    await write(uri);
+    return { uri, name };
+  });
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -170,9 +204,10 @@ export async function writeIdea(
 ): Promise<{ filepath: string }> {
   const root = rootOverride ?? await resolveRoot();
   const ideasUri = await root.fs.findOrCreateSubdir(root.uri, "Ideas");
-  const filename = await findCollisionFreeName(ideasUri, slug, ".md", root.fs);
-  const filepath = await writeNewFile(ideasUri, filename, markdown, root.fs);
-  return { filepath };
+  const { uri } = await writeUniqueFile(ideasUri, slug, ".md", "text/markdown", root.fs, (u) =>
+    root.fs.writeString(u, markdown),
+  );
+  return { filepath: uri };
 }
 
 /**
@@ -190,9 +225,10 @@ export async function writeNote(
 ): Promise<{ filepath: string }> {
   const root = rootOverride ?? await resolveRoot();
   const notesUri = await root.fs.findOrCreateSubdir(root.uri, "Notes");
-  const filename = await findCollisionFreeName(notesUri, slug, ".md", root.fs);
-  const filepath = await writeNewFile(notesUri, filename, markdown, root.fs);
-  return { filepath };
+  const { uri } = await writeUniqueFile(notesUri, slug, ".md", "text/markdown", root.fs, (u) =>
+    root.fs.writeString(u, markdown),
+  );
+  return { filepath: uri };
 }
 
 /**
@@ -215,9 +251,10 @@ export async function writeSynthesis(
 ): Promise<{ filepath: string }> {
   const root = rootOverride ?? await resolveRoot();
   const notesUri = await root.fs.findOrCreateSubdir(root.uri, "Notes");
-  const filename = await findCollisionFreeName(notesUri, slug, ".md", root.fs);
-  const filepath = await writeNewFile(notesUri, filename, markdown, root.fs);
-  return { filepath };
+  const { uri } = await writeUniqueFile(notesUri, slug, ".md", "text/markdown", root.fs, (u) =>
+    root.fs.writeString(u, markdown),
+  );
+  return { filepath: uri };
 }
 
 /**
@@ -248,7 +285,10 @@ export async function appendJournal(
   // it's still unique per file.
   const lockKey = `${journalUri}/${filename}`;
 
-  return serialize(lockKey, async () => {
+  // The `dir:` lock is taken INSIDE the file lock (always file → dir, never
+  // the reverse, so no deadlock): a writeUniqueFile into Journal/ could
+  // otherwise pick this same free name between our check and our create.
+  return serialize(lockKey, () => serialize(`dir:${journalUri}`, async () => {
     const existingUri = await root.fs.findChild(journalUri, filename);
 
     if (existingUri) {
@@ -274,7 +314,7 @@ export async function appendJournal(
 
     const filepath = await writeNewFile(journalUri, filename, markdown, root.fs);
     return { filepath, markdown };
-  });
+  }));
 }
 
 /**
@@ -307,9 +347,10 @@ export async function writePerson(
   }
   if (!stem) stem = "Unknown-Person";
 
-  const filename = await findCollisionFreeName(peopleUri, stem, ".md", root.fs);
-  const filepath = await writeNewFile(peopleUri, filename, markdown, root.fs);
-  return { filepath };
+  const { uri } = await writeUniqueFile(peopleUri, stem, ".md", "text/markdown", root.fs, (u) =>
+    root.fs.writeString(u, markdown),
+  );
+  return { filepath: uri };
 }
 
 /**
@@ -329,13 +370,20 @@ export async function writeTextFile(
   const dot = filename.lastIndexOf(".");
   const stem = dot >= 0 ? filename.slice(0, dot) : filename;
   const ext = dot >= 0 ? filename.slice(dot) : "";
-  const finalName = await findCollisionFreeName(dirUri, stem, ext, root.fs);
   // Derive the MIME from the name rather than hardcoding text/plain: SAF's
   // createFileAsync appends the canonical extension for whatever MIME it is
   // given, so a `.md` record written as text/plain landed as `cap_x.md.txt`,
-  // which mdcrm's `*.md`-only discovery never picks up.
-  const filepath = await root.fs.createFile(dirUri, finalName, mimeFromFilename(finalName));
-  await root.fs.writeString(filepath, content);
+  // which mdcrm's `*.md`-only discovery never picks up. A collision suffix
+  // (`-2`) never changes the extension, so the requested name's MIME is the
+  // final name's too.
+  const { uri: filepath, name: finalName } = await writeUniqueFile(
+    dirUri,
+    stem,
+    ext,
+    mimeFromFilename(filename),
+    root.fs,
+    (u) => root.fs.writeString(u, content),
+  );
   return { filepath, finalName: root.fs.isSaf ? safLastSegment(filepath) || finalName : finalName };
 }
 
@@ -364,10 +412,14 @@ export async function writeBinary(
   const stem = dot >= 0 ? filename.slice(0, dot) : filename;
   const ext = dot >= 0 ? filename.slice(dot) : "";
 
-  const finalName = await findCollisionFreeName(dirUri, stem, ext, root.fs);
-
-  const filepath = await root.fs.createFile(dirUri, finalName, mimeType);
-  await root.fs.writeBinaryBytes(filepath, base64);
+  const { uri: filepath, name: finalName } = await writeUniqueFile(
+    dirUri,
+    stem,
+    ext,
+    mimeType,
+    root.fs,
+    (u) => root.fs.writeBinaryBytes(u, base64),
+  );
   if (root.fs.isSaf) {
     // SAF may RENAME on create: DocumentsContract appends the mime-canonical
     // extension when the display name doesn't already end with it (observed
@@ -567,12 +619,6 @@ export async function listNoteFilesInRoot(root: Root): Promise<NoteFileRef[]> {
   return out;
 }
 
-/** Resolve a collision-free filename in `parentUri`. Exported so
- * vaultMigration.ts can place a copied note/binary in the target vault
- * without reinventing the numbered-suffix (`{stem}-2{ext}`) convention every
- * other writer in this module uses. */
-export { findCollisionFreeName };
-
 /** Enumerate the Syncthing conflict copies in the note subdirs — the review
  * surface's source (Home banner). Markdown only, matching listNoteFiles'
  * scope; binary-subdir conflicts are out of scope (see the plan). */
@@ -626,17 +672,13 @@ export async function moveToArchive(
   const mdDot = mdName.lastIndexOf(".");
   const mdStem = mdDot >= 0 ? mdName.slice(0, mdDot) : mdName;
   const mdExt = mdDot >= 0 ? mdName.slice(mdDot) : ".md";
-  const mdArchiveName = await findCollisionFreeName(
+  const { uri: archivedMdPath } = await writeUniqueFile(
     archiveUri,
     mdStem,
     mdExt,
+    "text/markdown",
     root.fs,
-  );
-  const archivedMdPath = await writeNewFile(
-    archiveUri,
-    mdArchiveName,
-    content,
-    root.fs,
+    (u) => root.fs.writeString(u, content),
   );
 
   // Archive every paired binary referenced by the body (each resolvable one).
@@ -652,18 +694,14 @@ export async function moveToArchive(
     const binDot = pb.filename.lastIndexOf(".");
     const binStem = binDot >= 0 ? pb.filename.slice(0, binDot) : pb.filename;
     const binExt = binDot >= 0 ? pb.filename.slice(binDot) : "";
-    const binArchiveName = await findCollisionFreeName(
+    const binBase64 = await root.fs.readBinary(binUri);
+    const { uri: archived } = await writeUniqueFile(
       archiveUri,
       binStem,
       binExt,
+      "application/octet-stream",
       root.fs,
-    );
-    const binBase64 = await root.fs.readBinary(binUri);
-    const archived = await writeBinaryBytes(
-      archiveUri,
-      binArchiveName,
-      binBase64,
-      root.fs,
+      (u) => root.fs.writeBinaryBytes(u, binBase64),
     );
     archivedBinaryPaths.push(archived);
     binaryOriginals.push(binUri);

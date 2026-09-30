@@ -35,9 +35,9 @@
 
 import { internalVaultRoot, resolveRoot, type Root } from "./vaultRoot";
 import {
-  findCollisionFreeName,
   listNoteFilesInRoot,
   readNote,
+  writeUniqueFile,
   type NoteFileRef,
 } from "./writer";
 import { listPairedBinaries } from "./pairedBinaries";
@@ -98,13 +98,14 @@ async function migratePairedBinaries(
     const base64 = await source.fs.readBinary(sourceBinUri);
     const targetSubdirUri = await target.fs.findOrCreateSubdir(target.uri, pb.subdir);
     const { stem, ext } = splitName(pb.filename);
-    const finalName = await findCollisionFreeName(targetSubdirUri, stem, ext, target.fs);
-    const targetBinUri = await target.fs.createFile(
+    const { name: finalName } = await writeUniqueFile(
       targetSubdirUri,
-      finalName,
+      stem,
+      ext,
       "application/octet-stream",
+      target.fs,
+      (uri) => target.fs.writeBinaryBytes(uri, base64),
     );
-    await target.fs.writeBinaryBytes(targetBinUri, base64);
 
     if (finalName !== pb.filename) {
       // Collision forced a rename — retarget this link with a whole-note
@@ -171,9 +172,14 @@ export async function migratePreVaultNotes(): Promise<MigrationResult> {
 
       const targetSubdirUri = await target.fs.findOrCreateSubdir(target.uri, note.subdir);
       const { stem, ext } = splitName(note.name);
-      const finalName = await findCollisionFreeName(targetSubdirUri, stem, ext, target.fs);
-      const targetUri = await target.fs.createFile(targetSubdirUri, finalName, "text/markdown");
-      await target.fs.writeString(targetUri, content);
+      const { uri: targetUri } = await writeUniqueFile(
+        targetSubdirUri,
+        stem,
+        ext,
+        "text/markdown",
+        target.fs,
+        (uri) => target.fs.writeString(uri, content),
+      );
 
       const readback = await target.fs.readString(targetUri);
       if (readback !== content) {

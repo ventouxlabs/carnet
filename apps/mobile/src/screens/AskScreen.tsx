@@ -46,7 +46,7 @@ import {
 } from "../lib/retrospective";
 import { askVault } from "../lib/dispatcher";
 import { askErrorMessage } from "../lib/captureErrorDecision";
-import { sanitizeMarkdown } from "../lib/enrichSanitize";
+import { sanitizeReplyBody } from "../lib/enrichSanitize";
 import { readNoteBodies, resolveNoteEntry, upsertNoteInIndex } from "../lib/vault";
 import { writeSynthesis } from "../lib/writer";
 import { slugify } from "../lib/noteNaming";
@@ -153,7 +153,7 @@ export default function AskScreen({ route, navigation }: AskScreenProps) {
 
         // Sanitize once, here — both the renderer below and the save path read
         // this string, so no route exists for raw model output to reach either.
-        const sanitized = sanitizeMarkdown(outcome.result.markdown);
+        const sanitized = sanitizeReplyBody(outcome.result.markdown);
 
         // An empty answer is a failure, not an answer. Arming Save on it would
         // offer to write a blank synthesis note into the vault. Note this is

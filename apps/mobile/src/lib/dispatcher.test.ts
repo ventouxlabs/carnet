@@ -116,6 +116,7 @@ import * as llmClient from "./llmClient";
 import { splitFrontmatter } from "./frontmatter";
 import { getSettings, getPromptOverrides } from "./settings";
 import { getVaultTagStrings } from "./vaultTagHint";
+import { withInjectionGuard } from "./prompts";
 
 function makeOkResponse(markdown: string, model = "test-model"): Response {
   const body = JSON.stringify({
@@ -524,7 +525,7 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
     const body = JSON.parse(init.body as string) as {
       messages: Array<{ content: string }>;
     };
-    expect(body.messages[0].content).toBe("OVERRIDE-IDEA-7f3a");
+    expect(body.messages[0].content).toBe(withInjectionGuard("OVERRIDE-IDEA-7f3a"));
   });
 
   it("enrichJournal forwards overrides.journal", async () => {
@@ -539,7 +540,7 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
     const body = JSON.parse(init.body as string) as {
       messages: Array<{ content: string }>;
     };
-    expect(body.messages[0].content).toBe("OVERRIDE-JOURNAL-9c1d");
+    expect(body.messages[0].content).toBe(withInjectionGuard("OVERRIDE-JOURNAL-9c1d"));
   });
 
   it("enrichPerson forwards overrides.person", async () => {
@@ -554,7 +555,7 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
     const body = JSON.parse(init.body as string) as {
       messages: Array<{ content: string }>;
     };
-    expect(body.messages[0].content).toBe("OVERRIDE-PERSON-2e8b");
+    expect(body.messages[0].content).toBe(withInjectionGuard("OVERRIDE-PERSON-2e8b"));
   });
 
   it("enrichSharedImage forwards overrides.sharedImage", async () => {
@@ -569,7 +570,7 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
     const body = JSON.parse(init.body as string) as {
       messages: Array<{ content: string }>;
     };
-    expect(body.messages[0].content).toBe("OVERRIDE-SHAREDIMAGE-4b6f");
+    expect(body.messages[0].content).toBe(withInjectionGuard("OVERRIDE-SHAREDIMAGE-4b6f"));
   });
 
   it("enrichSharedLink forwards overrides.sharedLink", async () => {
@@ -587,7 +588,7 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
     const body = JSON.parse(init.body as string) as {
       messages: Array<{ content: string }>;
     };
-    expect(body.messages[0].content).toBe("OVERRIDE-SHAREDLINK-5d0a");
+    expect(body.messages[0].content).toBe(withInjectionGuard("OVERRIDE-SHAREDLINK-5d0a"));
   });
 
   it("promoteIdea applies NO override — the current, correct behaviour", async () => {
@@ -614,6 +615,26 @@ describe("dispatcher forwards the correct per-mode prompt override", () => {
       messages: Array<{ content: string }>;
     };
     expect(body.messages[0].content).not.toContain("OVERRIDE-");
+  });
+});
+
+describe("promoteIdea keeps the note's app-owned frontmatter (B3 allowlist)", () => {
+  it("re-applies non-canonical fields from the current note; drops model-invented ones", async () => {
+    // The strict allowlist drops every non-idea key the model echoes, so
+    // promote must carry the note's own `fallback` / `location` across itself.
+    const currentMd =
+      "---\ncreated: 2026-07-04\nstatus: seedling\ntags: [idea]\nfallback: relais\nlocation: 48.85,2.35\n---\n# My Idea\n\nRaw.\n";
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse(
+        "---\ncreated: 2026-07-04\nstatus: developing\ntags: [idea]\nfallback: relais\ndg-publish: true\n---\n# My Idea\n\nMore.\n",
+      ),
+    );
+
+    const result = await promoteIdea(currentMd, "developing");
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-07-04\nstatus: developing\ntags: [idea]\nfallback: relais\nlocation: 48.85,2.35\n---\n# My Idea\n\nMore.\n",
+    );
   });
 });
 
@@ -804,7 +825,7 @@ describe("dispatcher enrichNote", () => {
 
     await enrichNote("text");
 
-    expect(systemOf()).toBe("OVERRIDE-NOTE-4c7a");
+    expect(systemOf()).toBe(withInjectionGuard("OVERRIDE-NOTE-4c7a"));
   });
 
   it("uses the capture's vault tags after the active profile has switched", async () => {
@@ -952,6 +973,18 @@ describe("dispatcher enrichNote keeps the user's lines", () => {
 
       expect(result.markdown).not.toMatch(/onerror/);
       expect(result.markdown).toContain("\nbuy milk\n");
+    });
+
+    it("a fallback carries only note-owned frontmatter keys (B3 allowlist, #223)", async () => {
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse("---\ncreated: 2026-09-29\ntags: [note]\ndg-publish: true\ncssclasses: x\n---\n# T\n\nA long expansion.\n"),
+      );
+
+      const result = await enrichNote("buy milk");
+
+      const { header, body } = splitFrontmatter(result.markdown);
+      expect(header).toBe("---\ncreated: 2026-09-29\ntags: [note]\n---\n");
+      expect(body).toBe("# T\n\nbuy milk\n");
     });
 
     it("never tags a user's own --- block as the note's frontmatter", async () => {
