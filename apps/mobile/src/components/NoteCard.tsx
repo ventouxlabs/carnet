@@ -10,6 +10,8 @@ export function modeStamp(mode: CaptureMode): { label: string; icon: string } {
   switch (mode) {
     case "idea":
       return { label: "Idea", icon: "lightbulb-on-outline" };
+    case "note":
+      return { label: "Note", icon: "checkbox-marked-outline" };
     case "journal":
       return { label: "Journal", icon: "book-open-variant" };
     case "person":
@@ -18,6 +20,15 @@ export function modeStamp(mode: CaptureMode): { label: string; icon: string } {
       return { label: "Photo", icon: "camera-outline" };
     case "audio":
       return { label: "Audio", icon: "microphone-outline" };
+    default: {
+      // tsc: a CaptureMode added without a case above fails to compile here.
+      // Runtime: a mode this build can't name (a newer build's row, read after
+      // a downgrade) gets a generic stamp — falling off the switch returned
+      // undefined, which threw into CrashBoundary and the Sync dialog.
+      const unknownMode: never = mode;
+      void unknownMode; // read, so noUnusedLocals accepts the binding
+      return { label: "Capture", icon: "file-document-outline" };
+    }
   }
 }
 

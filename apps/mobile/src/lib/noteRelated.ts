@@ -32,9 +32,9 @@ export function computeRelatedNotes(
     {
       uri: entry.filepath,
       // The uri is authoritative — relatedSubdirForMode(entry.mode) is kept
-      // only as a fallback, since inferNoteMode collapses any unrecognized
-      // parent (e.g. Notes/) to "idea" and would wrongly self-exclude against
-      // Ideas/ for those notes.
+      // only as a fallback: an entry's mode can lag its folder (a Notes/ row
+      // cached before Notes/ mapped to "note" still says "idea"), and
+      // inferNoteMode collapses any unrecognized parent to "idea".
       subdir: subdirForUri(entry.filepath) ?? relatedSubdirForMode(entry.mode),
       title: deriveTitle(body) || entry.title,
       tags: tagsForNote(body),

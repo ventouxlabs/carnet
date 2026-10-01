@@ -60,11 +60,12 @@ ANDROID MOBILE (Expo + RN)                  WORKSTATION
    NO DAEMON. NO CUSTOM RUST. NO HMAC HANDSHAKE.
 ```
 
-Five capture modes:
+Six capture modes:
 
 | Mode | Input | Output |
 |------|-------|--------|
 | `idea`    | text / dictation            | `Ideas/{slug}.md` (save-first: file lands instantly, enrichment patches after) |
+| `note`    | text / dictation            | `Notes/{slug}.md` (save-first; titled and tagged, never expanded — action lines become `- [ ]` todos) |
 | `journal` | voice transcript (+ text)   | `Journal/{YYYY-MM-DD}.md` (appends to existing) |
 | `person`  | business card scan (vision OCR) + dictated context | `People/{Firstname-Lastname}.md` |
 | `photo`   | in-app camera (+ voice/text context) | `Photos/{slug}.jpg` + paired `Ideas/{slug}.md` (via OmniRoute vision) |

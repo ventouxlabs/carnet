@@ -4,6 +4,7 @@ import {
   buildEnhanceProsePrompt,
   buildIdeaPrompt,
   buildJournalPrompt,
+  buildNotePrompt,
   buildPersonPrompt,
   buildPromoteIdeaPrompt,
   buildRetrospectivePrompt,
@@ -41,6 +42,7 @@ describe("injection-guard invariants (every builder)", () => {
     buildPersonPrompt("ocr", "ctx"),
     buildSharedLinkPrompt("https://x.test/a", "", "ctx", null),
     buildPromoteIdeaPrompt("# Idea\n", "developing"),
+    buildNotePrompt("thought"),
   ];
 
   it("wraps user content in USER_INPUT delimiters, never the system prompt", () => {
@@ -282,6 +284,47 @@ describe("buildRetrospectivePrompt", () => {
   it("puts the question in the user message", () => {
     expect(buildRetrospectivePrompt("what about coffee?", []).user).toContain(
       "what about coffee?",
+    );
+  });
+});
+
+describe("buildNotePrompt (note capture: tidy and tag, never expand)", () => {
+  it("wraps the user's lines in the USER_INPUT delimiters", () => {
+    expect(buildNotePrompt("- [ ] call the dentist").user).toBe(
+      "<USER_INPUT>\n- [ ] call the dentist\n</USER_INPUT>",
+    );
+  });
+
+  it("forbids expanding the user's text — the one rule that separates it from Idea", () => {
+    const { system } = buildNotePrompt("x");
+    expect(system).toContain("DO NOT expand");
+    expect(system).not.toMatch(/expand the thought/i);
+  });
+
+  it("reuses the never-invent-tasks rule verbatim, on one line", () => {
+    // Same phrase as buildIdeaPrompt/buildJournalPrompt (prompts.ts:44, :78).
+    expect(buildNotePrompt("x").system).toContain("NEVER invent tasks");
+  });
+
+  it("asks for checkboxes only on actions the user already wrote", () => {
+    expect(buildNotePrompt("x").system).toContain("- [ ]");
+  });
+
+  it("asks for the note tag plus two suggestions", () => {
+    expect(buildNotePrompt("x").system).toContain("tags: [note, {tag1}, {tag2}]");
+  });
+
+  // Re-enrich feeds an already-enriched note back in. noteLineGuard enforces
+  // "keep the lines"; these two rules make a compliant reply the likely one.
+  it("reuses an existing # heading as the title on re-enrich", () => {
+    expect(buildNotePrompt("# Errands\n- [ ] x").system).toContain(
+      'If the text already starts with a "# " heading, reuse it as the title',
+    );
+  });
+
+  it("keeps existing checkboxes, ticked or not, exactly as written", () => {
+    expect(buildNotePrompt("- [x] done").system).toContain(
+      'Keep existing "- [ ]" and "- [x]" lines exactly as written',
     );
   });
 });

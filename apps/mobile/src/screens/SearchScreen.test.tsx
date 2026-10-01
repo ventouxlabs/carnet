@@ -92,7 +92,7 @@ vi.mock("../lib/askExplainer", () => ({
 }));
 
 import SearchScreen from "./SearchScreen";
-import { resolveNoteEntry, searchNoteBodies, getNoteIndex } from "../lib/vault";
+import { resolveNoteEntry, searchNoteBodies, getNoteIndex, searchNotes } from "../lib/vault";
 import { shouldShowAskExplainer, markAskExplainerSeen } from "../lib/askExplainer";
 import { getSettings } from "../lib/settings";
 
@@ -174,6 +174,21 @@ describe("SearchScreen", () => {
       }),
     );
     expect(resolveNoteEntry).toHaveBeenCalledWith("file:///v/Ideas/first.md");
+  });
+
+  it("offers a Note filter chip that narrows the browse to mode note", async () => {
+    renderScreen();
+    await screen.findByText("First idea");
+    fireEvent.click(screen.getByLabelText("Show filters"));
+    fireEvent.click(await screen.findByLabelText("Filter by Note"));
+    await waitFor(() =>
+      expect(vi.mocked(searchNotes)).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.any(String),
+        { mode: "note" },
+      ),
+    );
+    expect(screen.getByLabelText("Remove Note filter")).toBeTruthy();
   });
 });
 

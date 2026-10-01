@@ -59,8 +59,15 @@ import * as llmClient from "./llmClient";
 import type { EnrichResult, ProviderConfig } from "./llmClient";
 import type { SelectedNote } from "./retrospective";
 import { isLocalNetworkUrl } from "./netAllowlist";
-import { preserveFrontmatterFields, upsertFrontmatterField } from "./frontmatter";
-import { CANONICAL_ORDER } from "./enrichSanitize";
+import {
+  getFrontmatterTags,
+  normalizeTag,
+  preserveFrontmatterFields,
+  setFrontmatterTags,
+  upsertFrontmatterField,
+} from "./frontmatter";
+import { CANONICAL_ORDER, sanitizeMarkdown } from "./enrichSanitize";
+import { keepsUserLines, withUserLines } from "./noteLineGuard";
 import {
   readNote,
   readPairedBinaryFromNote,
@@ -316,6 +323,61 @@ export async function enrichIdea(
     llmClient.enrichIdea(text, config, overrides.idea, availableTags),
   );
   return withFallbackMarker(outcome);
+}
+
+/** The note prompt's hard rule — never expand — enforced on the reply rather
+ * than trusted: a reply that drops, rewords, reorders or adds lines keeps its
+ * frontmatter and title, and gets the user's own lines back. No new status
+ * and no retry. A compliant reply is returned untouched.
+ *
+ * The reply is judged against the user's text exactly as typed: typed text is
+ * never lost (the human's call, 2026-09-30), so a line B3 altered in the
+ * model's echo (R6 `once = daily`, a Templater expression) also falls back,
+ * at the cost of that capture's checkboxes. In the fallback B3
+ * (enrichSanitize.sanitizeMarkdown) runs on the model-controlled parts — its
+ * frontmatter and title, separately, so a fence opener hiding in the
+ * frontmatter can't shield the title — and never on the user's own lines, which
+ * the raw save-first stub already stores unsanitized. The fallback's header is
+ * the reply's, which already passed executeChat's key allowlist (#223); it is
+ * NOT re-filtered here, because by now withFallbackMarker has added the
+ * app-owned `fallback` key, which the note allowlist would drop. */
+function keepNoteLines(text: string, result: EnrichResult): EnrichResult {
+  if (keepsUserLines(text, result.markdown)) return result;
+  return { ...result, markdown: withUserLines(text, result.markdown, sanitizeMarkdown) };
+}
+
+/** The tag every captured note carries (buildNotePrompt asks for it first). */
+const NOTE_TAG = "note";
+
+/** Guarantee #note without trusting the model to emit it. A reply that already
+ * carries it, in any spelling, is returned untouched; otherwise it is merged
+ * in first through setFrontmatterTags, never duplicated. */
+function withNoteTag(result: EnrichResult): EnrichResult {
+  const tags = getFrontmatterTags(result.markdown);
+  if (tags.some((tag) => normalizeTag(tag) === NOTE_TAG)) return result;
+  return { ...result, markdown: setFrontmatterTags(result.markdown, [NOTE_TAG, ...tags]) };
+}
+
+/** Every note enrichment — submit (ideaSaveFirst.enrichIdeaInPlace), the
+ * queue drain, Finish enrichment and Re-enrich — comes through here, so the
+ * line guard lives here once. */
+export async function enrichNote(
+  text: string,
+  options?: EnrichmentOptions,
+): Promise<EnrichResult> {
+  // Same shape as enrichIdea: the vocabulary comes from the capture's own
+  // profile (options.vaultContext), never whichever profile is active now.
+  const [settings, overrides, vaultTags] = await Promise.all([
+    getSettings(),
+    getPromptOverrides(),
+    getVaultTagStrings(options?.vaultContext?.profileId),
+  ]);
+  const availableTags = settings.useExistingTagsForAutoTag ? vaultTags : [];
+  const outcome = await withFallbackChain(settings, settings.activeProviderId, (config) =>
+    llmClient.enrichNote(text, config, overrides.note, availableTags),
+  );
+  // withFallbackChain throws on failure, so this is always a successful reply.
+  return withNoteTag(keepNoteLines(text, withFallbackMarker(outcome)));
 }
 
 export async function enrichJournal(

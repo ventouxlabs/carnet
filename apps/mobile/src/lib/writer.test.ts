@@ -78,6 +78,7 @@ vi.mock("expo-file-system/legacy", () => {
 import {
   writeIdea,
   writeSynthesis,
+  writeNote,
   writeBinary,
   writeTextFile,
   appendJournal,
@@ -96,6 +97,7 @@ import {
 } from "./writer";
 import * as FileSystem from "expo-file-system/legacy";
 import { getSettings } from "./settings";
+import { resolveProfileRoot } from "./vaultRoot";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -185,6 +187,33 @@ describe("writeSynthesis", () => {
     await writeSynthesis("scanned", "x");
     const files = await listNoteFiles();
     expect(files.some((f) => f.subdir === "Notes")).toBe(true);
+  });
+});
+
+// ── writeNote ─────────────────────────────────────────────────────────────────
+
+describe("writeNote", () => {
+  beforeEach(clearFiles);
+
+  it("writes a captured note under Notes/", async () => {
+    const md = "---\ncreated: 2026-09-27\ntags: [note]\n---\n# Weekend errands\n";
+    const { filepath } = await writeNote("weekend-errands", md);
+    expect(filepath).toBe("file:///data/carnet/Notes/weekend-errands.md");
+    expect(_files.get(filepath)!.content).toBe(md);
+  });
+
+  it("suffixes on a slug collision — including with a saved answer in the same folder", async () => {
+    await writeSynthesis("weekend-errands", "---\ntags: [synthesis]\n---\n# Q");
+    const { filepath } = await writeNote("weekend-errands", "b");
+    expect(filepath).toBe("file:///data/carnet/Notes/weekend-errands-2.md");
+  });
+
+  it("writes into the pinned vault root, never re-reading the active one", async () => {
+    const pinned = resolveProfileRoot({ rootUri: "file:///data/work-vault" });
+    vi.mocked(getSettings).mockClear();
+    const { filepath } = await writeNote("pinned", "x", pinned);
+    expect(filepath).toBe("file:///data/work-vault/Notes/pinned.md");
+    expect(getSettings).not.toHaveBeenCalled();
   });
 });
 

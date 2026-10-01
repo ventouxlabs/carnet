@@ -39,7 +39,7 @@ import { removeElement, stripTemplater } from "./sanitizeElements";
 import { makeInlineQueriesInert } from "./sanitizeInlineCode";
 import { neutralizeLinkTargets } from "./sanitizeLinks";
 
-export type NoteType = "idea" | "journal" | "person" | "shared";
+export type NoteType = "idea" | "journal" | "person" | "shared" | "note";
 
 /**
  * Canonical top-level frontmatter key order per note type, mirroring the exact
@@ -55,6 +55,9 @@ export const CANONICAL_ORDER: Record<NoteType, readonly string[]> = {
   journal: ["date", "tags", "people", "ideas"],
   person: ["name", "company", "title", "email", "phone", "linkedin", "met", "where", "tags"],
   shared: ["created", "kind", "tags"],
+  // buildNotePrompt's template emits exactly these two keys. No `status`: a
+  // note has no seedling/developing/mature maturity.
+  note: ["created", "tags"],
 };
 
 /**
@@ -68,6 +71,7 @@ const REQUIRED_KEYS: Record<NoteType, readonly string[]> = {
   journal: ["date", "tags", "people"],
   person: ["name"],
   shared: ["kind"],
+  note: ["created", "tags"],
 };
 
 // ── Sanitize (neutralize executable content) ──────────────────────────────────

@@ -45,7 +45,7 @@ vi.mock("../lib/vaultRoot", () => ({
 }));
 
 import TagBrowserScreen from "./TagBrowserScreen";
-import { getTagIndex } from "../lib/vault";
+import { getTagIndex, notesForTag } from "../lib/vault";
 import { refreshActiveVault } from "../lib/vaultRefreshService";
 
 type ScreenProps = Parameters<typeof TagBrowserScreen>[0];
@@ -119,5 +119,21 @@ describe("TagBrowserScreen", () => {
     expect(
       await screen.findByText("No tags yet — add tags when you capture."),
     ).toBeTruthy();
+  });
+
+  it("labels a note under a tag as Note, not Idea", async () => {
+    vi.mocked(notesForTag).mockResolvedValueOnce([
+      {
+        id: "vault:file:///v/Notes/weekend-errands.md",
+        mode: "note",
+        title: "Weekend errands",
+        filepath: "file:///v/Notes/weekend-errands.md",
+        createdAt: 0,
+      },
+    ]);
+    renderScreen({ tag: "errands" });
+    expect(await screen.findByText("Weekend errands")).toBeTruthy();
+    expect(screen.getByText("Note")).toBeTruthy();
+    expect(screen.queryByText("Idea")).toBeNull();
   });
 });

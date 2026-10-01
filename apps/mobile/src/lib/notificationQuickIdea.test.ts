@@ -452,3 +452,47 @@ describe("handleQuickIdeaCapture — raw write failure", () => {
     expect(recordCaptureMock).not.toHaveBeenCalled();
   });
 });
+
+// ── Drive Inbox receipt resume (characterization — note-capture-mode Task 5) ─
+//
+// Pinned BEFORE ideaSaveFirst learns the note mode. findReceiptRawNote scans
+// Ideas/ only — which is why a Drive Inbox receipt must never be written as a
+// note: its raw file would land in Notes/, a restarted task would never find
+// it, and the retry would write a duplicate.
+
+describe("handleQuickIdeaCapture — Drive Inbox receipt resume", () => {
+  const RECEIPT = "55555555-5555-5555-5555-555555555555";
+  const CONTEXT = { profileId: "receipt-profile", rootUri: "file:///receipt-vault" };
+  const MARKED = `---\ncreated: 2026-09-27\nstatus: pending-enrich\ncarnet_drive_inbox_receipt: ${RECEIPT}\n---\ncar reply\n`;
+
+  it("resumes the raw note already in Ideas/ instead of writing a second one", async () => {
+    const { extractFrontmatterField } = await import("./frontmatter");
+    // Once: the scan reads exactly one file (the Ideas/ one), so nothing leaks
+    // into later tests — this file's beforeEach never resets this mock.
+    vi.mocked(extractFrontmatterField).mockImplementationOnce((markdown, field) =>
+      field === "carnet_drive_inbox_receipt" && markdown.includes(RECEIPT) ? RECEIPT : null,
+    );
+    listNoteFilesInRootMock.mockResolvedValueOnce([
+      { uri: "file:///receipt-vault/Notes/car-reply.md", name: "car-reply.md", subdir: "Notes" },
+      { uri: "file:///receipt-vault/Ideas/car-reply.md", name: "car-reply.md", subdir: "Ideas" },
+    ] as never[]);
+    readNoteMock.mockResolvedValue(MARKED);
+    enrichIdeaInPlaceMock.mockResolvedValue({ kind: "updated" });
+
+    const result = await handleQuickIdeaCapture("car reply", CONTEXT, RECEIPT);
+
+    expect(result).toEqual({ kind: "enriched" });
+    expect(writeRawIdeaMock).not.toHaveBeenCalled();
+    // The Notes/ entry carries the same marker but is never even read.
+    expect(readNoteMock).toHaveBeenCalledTimes(1);
+    expect(readNoteMock).toHaveBeenCalledWith("file:///receipt-vault/Ideas/car-reply.md");
+    expect(enrichIdeaInPlaceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filepath: "file:///receipt-vault/Ideas/car-reply.md",
+        expectedContent: MARKED,
+        vaultContext: CONTEXT,
+      }),
+    );
+    expect(completeDriveInboxReceiptMock).toHaveBeenCalledWith(RECEIPT);
+  });
+});

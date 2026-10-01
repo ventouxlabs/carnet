@@ -35,12 +35,14 @@ type Props = NativeStackScreenProps<RootStackParamList, "TagBrowser">;
 function modeLabel(mode: CaptureMode): string {
   if (mode === "journal") return "Journal";
   if (mode === "person") return "Contact";
+  if (mode === "note") return "Note";
   return "Idea";
 }
 
 function modeIcon(mode: CaptureMode): string {
   if (mode === "journal") return "notebook-outline";
   if (mode === "person") return "account-outline";
+  if (mode === "note") return "checkbox-marked-outline";
   return "lightbulb-outline";
 }
 

@@ -1,0 +1,12 @@
+{
+  "input": "Weekend errands\ncall the dentist\nbuy stamps\nthe car is in the east lot\n- [ ] renew passport",
+  "model": "openrouter/openai/gpt-4o-mini",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "---\ntags: [note, errands, weekend]\ncreated: 2026-09-27\n---\n# Weekend errands\n\n- [ ] call the dentist\n- [ ] buy stamps\nthe car is in the east lot\n- [ ] renew passport\n"
+      }
+    }
+  ]
+}

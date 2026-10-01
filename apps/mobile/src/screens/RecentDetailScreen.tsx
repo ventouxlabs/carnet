@@ -82,6 +82,7 @@ import {
 import { enhanceNoteProse } from "../lib/enhanceProse";
 import { attachPhotoToNote } from "../lib/attachPhotoToNote";
 import { FALLBACK_PROVIDER_FIELD } from "../lib/dispatcher";
+import { isSynthesisNote } from "../lib/frontmatter";
 import { useCarnetTheme } from "../lib/theme";
 import { useKarakeepExport } from "../lib/useKarakeepExport";
 import { useNoteAudioPlayer } from "../lib/useNoteAudioPlayer";
@@ -89,7 +90,6 @@ import { useNoteEditSession } from "../lib/useNoteEditSession";
 import {
   loadCachedNoteIndex,
   resolveNoteEntry,
-  subdirForUri,
   tagsForNote,
   upsertNoteInIndex,
   type NoteIndexEntry,
@@ -327,6 +327,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       const outcome = await finishPendingEnrichment({
         body,
         filepath: entry.filepath,
+        mode: entry.mode,
         vaultContext,
       });
       if (outcome.kind === "updated") setBody(outcome.markdown);
@@ -336,7 +337,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       reEnrichingRef.current = false;
       setReEnriching(false);
     }
-  }, [body, entry.filepath, vaultContext]);
+  }, [body, entry.filepath, entry.mode, vaultContext]);
 
   // The third member of the re-enrich family, and the only one not gated on the
   // note being stuck: "I edited this note, run enrichment on my edit". Shares
@@ -814,7 +815,8 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
           canReEnrichGeneral={
             !missing &&
             isReEnrichableMode(entry.mode) &&
-            subdirForUri(entry.filepath) !== "Notes"
+            // Was a folder test (`!== "Notes"`); Notes/ now holds captured notes too.
+            !isSynthesisNote(body)
           }
           onGeneralReEnrich={fromSheet(() => void handleGeneralReEnrich())}
           canTranscribe={canTranscribe}

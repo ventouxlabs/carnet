@@ -17,7 +17,7 @@ source of truth.
 
 ## Data flow
 ```
-Capture (Idea / Journal / Contact / Photo / Audio / Share / notification inline-reply)
+Capture (Idea / Note / Journal / Contact / Photo / Audio / Share / notification inline-reply)
   → backend dispatcher            lib/dispatcher.ts  (ALL backend-divergent calls cross it;
        selects one of N configured providers — Relais (local) / OmniRoute / OpenAI / Groq /
        OpenRouter presets + custom entries, lib/llmProviders.ts — with a fallback chain)
@@ -27,7 +27,7 @@ Capture (Idea / Journal / Contact / Photo / Audio / Share / notification inline-
   → render Markdown               lib/writer.ts
   → write local folder            {captureFolderPath}/{Ideas,Journal,Notes,People,Photos,Attachments}
         │  (offline → lib/queue.ts buffers in AsyncStorage, drains when online)
-        │  (Idea/Journal default SAVE-FIRST: file lands instantly, enrichment patches after — B4)
+        │  (Idea/Note SAVE-FIRST: file lands instantly, enrichment patches after — B4; Note always, Idea unless previewBeforeSave)
         ▼  Syncthing p2p
   ~/Obsidian/Carnet/              workstation vault (Obsidian opens it directly)
 

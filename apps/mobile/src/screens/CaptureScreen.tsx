@@ -35,8 +35,9 @@ import {
   rewriteRawIdea,
   writeRawIdea,
   type EnrichIdeaOutcome,
-  type RawIdeaInput,
+  type RawCaptureInput,
 } from "../lib/ideaSaveFirst";
+import { buildSaveFirstRetryPayload, isSaveFirstTextMode, usesSaveFirst } from "../lib/saveFirstRouting";
 import { classifyCaptureError } from "../lib/captureErrorDecision";
 import { planSaveFirstOutcome } from "../lib/saveFirstOutcome";
 import { resolveActiveProvider, UNKNOWN_PROVIDER_LABEL } from "../lib/llmProviders";
@@ -56,6 +57,7 @@ import {
   buildMetaSummary,
   buildCapturePreviewResponse,
   computeCanSubmit,
+  saveFirstTitle,
   type CapturePhase,
 } from "../lib/captureDisplay";
 import {
@@ -156,7 +158,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
   // The captured Idea inputs, stashed so the saved-screen Re-enrich can re-run
   // enrichment against the same text/tags/location/attachments after the input
   // fields were cleared.
-  const saveFirstCtxRef = useRef<RawIdeaInput | null>(null);
+  const saveFirstCtxRef = useRef<RawCaptureInput | null>(null);
   // Captured once when an attempt begins. Preview confirmation, a save-first
   // retry, and offline fallback all reuse this rather than rereading Settings
   // after enrichment has yielded to the event loop.
@@ -171,7 +173,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
   const submitGenerationRef = useRef(0);
   // The draft the in-flight attempt is working from, stashed before any await
   // so Edit can restore it no matter how far the attempt got.
-  const submittedDraftRef = useRef<RawIdeaInput | null>(null);
+  const submittedDraftRef = useRef<RawCaptureInput | null>(null);
   // The in-flight raw write. Edit awaits it so the filepath it produces is
   // known before the user can resubmit — otherwise a resubmit issued during
   // the write falls through to writeRawIdea again and orphans a duplicate.
@@ -455,7 +457,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
    * with on a transient failure. */
   const finishSaveFirst = async (
     outcome: EnrichIdeaOutcome,
-    ctx: RawIdeaInput,
+    ctx: RawCaptureInput,
     filepath: string,
     mtime: number | null,
     /** The raw note's bytes at that same baseline — the SAF vault's only
@@ -485,19 +487,16 @@ export default function CaptureScreen({ route, navigation }: Props) {
     }
     if (plan.kind === "queue") {
       try {
-        await enqueue({
-          mode: "idea",
-          text: ctx.text,
-          attachments: ctx.attachments,
-          tags: ctx.tags,
-          location: ctx.location,
-          // Update the raw note we already wrote in place on drain — do NOT
-          // write a duplicate.
-          filepath,
-          baselineMtime: mtime,
-          baselineContent,
-          vaultContext: attemptVaultContextRef.current ?? undefined,
-        });
+        // In-place retry of the raw note already on disk, through ctx's own
+        // mode — see buildSaveFirstRetryPayload.
+        await enqueue(
+          buildSaveFirstRetryPayload(ctx, {
+            filepath,
+            baselineMtime: mtime,
+            baselineContent,
+            vaultContext: attemptVaultContextRef.current ?? undefined,
+          }),
+        );
         const depth = await getQueueDepth();
         if (superseded()) return;
         setQueueDepth(depth);
@@ -541,6 +540,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
       filepath: savedFilepath,
       expectedMtime: baseline,
       expectedContent: baselineContent,
+      mode: ctx.mode,
       text: ctx.text,
       tags: ctx.tags,
       location: ctx.location,
@@ -577,7 +577,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
     setDegradedReason(null);
     setEnrichNotice(null);
 
-    if (mode === "idea") {
+    if (isSaveFirstTextMode(mode)) {
       const draft = submittedDraftRef.current;
       if (draft) {
         // Save-first clears the inputs once the raw note lands — put them back.
@@ -607,7 +607,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
           // walked away from. Re-writing the same draft bumps the mtime, which
           // makes that call's updateNoteIfUnchanged guard fail — the existing
           // conflict mechanism, rather than a second cancellation path. Only
-          // Idea needs it; Journal/Person write nothing before enrichment.
+          // Idea/Note need it; Journal/Person write nothing before enrichment.
           //
           // Gated on rawWriteIsRealRef: reEnrichSaved's rawWriteRef is
           // synthetic and its draft is the ORIGINAL raw text, so bumping there
@@ -659,9 +659,9 @@ export default function CaptureScreen({ route, navigation }: Props) {
       attemptVaultContextRef.current = null;
     }
 
-    if (mode === "idea") {
-      // Blocking-preview (opt-in): enrich → preview → Save, exactly as before.
-      if (previewBeforeSave) {
+    if (isSaveFirstTextMode(mode)) {
+      // Blocking-preview (opt-in, Idea only — a Note is always save-first):
+      if (!usesSaveFirst(previewBeforeSave, mode)) {
         try {
           const result = await enrichIdea(text.trim(), {
             vaultContext: attemptVaultContextRef.current ?? undefined,
@@ -696,11 +696,8 @@ export default function CaptureScreen({ route, navigation }: Props) {
       try {
         // Stashed before the first await so Edit can restore the draft even if
         // it is tapped while the attachments are still being written.
-        submittedDraftRef.current = {
-          text: text.trim(),
-          tags,
-          location: location ?? undefined,
-        };
+        const draft: RawCaptureInput = { mode, text: text.trim(), tags, location: location ?? undefined };
+        submittedDraftRef.current = draft;
         const refs = await persistAttachments();
         // Earliest await in the path, and upstream of rawWriteRef being
         // published — an Edit tapped here finds no write to await, so bailing
@@ -721,7 +718,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
           refs,
           Boolean(resuming),
         );
-        const ctx: RawIdeaInput = { ...submittedDraftRef.current, attachments };
+        const ctx: RawCaptureInput = { ...draft, attachments };
         submittedDraftRef.current = ctx;
         // Consumed — a later, unrelated capture must not inherit these refs.
         preservedAttachmentsRef.current = [];
@@ -746,7 +743,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
         rawWriteIsRealRef.current = true;
         const { filepath, mtime, markdown: rawMarkdown } = await writePromise;
         if (superseded()) return;
-        const title = deriveTitle(ctx.text) || "Idea";
+        const title = saveFirstTitle(ctx.text, ctx.mode);
         // Every history mutation this attempt performs, chained after the
         // previous attempt's own chain — see chainHistoryWrite.
         const historyWrite = chainHistoryWrite({
@@ -793,6 +790,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
           // On SAF `mtime` is null, so the bytes just written are the baseline
           // the guard compares against — including after an Edit rewrote them.
           expectedContent: rawMarkdown,
+          mode: ctx.mode,
           text: ctx.text,
           tags: ctx.tags,
           location: ctx.location,
@@ -845,7 +843,7 @@ export default function CaptureScreen({ route, navigation }: Props) {
       return;
     }
 
-    // mode === "person"
+    if (mode !== "person") return setPhase("input"); // mode === "person" below; any other mode is a malformed carnet://capture/:mode
     try {
       const result = await enrichPerson(
         { ocrResult: ocrText.trim(), context: text.trim() },

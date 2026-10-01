@@ -74,8 +74,10 @@ export interface PromptOverrides {
   person?: string;
   sharedImage?: string;
   sharedLink?: string;
-  /** Override for the Enhance action's prose-rewrite prompt. Unlike the five
-   * capture modes above, this one's default output is bare prose — see
+  /** Override for the note capture prompt (buildNotePrompt). */
+  note?: string;
+  /** Override for the Enhance action's prose-rewrite prompt. Unlike the capture
+   * modes above, this one's default output is bare prose — see
    * prompts.ts's buildEnhanceProsePrompt. */
   enhanceProse?: string;
   /** Override for the retrospective query's synthesis prompt. Like

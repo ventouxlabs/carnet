@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * Finish the enrichment of a save-first Idea that never got enriched.
+ * Finish the enrichment of a save-first Idea or Note that never got enriched.
  *
  * A capture made while the provider is unreachable is written raw and queued
  * (`status: pending-enrich`). Normally the queue drains and overwrites the note
@@ -23,9 +23,10 @@
  * clobber this codebase guards against everywhere else.
  */
 
-import { getFrontmatterTags, extractFrontmatterField, stripFrontmatter } from "./frontmatter";
+import { extractFrontmatterField, getFrontmatterTags, isSynthesisNote, stripFrontmatter } from "./frontmatter";
 import { enrichIdeaInPlace, PENDING_ENRICH_STATUS, type EnrichIdeaOutcome } from "./ideaSaveFirst";
 import { enrichPersonInPlace, type EnrichInPlaceOutcome } from "./personInPlace";
+import { isSaveFirstTextMode } from "./saveFirstRouting";
 import type { CaptureMode } from "./storage";
 import type { VaultContext } from "./vaultContext";
 import {
@@ -70,8 +71,13 @@ export type FinishEnrichmentOutcome =
  * day into one enrichment of the concatenated text and destroy that structure.
  * Journal needs an entry-scoped re-enrichment, which is a different operation
  * than this whole-file overwrite. (The Edit-during-capture affordance is
- * unaffected — it runs before anything is written.) */
-const RE_ENRICHABLE_MODES = ["idea", "person"] as const;
+ * unaffected — it runs before anything is written.)
+ *
+ * `note` (a captured task note in Notes/) re-enriches through the note prompt,
+ * as `idea` does through its own. A saved Ask answer — also in Notes/, also
+ * mode "note" — is refused by isSynthesisNote, never by mode.
+ */
+const RE_ENRICHABLE_MODES = ["idea", "person", "note"] as const;
 
 type ReEnrichableMode = (typeof RE_ENRICHABLE_MODES)[number];
 
@@ -96,6 +102,9 @@ export function isPendingEnrich(body: string): boolean {
 export async function finishPendingEnrichment(input: {
   body: string;
   filepath: string;
+  /** The note's capture mode. A pending Note must get the note prompt — never
+   * the expanding idea prompt; every other pending note is a raw Idea. */
+  mode?: CaptureMode;
   vaultContext?: VaultContext;
 }): Promise<FinishEnrichmentOutcome> {
   try {
@@ -137,6 +146,7 @@ export async function finishPendingEnrichment(input: {
       filepath: input.filepath,
       expectedMtime: baseline,
       expectedContent,
+      mode: input.mode === "note" ? "note" : "idea",
       text,
       // The stub's own frontmatter is carnet's, but this note has been sitting
       // on disk since the failed enrich — long enough for the user (or a synced
@@ -228,17 +238,28 @@ export async function reEnrichNoteInPlace(input: {
       // The mtime guard still protects the write.
     }
 
+    if (isSynthesisNote(source)) {
+      // RecentDetail gates on isSynthesisNote(body), but body is "" until the
+      // note loads. A saved Ask answer is computed from other notes; running a
+      // capture prompt over it would overwrite the answer with a rewrite.
+      return {
+        kind: "failed",
+        reason: "A saved answer can't be re-enriched — ask the question again instead.",
+      };
+    }
+
     const text = stripFrontmatter(source).trim();
     if (!text) {
       return { kind: "failed", reason: "This note has no text to enrich." };
     }
 
-    if (input.mode === "idea") {
+    if (isSaveFirstTextMode(input.mode)) {
       return mapInPlaceOutcome(
         await enrichIdeaInPlace({
           filepath: input.filepath,
           expectedMtime: baseline,
           expectedContent,
+          mode: input.mode,
           text,
           // A saved Idea can carry frontmatter carnet never wrote (a hand-added
           // `project:`, an Obsidian plugin's field). The model sees the body

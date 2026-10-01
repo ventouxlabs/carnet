@@ -34,6 +34,7 @@ import {
 import {
   enrichIdea,
   enrichJournal,
+  enrichNote,
   enrichPerson,
   isPermanentError,
   isNotConfiguredError,
@@ -41,6 +42,7 @@ import {
 } from "./dispatcher";
 import {
   writeIdea,
+  writeNote,
   appendJournal,
   writePerson,
   slugify,
@@ -55,7 +57,7 @@ import { upsertFrontmatterField } from "./frontmatter";
 import { invalidateNoteIndex } from "./vault";
 import { getSettings } from "./settings";
 import { captureVaultContext, isVaultContext, type VaultContext } from "./vaultContext";
-import { resolveContextRoot } from "./vaultRoot";
+import { resolveContextRoot, type Root } from "./vaultRoot";
 import {
   DEFAULT_VAULT_PROFILE_ID,
   normaliseVaultProfileState,
@@ -68,7 +70,10 @@ function injectLocation(markdown: string, location?: string): string {
   return location ? upsertFrontmatterField(markdown, "location", location) : markdown;
 }
 
-export type CaptureMode = "idea" | "journal" | "person";
+/** The modes a queue row can carry — derived, so it can never drift from the
+ * payload union below. Row-level plaintext metadata only (the Sync dialog
+ * stamps it); the drain routes on the decrypted payload's own `mode`. */
+export type CaptureMode = QueuePayload["mode"];
 
 
 /** Raw user input stored in the queue — no credentials. Attachments carry only
@@ -99,6 +104,13 @@ export interface IdeaPayload {
   baselineContent?: string | null;
 }
 
+/** A note captured offline — or a save-first note whose enrichment failed
+ * transiently. Mirrors IdeaPayload exactly (attachments, tags, location, the
+ * save-first filepath + baselines); only the prompt and the folder differ. */
+export interface NotePayload extends Omit<IdeaPayload, "mode"> {
+  mode: "note";
+}
+
 export interface JournalPayload {
   mode: "journal";
   transcript: string;
@@ -125,7 +137,7 @@ export interface PersonPayload {
 }
 
 /** Every new row records the vault root it belonged to when queued. */
-export type QueuePayload = (IdeaPayload | JournalPayload | PersonPayload) & {
+export type QueuePayload = (IdeaPayload | JournalPayload | PersonPayload | NotePayload) & {
   vaultContext?: VaultContext;
 };
 
@@ -380,6 +392,42 @@ export async function drainQueue(): Promise<void> {
   }
 }
 
+/** Drain an Idea or Note row. One body for both on purpose: the compose order
+ * and the save-first in-place update are identical; only the prompt and the
+ * folder differ by mode. */
+async function drainSaveFirstText(
+  payload: IdeaPayload | NotePayload,
+  vaultContext: VaultContext,
+  root: Root,
+): Promise<void> {
+  const enrich = payload.mode === "note" ? enrichNote : enrichIdea;
+  const result = await enrich(payload.text, { vaultContext });
+  // Binaries were already written to disk at enqueue; fold their rel-paths
+  // back into the body so the drained note matches the online capture.
+  // Tags are merged AFTER attachments so the frontmatter merge sees the final body.
+  const md = injectLocation(
+    mergeUserTags(injectAttachments(result.markdown, payload.attachments ?? []), payload.tags),
+    payload.location,
+  );
+  if (payload.filepath) {
+    // Save-first: the raw note is already on disk — update it in place,
+    // guarded so a synced/user edit during the queue window is kept rather
+    // than clobbered. A skipped write (conflict) still counts as processed;
+    // the raw note stays and the user's edit wins.
+    await updateNoteIfUnchanged(
+      payload.filepath,
+      md,
+      payload.baselineMtime ?? null,
+      payload.baselineContent ?? null,
+    );
+    return;
+  }
+  const title = deriveTitle(result.markdown);
+  const slug = slugify(title) || "untitled";
+  const write = payload.mode === "note" ? writeNote : writeIdea;
+  await write(slug, md, root);
+}
+
 /** Process a single queued payload: enrich + write to disk. */
 async function processRow(payload: QueuePayload): Promise<void> {
   // Legacy rows have no context. Their pre-profile settings root is normalized
@@ -389,31 +437,8 @@ async function processRow(payload: QueuePayload): Promise<void> {
     ? payload.vaultContext
     : legacyQueueContext(await getSettings());
   const root = resolveContextRoot(vaultContext);
-  if (payload.mode === "idea") {
-    const result = await enrichIdea(payload.text, { vaultContext });
-    // Binaries were already written to disk at enqueue; fold their rel-paths
-    // back into the body so the drained note matches the online capture.
-    // Tags are merged AFTER attachments so the frontmatter merge sees the final body.
-    const md = injectLocation(
-      mergeUserTags(injectAttachments(result.markdown, payload.attachments ?? []), payload.tags),
-      payload.location,
-    );
-    if (payload.filepath) {
-      // Save-first: the raw note is already on disk — update it in place,
-      // guarded so a synced/user edit during the queue window is kept rather
-      // than clobbered. A skipped write (conflict) still counts as processed;
-      // the raw note stays and the user's edit wins.
-      await updateNoteIfUnchanged(
-        payload.filepath,
-        md,
-        payload.baselineMtime ?? null,
-        payload.baselineContent ?? null,
-      );
-    } else {
-      const title = deriveTitle(result.markdown);
-      const slug = slugify(title) || "untitled";
-      await writeIdea(slug, md, root);
-    }
+  if (payload.mode === "idea" || payload.mode === "note") {
+    await drainSaveFirstText(payload, vaultContext, root);
   } else if (payload.mode === "journal") {
     const result = await enrichJournal(
       { transcript: payload.transcript, notes: payload.notes },
@@ -440,6 +465,15 @@ async function processRow(payload: QueuePayload): Promise<void> {
       "",
       injectLocation(mergeUserTags(result.markdown, payload.tags), payload.location),
       root,
+    );
+  } else {
+    // A row this build can't route (e.g. written by a newer build, then the
+    // app was downgraded). Throwing keeps it in the queue — it burns attempts
+    // and ends up failed, visible in the Sync dialog — instead of drainQueue
+    // removing it as if it had drained.
+    const unhandled: never = payload;
+    throw new Error(
+      `Unsupported queued capture mode: ${String((unhandled as { mode?: unknown }).mode)}`,
     );
   }
   // A drained capture adds tags to the vault — drop the stale index cache so the

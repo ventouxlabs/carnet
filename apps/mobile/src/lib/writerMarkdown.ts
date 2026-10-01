@@ -17,6 +17,7 @@
 // Pure formatting helper + its type; location.ts imports only expo-location, so
 // this cannot form a cycle back into writer.ts.
 import { formatCoords, type Coords } from "./location";
+import { splitFrontmatter } from "./frontmatter";
 
 /**
  * Idempotently insert-or-replace an H2 section in a markdown body.
@@ -83,8 +84,15 @@ export function upsertSection(
 }
 
 /**
- * Inject a markdown image embed `![](relPath)` immediately under the first
- * H1 line of `markdown`. If there is no H1, prepend the embed at the top.
+ * Inject a markdown image embed `![](relPath)` immediately under the body's
+ * first H1. With no H1, the embed opens the body — after the frontmatter,
+ * never above it (a raw save-first stub has frontmatter and usually no H1;
+ * above `---` it stopped being frontmatter at all). A note with no
+ * frontmatter gets it at the very top, as before.
+ *
+ * Idempotent: an embed the note already contains is not added again.
+ * Finish enrichment and Re-enrich send the on-disk body, embeds included, to
+ * the model and then re-inject the same embeds.
  *
  * The earlier inline `/^(#\s+.+\n)/m` regex silently no-op'd when the H1
  * had no trailing newline (e.g. last line of a model response), dropping
@@ -92,13 +100,19 @@ export function upsertSection(
  */
 export function injectImageEmbed(markdown: string, relPath: string): string {
   const embed = `![](${relPath})`;
-  // Match the H1 line and capture its trailing newline (if any).
-  const match = markdown.match(/^(#\s+.+?)(\r?\n|$)/m);
-  if (!match) return `${embed}\n\n${markdown}`;
+  if (markdown.includes(embed)) return markdown;
+  const { header, body } = splitFrontmatter(markdown);
+  // Match the body's H1 line and capture its trailing newline (if any).
+  const match = body.match(/^(#\s+.+?)(\r?\n|$)/m);
+  if (!match) {
+    // A closing fence at end-of-file has no newline of its own to stand on.
+    const fenceEnd = header && !header.endsWith("\n") ? "\n" : "";
+    return `${header}${fenceEnd}${embed}\n\n${body}`;
+  }
   const idx = match.index ?? 0;
-  const before = markdown.slice(0, idx + match[1].length);
-  const after = markdown.slice(idx + match[0].length);
-  return `${before}\n\n${embed}\n${after}`;
+  const before = body.slice(0, idx + match[1].length);
+  const after = body.slice(idx + match[0].length);
+  return `${header}${before}\n\n${embed}\n${after}`;
 }
 
 /** A binary attachment carried alongside a capture: the storage subdir, the

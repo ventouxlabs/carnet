@@ -81,6 +81,36 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   `.claude/PRPs/plans/completed/self-hosted-sentry.plan.md` for why hosted crash reporting
   was rejected.
 
+## Landed, pending on-device verification
+
+- [ ] **Note capture mode** (PR #222) — a sixth mode, Note, writes create-only into
+  `Notes/` through a prompt that titles and tags a task list and NEVER expands it; action
+  lines become `- [ ]` and reach TodosScreen with no todo code changed. Always save-first
+  ("Preview ideas before saving" gates ideas only); queues offline; re-enrichable. Two
+  things not to re-litigate: (1) it deliberately and narrowly reverses the "no new capture
+  surface" non-goal of `notes-todo-capture.prd.md` — see the table in
+  `.claude/PRPs/prds/note-capture-mode.prd.md`; (2) `Notes/` intentionally holds two kinds
+  of file, told apart by frontmatter (`isSynthesisNote`), not folder. Drive Inbox (Android
+  Auto) stays idea-only. Plan: `.claude/PRPs/plans/note-capture-mode.plan.md`.
+  A line guard enforces "never expand" in code: if a reply drops, rewords, adds or
+  re-orders a line, the note keeps the model's title/tags over the user's own lines.
+  Follow-up (non-blocking, predates the guard): Finish/Re-enrich still send a note's
+  image-embed and `## Files` lines to the model, though they are re-added afterwards; a
+  reply that drops them trips the fallback and the note loses its checkboxes. Strip the
+  attachment lines from the enrichment input first (all re-enrichable modes).
+  Known limitation: the `injectImageEmbed` fix stops *new* files from getting an image
+  embed above their frontmatter, but doesn't repair ones v0.11.0 already wrote. A raw Idea
+  with a photo whose enrichment failed still starts with `![](…)`, so `isPendingEnrich`
+  refuses it and "Finish enrichment" is unavailable. Follow-up: detect/repair that shape
+  (move a leading embed below the frontmatter) on read or via a one-shot sweep.
+
+## Security follow-ups (from the note-capture review, 2026-09-29) — resolved
+
+The six pre-existing, all-mode weaknesses this review surfaced (inline DataviewJS, extra
+model frontmatter keys, a fence line in frontmatter hiding the body, `neutralizeText`
+non-idempotence, the `file://` create race, overrides dropping `INJECTION_GUARD`) were
+fixed in #223. See the B3 sanitizer hardening section below.
+
 ## Landed, device verification complete (benefit not yet measured)
 
 Code merged and green in CI, then verified against a real vault on hardware. The

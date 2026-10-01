@@ -180,6 +180,7 @@ const PROMPT_OVERRIDE_KEYS: readonly (keyof Settings["promptOverrides"])[] = [
   "sharedLink",
   "enhanceProse",
   "retrospective",
+  "note",
 ];
 
 function isPromptOverrides(value: unknown): value is Settings["promptOverrides"] {

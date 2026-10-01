@@ -102,6 +102,7 @@ globalThis.fetch = fetchMock as unknown as typeof fetch;
 import {
   askVault,
   enrichIdea,
+  enrichNote,
   enhanceProse,
   enrichJournal,
   enrichPerson,
@@ -112,6 +113,7 @@ import {
   isNotConfiguredError,
 } from "./dispatcher";
 import * as llmClient from "./llmClient";
+import { splitFrontmatter } from "./frontmatter";
 import { getSettings, getPromptOverrides } from "./settings";
 import { getVaultTagStrings } from "./vaultTagHint";
 import { withInjectionGuard } from "./prompts";
@@ -796,5 +798,283 @@ describe("dispatcher threads the vault tag vocabulary", () => {
 
     await expect(enrichIdea("text")).resolves.toBeTruthy();
     expect(systemOf()).not.toContain("This vault already uses these tags");
+  });
+});
+
+// ── note capture mode ─────────────────────────────────────────────────────────
+
+describe("dispatcher enrichNote", () => {
+  function systemOf(call = 0): string {
+    const [, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+    return (JSON.parse(init.body as string) as { messages: Array<{ content: string }> })
+      .messages[0].content;
+  }
+
+  // The vault-tag block above installs a persistent per-profile
+  // implementation (no restoreMocks in vitest.config.ts); start clean.
+  beforeEach(() => {
+    vi.mocked(getVaultTagStrings).mockReset().mockResolvedValue([]);
+  });
+
+  it("forwards overrides.note — never overrides.idea", async () => {
+    vi.mocked(getPromptOverrides).mockResolvedValueOnce({
+      idea: "OVERRIDE-IDEA-7f3a",
+      note: "OVERRIDE-NOTE-4c7a",
+    });
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+
+    await enrichNote("text");
+
+    expect(systemOf()).toBe(withInjectionGuard("OVERRIDE-NOTE-4c7a"));
+  });
+
+  it("uses the capture's vault tags after the active profile has switched", async () => {
+    vi.mocked(getVaultTagStrings).mockImplementation(
+      async (profileIdOrLimit?: string | number) => {
+        const profileId = typeof profileIdOrLimit === "string" ? profileIdOrLimit : undefined;
+        return profileId === "personal" ? ["personal-only"] : ["work-secret"];
+      },
+    );
+    fetchMock.mockResolvedValueOnce(makeOkResponse("---\n---\n# x\n"));
+
+    await enrichNote("deferred A capture", {
+      vaultContext: { profileId: "personal", rootUri: "file:///personal" },
+    });
+
+    expect(getVaultTagStrings).toHaveBeenCalledWith("personal");
+    expect(systemOf()).toContain("personal-only");
+    expect(systemOf()).not.toContain("work-secret");
+  });
+});
+
+// ── note capture mode: "never expand" enforced in code (plan Task 10) ────────
+//
+// Replies go through the REAL llmClient + sanitizer (fetch is the only mock
+// here), so each reply below is what the model sent, not what arrives.
+
+describe("dispatcher enrichNote keeps the user's lines", () => {
+  const INPUT = "call the dentist\nbuy stamps";
+
+  beforeEach(() => {
+    vi.mocked(getVaultTagStrings).mockReset().mockResolvedValue([]);
+  });
+
+  it("replaces an expanded body with the user's lines verbatim, keeping the model's title and tags", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse(
+        "---\ncreated: 2026-09-29\ntags: [note, errands]\n---\n# Errands\n\n" +
+          "You should call the dentist soon to book a cleaning.\n- [ ] buy stamps\n- [ ] buy envelopes too\n",
+      ),
+    );
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-29\ntags: [note, errands]\n---\n# Errands\n\ncall the dentist\nbuy stamps\n",
+    );
+  });
+
+  it("passes a compliant reply through byte-for-byte", async () => {
+    const compliant =
+      "---\ncreated: 2026-09-29\ntags: [note, errands]\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n";
+    fetchMock.mockResolvedValueOnce(makeOkResponse(compliant));
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(compliant);
+  });
+
+  it("falls back to a line exactly as typed when B3 alters the model's echo of it (R6)", async () => {
+    // neutralizeText's on*= stripper eats ` once = daily` from the echoed
+    // line. The reply is judged against the user's raw text (the human's
+    // decision, 2026-09-30: never lose typed text), so the note keeps the
+    // line whole — at the cost of that capture's checkboxes.
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse(
+        "---\ncreated: 2026-09-29\ntags: [note, plants]\n---\n# Plants\n\n- [ ] water the ferns once = daily\n",
+      ),
+    );
+
+    const result = await enrichNote("water the ferns once = daily");
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-29\ntags: [note, plants]\n---\n# Plants\n\nwater the ferns once = daily\n",
+    );
+  });
+
+  // Security review 2026-09-29 (HIGH): B3 leaves fence bodies unsanitized, and
+  // the fallback used to lift the first `#` line from anywhere — a fenced one
+  // included — into a live title.
+  describe("never lifts unsanitized model text into the fallback", () => {
+    const PAYLOAD = "# <img src=x onerror=alert(1)> [x](javascript:alert(2)) `= this.file.name`";
+    const FM = "---\ncreated: 2026-09-29\ntags: [note]\n---\n";
+
+    it.each([
+      ["a ```js fence", `${FM}\`\`\`js\n${PAYLOAD}\n\`\`\`\nbuy milk`],
+      ["an unclosed fence", `${FM}buy milk\n\`\`\`\n${PAYLOAD}`],
+      ["a ~~~ fence", `${FM}~~~\n${PAYLOAD}\n~~~\nbuy milk`],
+    ])("a heading inside %s never becomes the title", async (_, reply) => {
+      fetchMock.mockResolvedValueOnce(makeOkResponse(reply));
+
+      const result = await enrichNote("buy milk");
+
+      expect(result.markdown).toBe(`${FM}buy milk\n`);
+    });
+
+    it("a heading inside a fence never becomes the title when the reply has no frontmatter", async () => {
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse(`\`\`\`text\nignored\n\`\`\`\n\`\`\`js\n${PAYLOAD}\n\`\`\`\nbuy milk`),
+      );
+
+      const result = await enrichNote("buy milk");
+
+      expect(result.markdown).not.toMatch(/onerror|javascript:|`= this/);
+      expect(result.markdown).toContain("buy milk");
+    });
+
+    it("sanitizes the fallback's body even when the reply's frontmatter hides a fence opener", async () => {
+      // A bare ``` line in the frontmatter makes B3 treat the whole body as
+      // fenced (pre-existing, all modes — TODO.md). No `created`, so
+      // normalization fails and the ``` survives into the fallback's header.
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse(`---\ntags: [note]\n\`\`\`\n---\n${PAYLOAD}\n\nA long expansion.\n`),
+      );
+
+      const result = await enrichNote("buy milk");
+
+      expect(result.markdown).not.toMatch(/onerror|javascript:|`= this/);
+      expect(result.markdown).toContain("\nbuy milk\n");
+    });
+
+    // Security re-check 2026-09-30: B3 over the header as ONE block could read
+    // across lines. Both replies below skip normalization (no `created`), so
+    // the model's header reaches the fallback as the model wrote it.
+    it("never lets a sanitized header line swallow the frontmatter's closing ---", async () => {
+      // B3's first pass turns `o onq='z'nx=` into ` onx=`; a second pass over
+      // the whole block then ate ` onx=\n---`, pulling the title and the
+      // user's lines into the frontmatter.
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse("---\ntags: [note]\no: o onq='z'nx=\n---\n# T\n\nA long expansion.\n"),
+      );
+
+      const result = await enrichNote("buy milk\n---\nsecret line");
+
+      const { body } = splitFrontmatter(result.markdown);
+      expect(body).toContain("buy milk\n---\nsecret line");
+      expect(body).toContain("# T");
+    });
+
+    it("sanitizes every header line, even after a fence opener inside the frontmatter", async () => {
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse("---\ntags: [note]\n```\nevil: <img src=x onerror=alert(9)>\n---\n# T\n\nA long expansion.\n"),
+      );
+
+      const result = await enrichNote("buy milk");
+
+      expect(result.markdown).not.toMatch(/onerror/);
+      expect(result.markdown).toContain("\nbuy milk\n");
+    });
+
+    it("a fallback carries only note-owned frontmatter keys (B3 allowlist, #223)", async () => {
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse("---\ncreated: 2026-09-29\ntags: [note]\ndg-publish: true\ncssclasses: x\n---\n# T\n\nA long expansion.\n"),
+      );
+
+      const result = await enrichNote("buy milk");
+
+      const { header, body } = splitFrontmatter(result.markdown);
+      expect(header).toBe("---\ncreated: 2026-09-29\ntags: [note]\n---\n");
+      expect(body).toBe("# T\n\nbuy milk\n");
+    });
+
+    it("never tags a user's own --- block as the note's frontmatter", async () => {
+      fetchMock.mockResolvedValueOnce(makeOkResponse("Sure, here you go."));
+
+      const result = await enrichNote("---\nfoo: bar\n---\nbuy milk");
+
+      expect(result.markdown).toBe("---\ntags: [note]\n---\n---\nfoo: bar\n---\nbuy milk\n");
+    });
+
+    it("keeps the fallback's user lines exactly as typed, even ones B3 would neutralize", async () => {
+      // B3 defuses model output; the user's own lines are theirs (the raw
+      // save-first stub already stores them unsanitized).
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse(`${FM}# Shopping\n\nA long expansion.\n`),
+      );
+
+      const result = await enrichNote("buy milk <% tp.system.prompt('x') %>");
+
+      expect(result.markdown).toBe(`${FM}# Shopping\n\nbuy milk <% tp.system.prompt('x') %>\n`);
+    });
+
+    it("sanitizes the model's title but not the user's lines in the same fallback", async () => {
+      // The frontmatter fence hides the body from B3, so PAYLOAD reaches the
+      // fallback as a raw H1 — only the model-controlled title is neutralized.
+      fetchMock.mockResolvedValueOnce(
+        makeOkResponse(`---\ntags: [note]\n\`\`\`\n---\n${PAYLOAD}\n\nA long expansion.\n`),
+      );
+
+      const result = await enrichNote("buy milk <% tp.date.now() %>");
+
+      expect(result.markdown).not.toMatch(/onerror|javascript:|`= this/);
+      expect(result.markdown).toContain("\nbuy milk <% tp.date.now() %>\n");
+    });
+  });
+
+  it("adds #note when the model's tags leave it out", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse(
+        "---\ncreated: 2026-09-29\ntags: [errands]\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n",
+      ),
+    );
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-29\ntags: [note, errands]\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n",
+    );
+  });
+
+  it("adds a tags field carrying #note when the reply has none", async () => {
+    // No `tags` fails note normalization, so the sanitized reply arrives as-is.
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse("---\ncreated: 2026-09-29\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n"),
+    );
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-29\ntags: [note]\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n",
+    );
+  });
+
+  it("leaves a reply that already carries #note, in any spelling, byte-for-byte unchanged", async () => {
+    const tagged =
+      "---\ncreated: 2026-09-29\ntags: [Errands, Note]\n---\n# Errands\n\n- [ ] call the dentist\n- [ ] buy stamps\n";
+    fetchMock.mockResolvedValueOnce(makeOkResponse(tagged));
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(tagged);
+  });
+
+  it("keeps the fallback-provider marker when it falls back to the user's lines", async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      ...BASE_SETTINGS,
+      fallbackProviderId: "relais",
+      llmProviders: BASE_SETTINGS.llmProviders.map((p) =>
+        p.id === "relais" ? { ...p, model: "local-fallback-model" } : p,
+      ),
+    });
+    fetchMock.mockRejectedValueOnce(new TypeError("Network request failed"));
+    fetchMock.mockResolvedValueOnce(
+      makeOkResponse("---\ncreated: 2026-09-29\ntags: [note]\n---\n# Errands\n\nA long expansion.\n"),
+    );
+
+    const result = await enrichNote(INPUT);
+
+    expect(result.markdown).toBe(
+      "---\ncreated: 2026-09-29\ntags: [note]\nfallback: relais\n---\n# Errands\n\ncall the dentist\nbuy stamps\n",
+    );
   });
 });

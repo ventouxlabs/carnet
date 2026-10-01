@@ -36,6 +36,7 @@ describe("formatMode", () => {
       person: formatMode("person"),
       photo: formatMode("photo"),
       audio: formatMode("audio"),
+      note: formatMode("note"),
     }).toEqual({
       idea: "Idea",
       journal: "Journal",
@@ -43,7 +44,14 @@ describe("formatMode", () => {
       person: "Contact",
       photo: "Photo",
       audio: "Audio",
+      note: "Note",
     });
+  });
+
+  it("gives a mode this build can't name a generic label, not undefined", () => {
+    // A row persisted by a newer build, read after a downgrade — the File info
+    // summary used to read "undefined · captured …".
+    expect(formatMode("task" as unknown as Parameters<typeof formatMode>[0])).toBe("Capture");
   });
 });
 
@@ -257,6 +265,7 @@ describe("relatedSubdirForMode", () => {
       idea: relatedSubdirForMode("idea"),
       photo: relatedSubdirForMode("photo"),
       audio: relatedSubdirForMode("audio"),
+      note: relatedSubdirForMode("note"),
     }).toEqual({
       journal: "Journal",
       person: "People",
@@ -264,6 +273,7 @@ describe("relatedSubdirForMode", () => {
       idea: "Ideas",
       photo: "Ideas",
       audio: "Ideas",
+      note: "Notes",
     });
   });
 });

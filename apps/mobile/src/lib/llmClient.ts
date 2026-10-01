@@ -17,6 +17,7 @@
  *
  * Each method corresponds to one capture mode:
  *   enrichIdea    — raw thought → structured Obsidian markdown
+ *   enrichNote    — task list / working notes → titled, tagged, never expanded
  *   enrichJournal — voice transcript → journal entry
  *   enrichPerson  — OCR business card + context → contact note
  *   promoteIdea   — rewrite an existing idea at a higher maturity status
@@ -45,6 +46,7 @@ import {
   buildEnhanceProsePrompt,
   buildIdeaPrompt,
   buildJournalPrompt,
+  buildNotePrompt,
   buildPersonPrompt,
   buildPromoteIdeaPrompt,
   buildRetrospectivePrompt,
@@ -344,6 +346,33 @@ export async function enrichIdea(
     model,
     pair,
     "idea",
+    config.label,
+    resolveEnrichmentTimeoutMs(config.baseUrl),
+    config.allowInsecureTransport ?? false,
+  );
+}
+
+/** Enrich a captured note. Unlike enrichIdea, the prompt keeps the user's
+ * lines and only adds a title, tags and checkboxes — see buildNotePrompt.
+ * Normalized as noteType "note" (created, tags): "idea" would fail
+ * normalization on the `status` key the note prompt never emits. */
+export async function enrichNote(
+  text: string,
+  config: ProviderConfig,
+  override?: string,
+  availableTags: string[] = [],
+): Promise<EnrichResult> {
+  const model = assertModelConfigured(config.model, config.label);
+  const base = withSystemOverride(buildNotePrompt(text), override);
+  // The hint goes on the FINAL system string: withSystemOverride replaces
+  // the whole message, so hinting before the override would lose it.
+  const pair = { ...base, system: withTagHint(base.system, availableTags) };
+  return chatCompletion(
+    config.baseUrl,
+    config.apiKey,
+    model,
+    pair,
+    "note",
     config.label,
     resolveEnrichmentTimeoutMs(config.baseUrl),
     config.allowInsecureTransport ?? false,

@@ -77,6 +77,47 @@ tags: [idea, seedling, {tag1}, {tag2}]
   return { system, user };
 }
 
+/**
+ * Prompt for note capture mode — task lists and working notes.
+ *
+ * The hard contract, and the one thing that separates it from buildIdeaPrompt:
+ * it must NOT expand. buildIdeaPrompt grows a half-formed thought into prose,
+ * which is the wrong thing to do to a todo list. Here the user's lines are kept
+ * and only a title, tags and checkbox syntax are added.
+ *
+ * "NEVER invent tasks" is copied from buildIdeaPrompt/buildJournalPrompt on
+ * purpose — it is the wording that keeps those two from fabricating action
+ * items. The frontmatter template (created, tags) is exactly what
+ * enrichSanitize's `note` type requires; enrichSanitize.test.ts pins the two.
+ */
+export function buildNotePrompt(input: string): PromptPair {
+  const today = todayLocal();
+  const system = `You are a personal knowledge assistant. The user has captured a note —
+working notes, a task list, or things they need to get done. Your job is to:
+1. Give it a concise title (5 words max, slug-friendly).
+   If the text already starts with a "# " heading, reuse it as the title.
+2. Keep the user's own lines. DO NOT expand, summarise, reword, or add prose.
+   Preserve their wording and their order.
+3. Render a line as a markdown checkbox ("- [ ] ...") ONLY if it is already an
+   action the user wrote, phrased faithfully from the input — NEVER invent tasks.
+   Leave context and reference lines exactly as they are.
+   Keep existing "- [ ]" and "- [x]" lines exactly as written.
+4. Suggest 2-3 relevant tags
+
+${INJECTION_GUARD}
+
+Respond ONLY with valid Obsidian markdown in this exact format:
+---
+created: ${today}
+tags: [note, {tag1}, {tag2}]
+---
+# {Title}
+
+{The user's lines, in order, with their actions as "- [ ] ..." checkboxes}`;
+  const user = `<USER_INPUT>\n${input}\n</USER_INPUT>`;
+  return { system, user };
+}
+
 /** Prompt for journal capture mode (voice transcript). */
 export function buildJournalPrompt(transcript: string, notes: string): PromptPair {
   const today = todayLocal();
@@ -449,8 +490,8 @@ ${INJECTION_GUARD}`;
  * vault, and a disabled setting all collapse to today's exact behavior.
  *
  * The hint supplies vocabulary ONLY — it must never restate how many tags to
- * emit, because the five capture prompts ask for different counts (2-3 for
- * idea/journal/person, 3-5 for shared image/link).
+ * emit, because the capture prompts ask for different counts (2-3 for
+ * idea/journal/person/note, 3-5 for shared image/link).
  */
 export function withTagHint(system: string, availableTags: string[]): string {
   if (availableTags.length === 0) return system;

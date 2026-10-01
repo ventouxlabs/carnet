@@ -5,6 +5,7 @@ import {
   sanitizeAndNormalize,
   sanitizeMarkdown,
 } from "./enrichSanitize";
+import { buildNotePrompt } from "./prompts";
 
 // A minimal, valid, prompt-shaped idea note used as a carrier for body-level
 // sanitize assertions. Its frontmatter is canonical so sanitizeAndNormalize
@@ -291,5 +292,43 @@ describe("sanitizeAndNormalize", () => {
     // sanitize runs, but the frontmatter is missing required idea keys
     const md = "---\ncreated: 2026-07-04\n---\n# T\n\n<script>x</script>\n";
     expect(sanitizeAndNormalize(md, "idea")).toBeNull();
+  });
+});
+
+// ── Note shape (note capture mode) ────────────────────────────────────────────
+
+describe("normalizeFrontmatter — note", () => {
+  it("round-trips a prompt-shaped note byte-for-byte", () => {
+    const md =
+      "---\ncreated: 2026-09-27\ntags: [note, errands]\n---\n# Weekend errands\n\n- [ ] call the dentist\nthe car is in the east lot\n";
+    expect(normalizeFrontmatter(md, "note")).toBe(md);
+  });
+
+  it("re-serializes note frontmatter into canonical order (created, tags)", () => {
+    expect(normalizeFrontmatter("---\ntags: [note]\ncreated: 2026-09-27\n---\n# T\n", "note")).toBe(
+      "---\ncreated: 2026-09-27\ntags: [note]\n---\n# T\n",
+    );
+  });
+
+  it("does not demand idea's status key — the reason the note type exists", () => {
+    const md = "---\ncreated: 2026-09-27\ntags: [note]\n---\n# T\n";
+    expect(normalizeFrontmatter(md, "idea")).toBeNull();
+    expect(normalizeFrontmatter(md, "note")).toBe(md);
+  });
+
+  it("returns null when a note is missing its tags", () => {
+    expect(normalizeFrontmatter("---\ncreated: 2026-09-27\n---\n# T\n", "note")).toBeNull();
+  });
+
+  it("accepts exactly the frontmatter buildNotePrompt asks for (prompt and sanitizer agree)", () => {
+    // Fill the prompt's own template. If the prompt ever asks for a key the
+    // note type doesn't order, or stops emitting a required one, this fails.
+    const { system } = buildNotePrompt("x");
+    const template = system.slice(system.indexOf("---\ncreated:"));
+    const filled = template
+      .replace("{tag1}", "errands")
+      .replace("{tag2}", "weekend")
+      .replace("{Title}", "Weekend errands");
+    expect(normalizeFrontmatter(filled, "note")).toBe(filled);
   });
 });

@@ -10,8 +10,11 @@
  * window is kept instead of clobbered.
  *
  * Journal and Person are intentionally NOT routed through this module: Journal
- * keeps its deferred-write model and Person keeps enrich-then-preview. Only Idea
- * is save-first, and only when Settings.previewBeforeSave is off (the default).
+ * keeps its deferred-write model and Person keeps enrich-then-preview. Idea and
+ * Note are save-first; `mode` (default "idea") picks the folder — Ideas/ vs
+ * Notes/ — and the prompt — enrichIdea vs enrichNote. Idea may opt back into
+ * the blocking preview (Settings.previewBeforeSave, see usesSaveFirst); a Note
+ * never does.
  *
  * The pure builders (deriveRawIdeaSlug, buildRawIdeaMarkdown) plus the IO
  * functions (writeRawIdea, applyEnrichedIdea, enrichIdeaInPlace) are kept here,
@@ -26,6 +29,7 @@ import {
   updateNote,
   updateNoteIfUnchanged,
   writeIdea,
+  writeNote,
   type AttachmentRef,
 } from "./writer";
 import type { Root } from "./vaultRoot";
@@ -33,11 +37,18 @@ import { preserveFrontmatterFields, upsertFrontmatterField } from "./frontmatter
 import { mergeUserTags } from "./tags";
 import {
   enrichIdea,
+  enrichNote,
   isInsecureTransportError,
   isNotConfiguredError,
   isPermanentError,
 } from "./dispatcher";
 import type { VaultContext } from "./vaultContext";
+import { subdirForUri } from "./noteSubdirs";
+import { saveFirstModeOf, type SaveFirstTextMode } from "./saveFirstRouting";
+
+// Defined in the leaf ./saveFirstRouting (its header says why); re-exported so
+// this module's API still names the whole save-first surface.
+export { isSaveFirstTextMode, saveFirstModeOf, usesSaveFirst, type SaveFirstTextMode } from "./saveFirstRouting";
 
 /** Frontmatter `status` value stamped on the raw note before enrichment lands.
  * Enrichment overwrites the whole note (including this) with the LLM result. */
@@ -75,45 +86,67 @@ function newRevToken(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** The captured inputs a save-first Idea needs. Attachments are the post-write
- * rel-path references (binaries already on disk), matching the online + offline
- * paths so all three inject identically. */
-export interface RawIdeaInput {
-  /** The user's raw idea text — becomes the note body verbatim. */
+/** Fields every save-first text capture carries. Attachments are the
+ * post-write rel-path references (binaries already on disk), matching the
+ * online + offline paths so all three inject identically. */
+interface RawCaptureFields {
+  /** The user's raw text — becomes the note body verbatim. */
   text: string;
   /** User-entered tags, merged into the frontmatter deterministically. */
   tags: string[];
   /** User-selected `lat,lon`, injected into frontmatter when set. */
   location?: string;
   attachments?: AttachmentRef[];
+}
+
+/** A save-first Idea. `mode` is optional so every pre-Note caller —
+ * notificationQuickIdea.ts above all — compiles and routes unchanged. */
+export interface RawIdeaInput extends RawCaptureFields {
+  mode?: "idea";
   /** Native Android Auto receipt; omitted for normal in-app/notification ideas. */
   receiptId?: string;
 }
 
-/**
- * Decide whether Idea capture uses the save-first path. Save-first is the
- * default; `previewBeforeSave` (a Settings flag) restores the old blocking
- * enrich → preview → Save flow. Journal and Person never call this.
- */
-export function usesSaveFirst(previewBeforeSave: boolean): boolean {
-  return !previewBeforeSave;
+/** A save-first Note (Notes/, note prompt). Never carries a Drive Inbox
+ * receipt: a restarted headless task finds its raw note by scanning Ideas/
+ * only (notificationQuickIdea.ts findReceiptRawNote), so a receipt on a Notes/
+ * file would never be found and the retry would write a duplicate. */
+export interface RawNoteInput extends RawCaptureFields {
+  mode: "note";
+  receiptId?: never;
+}
+
+/** Everything the save-first write accepts. */
+export type RawCaptureInput = RawIdeaInput | RawNoteInput;
+
+/** Runtime backstop for RawNoteInput's `receiptId?: never`: headless-task data
+ * crosses the native bridge untyped, so the type alone can't hold the line. */
+function assertReceiptIsIdeaOnly(input: RawCaptureInput): void {
+  if (input.receiptId !== undefined && saveFirstModeOf(input) !== "idea") {
+    throw new Error("A Drive Inbox receipt can only be written as an idea.");
+  }
 }
 
 /**
  * Derive the on-disk slug for a save-first Idea from the RAW text. The polished
  * LLM title doesn't exist yet at write time, and the file is deliberately not
  * renamed on enrichment, so the slug reflects the raw text — the accepted price
- * of save-first (see the decision memo). Falls back to "idea" when the text
+ * of save-first (see the decision memo). Falls back to the mode's name ("idea"/"note") when the text
  * slugifies to nothing (e.g. emoji-only input).
  */
-export function deriveRawIdeaSlug(text: string): string {
+export function deriveRawIdeaSlug(text: string, mode: SaveFirstTextMode = "idea"): string {
   const firstLine =
     text
       .split("\n")
       .map((l) => l.trim())
       .find((l) => l.length > 0) ?? "";
-  return slugify(firstLine.slice(0, 80)) || "idea";
+  return slugify(firstLine.slice(0, 80)) || mode;
 }
+
+/** Every captured note carries #note from its first write, so it never depends
+ * on the model emitting it (dispatcher.enrichNote guarantees it on the enriched
+ * note too). */
+const NOTE_TAG = "note";
 
 /**
  * Build the deterministic client-side markdown written immediately on Save,
@@ -130,10 +163,11 @@ export function deriveRawIdeaSlug(text: string): string {
  * Pass `now`/`rev` for deterministic output in tests.
  */
 export function buildRawIdeaMarkdown(
-  input: RawIdeaInput,
+  input: RawCaptureInput,
   now: Date = new Date(),
   rev: string = newRevToken(),
 ): string {
+  assertReceiptIsIdeaOnly(input);
   const body = input.text.trim();
   const receipt = input.receiptId?.trim();
   const receiptLine = receipt ? `${DRIVE_INBOX_RECEIPT_FIELD}: ${receipt}\n` : "";
@@ -141,7 +175,7 @@ export function buildRawIdeaMarkdown(
   // Order matches confirmSave: attachments first (so the tag/location merges see
   // the final body), then user tags, then location.
   md = injectAttachments(md, input.attachments ?? []);
-  md = mergeUserTags(md, input.tags);
+  md = mergeUserTags(md, saveFirstModeOf(input) === "note" ? [NOTE_TAG, ...input.tags] : input.tags);
   if (input.location) md = upsertFrontmatterField(md, "location", input.location);
   return md;
 }
@@ -163,23 +197,27 @@ export interface WriteRawIdeaResult {
  * write: it completes before enrichment is even attempted.
  */
 export async function writeRawIdea(
-  input: RawIdeaInput,
+  input: RawCaptureInput,
   now?: Date,
   root?: Root,
 ): Promise<WriteRawIdeaResult> {
-  const slug = deriveRawIdeaSlug(input.text);
+  const mode = saveFirstModeOf(input);
+  const slug = deriveRawIdeaSlug(input.text, mode);
   const markdown = buildRawIdeaMarkdown(input, now);
+  // Same raw stub, same collision suffixing, same pinned root — only the
+  // folder differs: Notes/ for a note, Ideas/ for an idea.
+  const write = mode === "note" ? writeNote : writeIdea;
   const { filepath } = root
-    ? await writeIdea(slug, markdown, root)
-    : await writeIdea(slug, markdown);
+    ? await write(slug, markdown, root)
+    : await write(slug, markdown);
   const mtime = await getModificationTime(filepath);
   return { filepath, slug, mtime, markdown };
 }
 
-export interface RewriteRawIdeaInput extends RawIdeaInput {
-  /** The already-on-disk note to overwrite — NOT re-derived from the text. */
-  filepath: string;
-}
+/** A revised draft plus the already-on-disk note it overwrites — NOT re-derived
+ * from the text. A type alias: an interface can't extend the RawCaptureInput
+ * union. */
+export type RewriteRawIdeaInput = RawCaptureInput & { filepath: string };
 
 export interface RewriteRawIdeaResult {
   filepath: string;
@@ -274,6 +312,10 @@ export async function applyEnrichedIdea(
 export interface EnrichIdeaInPlaceInput {
   filepath: string;
   expectedMtime: number | null;
+  /** Which prompt enriches it: "note" → enrichNote (tidy, never expand);
+   * absent or "idea" → enrichIdea — except that a file in Notes/ always gets
+   * the note prompt (see enrichModeOf). Must match the mode of the raw write. */
+  mode?: SaveFirstTextMode;
   /** Content baseline for SAF vaults — see ApplyEnrichedIdeaInput. */
   expectedContent?: string | null;
   /** See ApplyEnrichedIdeaInput. */
@@ -303,6 +345,14 @@ export type EnrichIdeaOutcome =
   | { kind: "conflict" }
   | { kind: "failed"; transient: boolean; reason: string };
 
+/** The prompt a save-first file is enriched with. Notes/ never holds an idea
+ * (writeIdea writes Ideas/), so a file there gets the note prompt whatever the
+ * caller said: a missing mode, finishPendingEnrichment's "idea" default, or a
+ * cached index row still saying "idea" (plan R2) must not expand a note. */
+function enrichModeOf(input: EnrichIdeaInPlaceInput): SaveFirstTextMode {
+  return subdirForUri(input.filepath) === "Notes" ? "note" : saveFirstModeOf(input);
+}
+
 /**
  * Enrich a save-first Idea and update its file in place. The raw note already
  * exists on disk (writeRawIdea ran first), so any failure here is recoverable:
@@ -313,7 +363,8 @@ export async function enrichIdeaInPlace(
 ): Promise<EnrichIdeaOutcome> {
   let enriched: string;
   try {
-    const result = await enrichIdea(input.text, { vaultContext: input.vaultContext });
+    const enrich = enrichModeOf(input) === "note" ? enrichNote : enrichIdea;
+    const result = await enrich(input.text, { vaultContext: input.vaultContext });
     enriched = result.markdown;
   } catch (e: unknown) {
     const reason = e instanceof Error ? e.message : String(e);

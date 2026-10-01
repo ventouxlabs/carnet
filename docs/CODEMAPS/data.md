@@ -11,7 +11,9 @@ Markdown as canonical; `indexes/full-text.json` is derived and rebuildable.
 Ideas/{slug}.md          IdeaNote        (status in frontmatter; save-first writes stub
                                           then enrichment patches — B4)
 Journal/YYYY-MM-DD.md     JournalEntry    (one day file; same-day captures appended)
-Notes/{slug}.md           synthesis note  (saved retrospective-query answer, cites other notes)
+Notes/{slug}.md           captured note   (Note mode — task list / working notes, tags: [note, …])
+                          synthesis note  (saved Ask answer — tags: [synthesis] + question:;
+                                           isSynthesisNote tells the two apart, not the folder)
 People/F-L.md             PersonNote      (card scan → ocrCardViaVision → person enrich)
 Photos/{slug}.jpg         image binaries
 Attachments/…             paired files (embedded from notes via ../Subdir/file)

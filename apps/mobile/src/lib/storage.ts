@@ -8,7 +8,7 @@ import { DEFAULT_VAULT_PROFILE_ID } from "./vaultProfiles";
 
 const HISTORY_LIMIT = 20;
 
-export type CaptureMode = "idea" | "journal" | "person" | "photo" | "audio";
+export type CaptureMode = "idea" | "journal" | "person" | "photo" | "audio" | "note";
 
 export interface CaptureEntry {
   id: string;

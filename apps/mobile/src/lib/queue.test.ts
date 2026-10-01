@@ -109,6 +109,10 @@ vi.mock("./llmClient", () => ({
     markdown: "---\nstatus: seedling\n---\n# Test Idea\n\nbody\n",
     model: "test",
   }),
+  enrichNote: vi.fn().mockResolvedValue({
+    markdown: "---\ncreated: 2026-09-27\ntags: [note]\n---\n# Test Note\n\n- [ ] call the dentist\n",
+    model: "test",
+  }),
   enrichJournal: vi.fn().mockResolvedValue({
     markdown: "---\ndate: 2026-05-16\n---\n# Journal\n\n## Notes\n- thing\n",
     model: "test",
@@ -139,6 +143,9 @@ vi.mock("./llmClient", () => ({
 
 vi.mock("./writer", () => ({
   writeIdea: vi.fn().mockResolvedValue({ filepath: "file:///carnet/Ideas/test-idea.md" }),
+  writeNote: vi.fn().mockResolvedValue({ filepath: "file:///carnet/Notes/test-note.md" }),
+  // The save-first (filepath) drain path updates in place; it had no double.
+  updateNoteIfUnchanged: vi.fn().mockResolvedValue({ ok: true }),
   appendJournal: vi.fn().mockResolvedValue({ filepath: "file:///carnet/Journal/2026-05-16.md" }),
   writePerson: vi.fn().mockResolvedValue({ filepath: "file:///carnet/People/Jane-Doe.md" }),
   slugify: vi.fn((s: string) => s.toLowerCase().replace(/\s+/g, "-")),
@@ -816,5 +823,110 @@ describe("queue at-rest encryption", () => {
       "second",
       "third",
     ]);
+  });
+});
+
+// ── note payloads (note-capture-mode Task 6) ─────────────────────────────────
+
+describe("drainQueue — notes and unknown modes", () => {
+  it("drains a note through enrichNote + writeNote into the row's own vault", async () => {
+    const { enrichNote, enrichIdea } = await import("./llmClient");
+    const { writeNote, writeIdea } = await import("./writer");
+    const workRoot = { uri: "file:///work", fs: {} };
+    resolveContextRoot.mockReturnValue(workRoot);
+
+    await enqueue({
+      mode: "note",
+      text: "- [ ] call the dentist",
+      vaultContext: { profileId: "work", rootUri: "file:///work" },
+    });
+    // Plaintext row metadata (the Sync dialog's stamp) says note, not idea.
+    expect(rows()[0].mode).toBe("note");
+
+    await drainQueue();
+
+    expect(vi.mocked(enrichNote)).toHaveBeenCalledWith(
+      "- [ ] call the dentist",
+      expect.any(Object),
+      undefined,
+      expect.any(Array),
+    );
+    expect(vi.mocked(enrichIdea)).not.toHaveBeenCalled();
+    expect(vi.mocked(writeNote)).toHaveBeenCalledWith("test-note", expect.any(String), workRoot);
+    expect(vi.mocked(writeIdea)).not.toHaveBeenCalled();
+    expect(rows().length).toBe(0);
+  });
+
+  it("updates a save-first note in place and never writes a second file", async () => {
+    const { writeNote, updateNoteIfUnchanged } = await import("./writer");
+    await enqueue({
+      mode: "note",
+      text: "- [ ] call the dentist",
+      filepath: "file:///carnet/Notes/call-the-dentist.md",
+      baselineMtime: 7,
+      baselineContent: "RAW",
+    });
+
+    await drainQueue();
+
+    expect(vi.mocked(updateNoteIfUnchanged)).toHaveBeenCalledWith(
+      "file:///carnet/Notes/call-the-dentist.md",
+      expect.stringContaining("# Test Note"),
+      7,
+      "RAW",
+    );
+    expect(vi.mocked(writeNote)).not.toHaveBeenCalled();
+    expect(rows().length).toBe(0);
+  });
+
+  it("drains an expanded reply with the user's lines verbatim, not the model's prose", async () => {
+    // The dispatcher runs for real here (only llmClient is mocked), so this
+    // is the drain reaching the same line guard as submit and re-enrich.
+    const { enrichNote } = await import("./llmClient");
+    const { updateNoteIfUnchanged } = await import("./writer");
+    vi.mocked(enrichNote).mockResolvedValueOnce({
+      markdown:
+        "---\ncreated: 2026-09-29\ntags: [note]\n---\n# Errands\n\nBook a cleaning with the dentist this week.\n- [ ] buy stamps\n",
+      model: "test",
+    });
+    await enqueue({
+      mode: "note",
+      text: "call the dentist\n- [ ] buy stamps",
+      filepath: "file:///carnet/Notes/call-the-dentist.md",
+      baselineMtime: 7,
+      baselineContent: "RAW",
+    });
+
+    await drainQueue();
+
+    expect(vi.mocked(updateNoteIfUnchanged)).toHaveBeenCalledWith(
+      "file:///carnet/Notes/call-the-dentist.md",
+      "---\ncreated: 2026-09-29\ntags: [note]\n---\n# Errands\n\ncall the dentist\n- [ ] buy stamps\n",
+      7,
+      "RAW",
+    );
+    expect(rows().length).toBe(0);
+  });
+
+  it("keeps a row this build cannot route, instead of removing it as if it had drained", async () => {
+    // A row written by a newer build and drained after a downgrade. Before
+    // the exhaustive else, processRow returned normally and the row was
+    // deleted — silent data loss.
+    seed([
+      {
+        id: "future",
+        mode: "task",
+        payload_json: JSON.stringify({ mode: "task", text: "from a newer build" }),
+        created_at: 1,
+        attempts: 0,
+        last_error: null,
+      },
+    ]);
+
+    await drainQueue();
+
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].attempts).toBe(1);
+    expect(rows()[0].last_error).toMatch(/Unsupported queued capture mode: task/);
   });
 });

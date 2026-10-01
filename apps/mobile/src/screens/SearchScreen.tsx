@@ -40,11 +40,12 @@ import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Search">;
 
-/** Capture modes that can appear in the note index. NOT one per note subdir —
- * there are four subdirs (noteSubdirs.ts) and three modes: a `Notes/` note
- * (a saved synthesis) has no mode of its own and filters under "Idea", which
- * is inferNoteMode's documented collapse-to-idea behaviour, not a gap here. */
-const MODE_FILTERS: readonly CaptureMode[] = ["idea", "journal", "person"];
+/** Capture modes that can appear in the note index — one per note subdir
+ * (noteSubdirs.ts): Ideas/ → idea, Journal/ → journal, People/ → person,
+ * Notes/ → note. The Note chip therefore finds captured notes AND saved Ask
+ * answers, which share Notes/ (the #synthesis tag tells them apart). photo and
+ * audio never appear as their own mode — their notes land in Ideas/. */
+const MODE_FILTERS: readonly CaptureMode[] = ["idea", "note", "journal", "person"];
 
 /** Max tag pills offered in the expanded filter row — the most-used tags
  * carry most taps; everything else is reachable by typing. */
