@@ -1,6 +1,6 @@
 /**
  * B3 sanitizer hardening — security regressions (plan:
- * .claude/PRPs/plans/b3-sanitizer-hardening.plan.md). Every case here is a
+ * .claude/PRPs/plans/completed/b3-sanitizer-hardening.plan.md). Every case here is a
  * confirmed bypass of the pre-hardening sanitizer, plus the invariants the fix
  * must hold: the sanitizer is TOTAL (never throws) and IDEMPOTENT
  * (s(s(x)) === s(x)), and it fails closed when its fixed point is not reached.
