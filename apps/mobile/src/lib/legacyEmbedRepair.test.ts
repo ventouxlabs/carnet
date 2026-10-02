@@ -8,8 +8,8 @@ import { upsertFrontmatterField } from "./frontmatter";
 import { mergeUserTags } from "./tags";
 import { injectAttachments, type AttachmentRef } from "./writerMarkdown";
 
-/** v0.11.0's injectImageEmbed, verbatim: with no H1 anywhere it put the embed
- * on top of the whole file — above the frontmatter. */
+/** v0.3.0–v0.11.0's injectImageEmbed, verbatim: with no H1 anywhere it put
+ * the embed on top of the whole file — above the frontmatter. */
 function v011InjectImageEmbed(markdown: string, rel: string): string {
   const embed = `![](${rel})`;
   const match = markdown.match(/^(#\s+.+?)(\r?\n|$)/m);
@@ -65,6 +65,13 @@ describe("repairEmbedsAboveFrontmatter", () => {
     );
   });
 
+  it("repairs an older stub with no rev line", () => {
+    const stub = "---\ncreated: 2026-06-01T08:00:00.000Z\nstatus: pending-enrich\n---\nolder capture\n";
+    expect(repairEmbedsAboveFrontmatter(v011Write(stub, ["a.jpg"], ["garden"]))).toBe(
+      currentWrite(stub, ["a.jpg"], ["garden"]),
+    );
+  });
+
   it("handles a second block holding only a location", () => {
     const broken = v011Write(RAW, ["a.jpg"], [], LOCATION);
     expect(repairEmbedsAboveFrontmatter(broken)).toBe(currentWrite(RAW, ["a.jpg"], [], LOCATION));
@@ -93,6 +100,16 @@ describe("repairEmbedsAboveFrontmatter", () => {
       "a top block with keys v0.11.0 never prepended",
       `---\nproject: allotment\n---\n![](../Photos/a.jpg)\n\n${RAW}`,
     ],
+    // A `---` pair that isn't carnet's frontmatter: repairing would turn the
+    // user's prose into properties and the enriched write would lose it.
+    ["prose between two thematic breaks", "![](../Photos/a.jpg)\n\n---\n\nSome thoughts\n\n---\n\nMore\n"],
+    [
+      "a real note whose body opens with an embed and a --- pair",
+      "---\ntags: [garden]\n---\n![](../Photos/a.jpg)\n\n---\nSection one\n---\nMore\n",
+    ],
+    ["a key-shaped line between breaks", "![](../Photos/a.jpg)\n\n---\nNote: buy milk\n---\nMore\n"],
+    ["prose that mentions created: mid-line", "![](../Photos/a.jpg)\n\n---\nI created: a list\n---\nx\n"],
+    ["a table", "![](../Photos/a.jpg)\n\n---\ncreated: x\n--- | ---\na | b\n"],
   ])("leaves %s byte-identical", (_label, markdown) => {
     expect(repairEmbedsAboveFrontmatter(markdown)).toBe(markdown);
   });

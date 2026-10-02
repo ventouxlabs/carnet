@@ -332,7 +332,7 @@ describe("repro: note capture keeps every line (note-tasklist.json)", () => {
   });
 });
 
-// v0.11.0's injectImageEmbed put a photo embed ABOVE the frontmatter of a raw
+// v0.3.0–v0.11.0's injectImageEmbed put a photo embed ABOVE the frontmatter of a raw
 // Idea with no H1, and the tag/location merges then prepended a second block.
 // The note's status was unreadable, so "Finish enrichment" was never offered.
 // finishEnrichment.ts reads every note through this repair.

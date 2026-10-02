@@ -49,7 +49,7 @@ import { getModificationTime, readNote } from "./writer";
 import { enrichIdeaInPlace } from "./ideaSaveFirst";
 import { enrichPersonInPlace } from "./personInPlace";
 import { keepsUserLines } from "./noteLineGuard";
-import { splitFrontmatter } from "./frontmatter";
+import { extractFrontmatterField, splitFrontmatter } from "./frontmatter";
 
 const mockMtime = vi.mocked(getModificationTime);
 const mockReadNote = vi.mocked(readNote);
@@ -125,8 +125,19 @@ describe("a v0.11.0 note with its embed above the frontmatter", () => {
     // The fields to carry come from the repaired note; the conflict guard
     // compares against the bytes actually on disk, or it reports a phantom
     // conflict and the repair never lands.
-    expect(arg.preserveFrontmatterFrom?.startsWith("---\n")).toBe(true);
+    expect(extractFrontmatterField(arg.preserveFrontmatterFrom ?? "", "status")).toBe("pending-enrich");
     expect(arg.expectedContent).toBe(V011_PENDING_WITH_PHOTO);
+  });
+
+  it("finishes the no-tags variant — just the embed on top", async () => {
+    const embedOnTop = `![](../Photos/sketch.png)\n\n${PENDING}`;
+    mockReadNote.mockResolvedValue(embedOnTop);
+    const out = await finishPendingEnrichment({ body: embedOnTop, filepath: "f.md" });
+    expect(out.kind).toBe("updated");
+    const arg = mockEnrich.mock.calls[0][0];
+    expect(arg.tags).toEqual(["travel"]);
+    expect(arg.text).toBe("Stroudsburg Pennsylvania and the Pocono Mountains region.");
+    expect(arg.expectedContent).toBe(embedOnTop);
   });
 
   it("re-enriches with the note's tags and location", async () => {
