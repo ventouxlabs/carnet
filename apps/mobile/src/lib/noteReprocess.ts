@@ -34,6 +34,17 @@ export function findPairedLink(body: string, subdir: string): string | null {
   return match ? match[1] : null;
 }
 
+/** Fields the old note carries that must not outlive a fresh vision reply.
+ *
+ * `tags` belongs to mergeUserTags: preserving it first would overwrite the
+ * model's fresh tags before the merge sees them. `fallback`
+ * (dispatcher.ts FALLBACK_PROVIDER_FIELD) names the provider that wrote the
+ * OLD reply — re-enrich is how a user clears the "via relais" chip — and
+ * `enhanced` (enhanceProse.ts ENHANCED_FIELD) vouches for a body this reply
+ * replaced. Literals, not imports: dispatcher is mocked in the tests, and an
+ * undefined entry would silently exclude nothing. */
+const REPROCESS_OWNED_FIELDS = ["tags", "fallback", "enhanced"] as const;
+
 /**
  * Outcome of a re-enrich / transcribe attempt:
  *   - updated: the note was rewritten in place; `nextBody` is the new content.
@@ -77,9 +88,11 @@ export async function reEnrichNote(input: {
       { base64, mimeType: mime, context: "" },
       { vaultContext: input.vaultContext },
     );
-    // `tags` is excluded because mergeUserTags owns it: preserving it first
-    // would overwrite the model's fresh tags before the merge sees them.
-    const preserved = preserveFrontmatterFields(result.markdown, input.body, ["tags"]);
+    const preserved = preserveFrontmatterFields(
+      result.markdown,
+      input.body,
+      REPROCESS_OWNED_FIELDS,
+    );
     const withImage = injectImageEmbed(preserved, `../Photos/${imageFilename}`);
     const next = mergeUserTags(withImage, getFrontmatterTags(input.body));
     await updateNote(input.filepath, next);

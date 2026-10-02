@@ -102,7 +102,6 @@ describe("reEnrichNote", () => {
     expect([...getFrontmatterTags(next)].sort()).toEqual(["ferns", "garden", "plants"]);
     // A value the model did provide beats the carried one.
     expect(extractFrontmatterField(next, "kind")).toBe("photo");
-    expect(extractFrontmatterField(next, "created")).toBe("2026-10-02");
     expect(splitFrontmatter(next).body).toBe("# Fresh\n\n![](../Photos/pic.jpg)\n\nNew text.\n");
   });
 
@@ -115,6 +114,22 @@ describe("reEnrichNote", () => {
     expect(extractFrontmatterField(next, "location")).toBe("48.85660, 2.35220");
     expect([...getFrontmatterTags(next)].sort()).toEqual(["ferns", "garden"]);
     expect(splitFrontmatter(next).body).toBe("![](../Photos/pic.jpg)\n\nJust a caption.\n");
+  });
+
+  it("clears the markers that described the OLD reply", async () => {
+    // `fallback` names the provider that wrote the previous reply (re-enrich is
+    // how the "via relais" chip goes away) and `enhanced` vouches for a body
+    // this reply replaced. Neither may ride along onto the fresh one.
+    mockRead.mockResolvedValue({ base64: "AAA", mime: "image/jpeg" });
+    mockEnrich.mockResolvedValue({
+      markdown: "---\ncreated: 2026-10-02\nkind: photo\ntags: []\n---\n# Fresh\n",
+    } as never);
+    const body = PHOTO_NOTE.replace("project:", "fallback: relais\nenhanced: 2026-09-20\nproject:");
+    const out = await reEnrichNote({ body, filepath: "f.md" });
+    if (out.kind !== "updated") throw new Error("expected updated");
+    expect(extractFrontmatterField(out.nextBody, "fallback")).toBeNull();
+    expect(extractFrontmatterField(out.nextBody, "enhanced")).toBeNull();
+    expect(extractFrontmatterField(out.nextBody, "project")).toBe("allotment");
   });
 
   it("does not double the embed when the model echoes it", async () => {

@@ -234,7 +234,17 @@ Review round (independent code + security review, 2026-09-30):
   (`preserveFrontmatterFields`, `tags` excluded) and merges the user's tags back, in
   `personInPlace.ts`'s order. A re-enriched photo note keeps `location`, `karakeepId` (so
   the next Karakeep export updates its bookmark instead of duplicating it) and hand-added
-  fields.
+  fields. The `fallback` provider marker and the `enhanced` stamp are deliberately NOT
+  carried: they describe the reply being replaced.
+- [ ] **Text re-enrich carries `fallback`/`enhanced` forward** (pre-existing, found by the
+  review of the item above) — `reEnrichNoteInPlace` hands the old note to
+  `preserveFrontmatterFields` for Idea/Note (`ideaSaveFirst.ts` `NEVER_PRESERVED_FIELDS`)
+  and Person (`personInPlace.ts`, excludes only `tags`), so re-enriching on the primary
+  provider leaves the "via relais" chip and a stale `enhanced` stamp behind. Add both
+  fields to those exclusion lists.
+- [ ] **Re-enrich resets `created` to today** (pre-existing, every re-enrich path) — the
+  prompts hardcode `created: ${today}` (`prompts.ts`), and the model's value beats the
+  carried one, so re-enriching an old note re-dates it. Keep the original `created`.
 - [ ] **Image re-enrich has no conflict guard** (pre-existing, found while fixing the item
   above) — `reEnrichNote` overwrites with `updateNote`, built from the screen's snapshot
   of the body, with no baseline-before-the-call mtime/content check. A Syncthing write or
