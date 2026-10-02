@@ -159,40 +159,60 @@ export function injectAttachments(
   return md;
 }
 
-/** A line that is solely a paired-binary embed or link — the shape
- * injectAttachments writes. The filename class is listPairedBinaries' own
- * (`[^/\s)]+`), so every line this matches is one attachmentsFromBody will
- * re-inject. Matched against the trimmed line. */
-const INJECTED_ATTACHMENT_LINE = /^!?\[[^\]]*\]\(\.\.\/(?:Photos|Audio|Files)\/[^/\s)]+\)$/;
+/** An image embed exactly as injectImageEmbed writes it: no alt text, no
+ * indent, a `../Photos/` link with listPairedBinaries' filename class. */
+const INJECTED_EMBED_LINE = /^!\[\]\(\.\.\/Photos\/[^/\s)]+\)\r?$/;
+/** A `## Files` link exactly as injectAttachments writes it: the label IS the
+ * filename. attachmentsFromBody files everything but Photos as a file. */
+const INJECTED_FILE_LINE = /^\[([^\]/\s)]+)\]\(\.\.\/(?:Files|Audio)\/\1\)\r?$/;
+/** injectImageEmbed's own H1 matcher — the embeds go under its first match. */
+const EMBED_ANCHOR_H1 = /^(#\s+.+?)(\r?\n|$)/m;
 
-const isBlankLine = (line: string): boolean => line.trim().length === 0;
+const isBlankLine = (line: string | undefined): boolean =>
+  line !== undefined && line.trim().length === 0;
 
-/** Indices of the lines stripInjectedAttachments removes: every attachment
- * line, plus a `## Files` heading whose section held nothing else. The section
- * ends at the next H1/H2 — upsertSection's boundary. */
-function injectedLineIndices(lines: readonly string[]): Set<number> {
-  const drop = new Set<number>();
-  lines.forEach((line, i) => {
-    if (INJECTED_ATTACHMENT_LINE.test(line.trim())) drop.add(i);
-  });
-  lines.forEach((line, i) => {
-    const heading = line.replace(/\r$/, "");
-    if (heading !== "## Files" && heading !== "## File") return;
-    let content = 0;
-    let onlyAttachments = true;
-    for (let j = i + 1; j < lines.length && !/^##? /.test(lines[j]); j++) {
-      if (isBlankLine(lines[j])) continue;
-      content++;
-      if (!drop.has(j)) onlyAttachments = false;
+/** The embed run injectImageEmbed leaves: under the body's first H1 it is
+ * `(blank, embed)` pairs; with no H1, `(embed, blank)` pairs at the top. */
+function injectedEmbedRun(body: string, lines: readonly string[]): number[] {
+  const h1 = EMBED_ANCHOR_H1.exec(body);
+  const run: number[] = [];
+  if (h1) {
+    let i = body.slice(0, h1.index).split("\n").length; // the line after the H1
+    while (isBlankLine(lines[i]) && INJECTED_EMBED_LINE.test(lines[i + 1] ?? "")) {
+      run.push(i, i + 1);
+      i += 2;
     }
-    if (content > 0 && onlyAttachments) drop.add(i);
-  });
-  return drop;
+    return run;
+  }
+  let i = 0;
+  while (isBlankLine(lines[i])) i++; // a CRLF body keeps a leading "\r" line
+  while (INJECTED_EMBED_LINE.test(lines[i] ?? "") && isBlankLine(lines[i + 1])) {
+    run.push(i, i + 1);
+    i += 2;
+  }
+  return run;
+}
+
+/** A `## Files` section upsertSection appended: everything after the heading
+ * to the end is file links — so it is the last section, since a heading that
+ * followed would not be one. Its lines and the blank run before it, but not
+ * the final "" that keeps the body's own closing line break. */
+function injectedFilesSection(lines: readonly string[]): number[] {
+  const start = lines.findIndex((line) => line.replace(/\r$/, "") === "## Files");
+  if (start === -1) return [];
+  const content = lines.slice(start + 1).filter((line) => !isBlankLine(line));
+  if (content.length === 0 || !content.every((line) => INJECTED_FILE_LINE.test(line))) return [];
+  let from = start;
+  while (from > 0 && isBlankLine(lines[from - 1])) from--;
+  const to = lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
+  return Array.from({ length: to - from }, (_, k) => from + k);
 }
 
 /**
- * The inverse of injectAttachments: remove the attachment embeds/links (and a
- * `## Files` heading left with nothing under it) from a note body.
+ * The inverse of injectAttachments: remove what it wrote, where it wrote it —
+ * the bare `![](../Photos/…)` embeds under the body's first H1 (or at the top
+ * of a body without one), and a trailing `## Files` section of
+ * `[name](../Files/name)` links.
  *
  * Finish enrichment and Re-enrich hand the on-disk body to a model and then
  * re-inject the note's attachments themselves. Leaving the lines in means the
@@ -200,31 +220,16 @@ function injectedLineIndices(lines: readonly string[]): Set<number> {
  * which then falls back and loses the capture's checkboxes. With them stripped,
  * the model sees what it saw at capture time.
  *
- * Removes only whole lines it can re-create; an inline link mid-sentence, a
- * remote image, `## Places` and any prose under `## Files` stay. A removed line
- * takes the blank run after it along when a blank (or the top) sits before it,
- * so no gap is doubled and adjacent paragraphs never merge. If removal reaches
- * the end, the body ends with a single line break, as upsertSection leaves it.
+ * Anything else stays, exactly as on disk: an embed the user moved, one with
+ * alt text, a link with the user's own label, a `## Files` section that holds
+ * prose or is followed by another section, and every inline link — the model
+ * may see those, because only these exact shapes are certain to come back.
  */
 export function stripInjectedAttachments(body: string): string {
   const lines = body.split("\n");
-  const drop = injectedLineIndices(lines);
+  const drop = new Set([...injectedEmbedRun(body, lines), ...injectedFilesSection(lines)]);
   if (drop.size === 0) return body;
-  const out: string[] = [];
-  let lastKept = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (!drop.has(i)) {
-      out.push(lines[i]);
-      if (!isBlankLine(lines[i])) lastKept = i;
-      continue;
-    }
-    if (out.length === 0 || isBlankLine(out[out.length - 1])) {
-      while (i + 1 < lines.length && !drop.has(i + 1) && isBlankLine(lines[i + 1])) i++;
-    }
-  }
-  if (Math.max(...drop) < lastKept) return out.join("\n");
-  while (out.length > 0 && isBlankLine(out[out.length - 1])) out.pop();
-  return out.length > 0 && body.endsWith("\n") ? `${out.join("\n")}\n` : out.join("\n");
+  return lines.filter((_, i) => !drop.has(i)).join("\n");
 }
 
 /** A named place attached to a capture: a display name plus the coordinates it

@@ -48,6 +48,7 @@ import { getModificationTime, readNote } from "./writer";
 import { enrichIdeaInPlace } from "./ideaSaveFirst";
 import { enrichPersonInPlace } from "./personInPlace";
 import { keepsUserLines } from "./noteLineGuard";
+import { splitFrontmatter } from "./frontmatter";
 
 const mockMtime = vi.mocked(getModificationTime);
 const mockReadNote = vi.mocked(readNote);
@@ -131,6 +132,17 @@ describe("finishPendingEnrichment", () => {
     const arg = mockEnrich.mock.calls[0][0];
     expect(arg.text).toBe("Stroudsburg Pennsylvania and the Pocono Mountains region.");
     expect(arg.attachments).toHaveLength(2);
+  });
+
+  it("refuses a pending note whose body is nothing but attachments", async () => {
+    const onlyPhoto = PENDING.replace(
+      "Stroudsburg Pennsylvania and the Pocono Mountains region.\n",
+      "![](../Photos/sketch.png)\n",
+    );
+    mockReadNote.mockResolvedValue(onlyPhoto);
+    const out = await finishPendingEnrichment({ body: onlyPhoto, filepath: "f.md" });
+    expect(out).toEqual({ kind: "failed", reason: "This note has no text to enrich." });
+    expect(mockEnrich).not.toHaveBeenCalled();
   });
 
   it("captures the mtime baseline BEFORE the model call", async () => {
@@ -480,7 +492,7 @@ describe("note mode", () => {
     expect(shown).toBe("# Weekend errands\n\n- [ ] call the dentist");
     const reply = "---\ncreated: 2026-09-27\ntags: [errands]\n---\n# Weekend errands\n\n- [ ] call the dentist\n";
     expect(keepsUserLines(shown, reply)).toBe(true);
-    expect(keepsUserLines(withPhoto.split("---\n")[2], reply)).toBe(false);
+    expect(keepsUserLines(splitFrontmatter(withPhoto).body, reply)).toBe(false);
     expect(mockEnrich.mock.calls[0][0].attachments).toEqual([
       { kind: "image", rel: "../Photos/receipt.jpg", filename: "receipt.jpg" },
     ]);

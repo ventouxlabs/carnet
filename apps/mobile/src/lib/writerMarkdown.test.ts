@@ -187,39 +187,37 @@ describe("stripInjectedAttachments", () => {
     expect(stripInjectedAttachments(injectedBody(enriched))).toBe(enriched);
   });
 
-  it("leaves a body with nothing app-owned in it byte-identical", () => {
-    const body = [
-      "# Trip",
-      "",
-      "![](https://example.com/remote.png)",
-      "",
-      "See [the spec](../Files/spec.pdf) before Monday.",
-      "",
-      "## Files",
-      "",
-      "Scans are still on the laptop.",
-      "",
-      "## Places",
-      "",
-      "[Gare de Lyon](geo:48.84430,2.37350)",
-      "",
-    ].join("\n");
-    expect(stripInjectedAttachments(body)).toBe(body);
+  it("undoes injectAttachments on a title followed directly by text", () => {
+    const enriched = "# Weekend errands\n- [ ] call the dentist\n";
+    expect(stripInjectedAttachments(injectedBody(enriched))).toBe(enriched);
   });
 
-  it("drops the links from a Files section that has prose, but keeps the heading and prose", () => {
-    const body = "Body.\n\n## Files\n\nScans are on the laptop.\n\n[spec.pdf](../Files/spec.pdf)\n";
-    expect(stripInjectedAttachments(body)).toBe("Body.\n\n## Files\n\nScans are on the laptop.\n");
-  });
-
-  it("drops an embed the user moved mid-text without merging the lines around it", () => {
-    const body = "First paragraph.\n\n![](../Photos/a.jpg)\n\nSecond paragraph.\n";
-    expect(stripInjectedAttachments(body)).toBe("First paragraph.\n\nSecond paragraph.\n");
+  it("undoes injectAttachments when the H1 is not the first line", () => {
+    const body = "Saturday list\n# Errands\n\n- [ ] buy milk\n";
+    expect(stripInjectedAttachments(injectedBody(body))).toBe(body);
   });
 
   it("handles a CRLF body synced from a Windows workstation", () => {
-    const body = "![](../Photos/a.jpg)\r\n\r\nHello\r\n\r\n## Files\r\n\r\n[spec.pdf](../Files/spec.pdf)\r\n";
-    expect(stripInjectedAttachments(body)).toBe("Hello\r\n");
+    const body = "\r\n![](../Photos/a.jpg)\r\n\r\nHello\r\n\r\n## Files\r\n\r\n[spec.pdf](../Files/spec.pdf)\r\n";
+    expect(stripInjectedAttachments(body).trim()).toBe("Hello");
+  });
+
+  it.each([
+    [
+      "nothing app-owned",
+      "# Trip\n\n![](https://example.com/remote.png)\n\nSee [the spec](../Files/spec.pdf) before Monday.\n\n## Places\n\n[Gare de Lyon](geo:48.84430,2.37350)\n",
+    ],
+    // The user's own words on the line: stripping it would lose them, since
+    // only the bare `[spec.pdf](…)` form is re-injected.
+    ["a link with the user's own label", "# T\n\n[Read before Monday](../Files/spec.pdf)\n"],
+    ["an embed with alt text", "# T\n\n![Receipt from Saturday](../Photos/a.jpg)\n\nBody.\n"],
+    ["an embed the user moved mid-text", "# T\n\nFirst.\n\n![](../Photos/a.jpg)\n\nSecond.\n"],
+    ["an indented embed", "# T\n\n    ![](../Photos/a.jpg)\n\nBody.\n"],
+    ["a Files link with the user's own label", "Body.\n\n## Files\n\n[Spec, read first](../Files/spec.pdf)\n"],
+    ["a Files section with prose", "Body.\n\n## Files\n\nScans are on the laptop.\n\n[spec.pdf](../Files/spec.pdf)\n"],
+    ["a Files section another section follows", "Body.\n\n## Files\n\n[spec.pdf](../Files/spec.pdf)\n\n## Places\n\n[Home](geo:1,2)\n"],
+  ])("leaves a body with %s byte-identical", (_label, body) => {
+    expect(stripInjectedAttachments(body)).toBe(body);
   });
 });
 
