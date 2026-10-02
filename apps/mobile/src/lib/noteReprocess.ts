@@ -18,6 +18,8 @@ import {
 } from "./writer";
 import { enrichSharedImage } from "./dispatcher";
 import { transcribeAudio } from "./dispatcher";
+import { getFrontmatterTags, preserveFrontmatterFields } from "./frontmatter";
+import { mergeUserTags } from "./tags";
 import type { VaultContext } from "./vaultContext";
 import type { Root } from "./vaultRoot";
 
@@ -47,6 +49,11 @@ export type ReprocessOutcome =
  * the fresh result (the original image embed is re-injected). Re-enrich uses an
  * empty context — the original context-at-capture isn't recoverable from the
  * saved markdown without a brittle parse.
+ *
+ * The model sees only the image, so the note's own frontmatter (`location`,
+ * `karakeepId`, hand-added fields, the user's tags) is carried onto its reply —
+ * the same preserve → attachments → tags order as personInPlace.ts. Dropping
+ * `karakeepId` would turn the next Karakeep export into a duplicate bookmark.
  */
 export async function reEnrichNote(input: {
   body: string;
@@ -70,12 +77,13 @@ export async function reEnrichNote(input: {
       { base64, mimeType: mime, context: "" },
       { vaultContext: input.vaultContext },
     );
-    const withImage = injectImageEmbed(
-      result.markdown,
-      `../Photos/${imageFilename}`,
-    );
-    await updateNote(input.filepath, withImage);
-    return { kind: "updated", nextBody: withImage };
+    // `tags` is excluded because mergeUserTags owns it: preserving it first
+    // would overwrite the model's fresh tags before the merge sees them.
+    const preserved = preserveFrontmatterFields(result.markdown, input.body, ["tags"]);
+    const withImage = injectImageEmbed(preserved, `../Photos/${imageFilename}`);
+    const next = mergeUserTags(withImage, getFrontmatterTags(input.body));
+    await updateNote(input.filepath, next);
+    return { kind: "updated", nextBody: next };
   } catch (e: unknown) {
     const reason = e instanceof Error ? e.message : String(e);
     console.warn("[RecentDetail] re-enrich failed:", reason);

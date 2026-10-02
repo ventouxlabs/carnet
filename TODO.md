@@ -229,11 +229,17 @@ Review round (independent code + security review, 2026-09-30):
 - [x] **Dataview evaluates whole code BLOCKS too** — resolved by `4e3cde0` (see above).
   Dataview's default `inlineQueriesInCodeblocks: true` evaluates a code block whose
   trimmed text starts with `=` (or `$=` with `enableInlineDataviewJs`).
-- [ ] **Image re-enrich drops app-owned frontmatter** (pre-existing, logged by the review,
-  not fixed) — `noteReprocess.ts` (~:69-77) writes `injectImageEmbed(result.markdown, …)`
-  over the whole note, with no `preserveFrontmatterFields`, so re-enriching a photo note
-  loses its `location` and `karakeepId` (and anything else not in the model's reply).
-  Mirror `personInPlace.ts`/`ideaSaveFirst.ts`, which carry the original's fields across.
+- [x] **Image re-enrich drops app-owned frontmatter** — fixed: `noteReprocess.reEnrichNote`
+  now carries the note's own frontmatter onto the model's reply
+  (`preserveFrontmatterFields`, `tags` excluded) and merges the user's tags back, in
+  `personInPlace.ts`'s order. A re-enriched photo note keeps `location`, `karakeepId` (so
+  the next Karakeep export updates its bookmark instead of duplicating it) and hand-added
+  fields.
+- [ ] **Image re-enrich has no conflict guard** (pre-existing, found while fixing the item
+  above) — `reEnrichNote` overwrites with `updateNote`, built from the screen's snapshot
+  of the body, with no baseline-before-the-call mtime/content check. A Syncthing write or
+  WYSIWYG edit landing during the vision call is clobbered. The text paths
+  (`finishEnrichment.ts`) read from disk and use `updateNoteIfUnchanged`; mirror them.
 
 ## Deferred to v0.3
 
