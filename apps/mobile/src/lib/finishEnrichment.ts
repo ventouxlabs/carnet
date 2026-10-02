@@ -33,6 +33,7 @@ import {
   getModificationTime,
   listPairedBinaries,
   readNote,
+  stripInjectedAttachments,
   type AttachmentRef,
 } from "./writer";
 
@@ -52,6 +53,16 @@ function attachmentsFromBody(body: string): AttachmentRef[] {
     rel: b.rel,
     filename: b.filename,
   }));
+}
+
+/**
+ * The text a model is shown: the body without its frontmatter, and without the
+ * attachment lines the write re-injects from attachmentsFromBody. A reply that
+ * drops those lines would otherwise trip a Note's line guard and cost the
+ * capture its checkboxes, for lines that come back regardless.
+ */
+function enrichmentText(source: string): string {
+  return stripInjectedAttachments(stripFrontmatter(source)).trim();
 }
 
 /**
@@ -133,10 +144,10 @@ export async function finishPendingEnrichment(input: {
     }
 
     // The raw note's body IS the user's original text — buildRawIdeaMarkdown
-    // writes it verbatim beneath the frontmatter, so no reconstruction is
-    // needed. Tags and location the user set at capture are preserved and
-    // re-merged by applyEnrichedIdea.
-    const text = stripFrontmatter(source).trim();
+    // writes it verbatim beneath the frontmatter, plus the attachment lines
+    // enrichmentText takes back out. Tags and location the user set at capture
+    // are preserved and re-merged by applyEnrichedIdea.
+    const text = enrichmentText(source);
     if (!text) {
       return { kind: "failed", reason: "This note has no text to enrich." };
     }
@@ -248,7 +259,7 @@ export async function reEnrichNoteInPlace(input: {
       };
     }
 
-    const text = stripFrontmatter(source).trim();
+    const text = enrichmentText(source);
     if (!text) {
       return { kind: "failed", reason: "This note has no text to enrich." };
     }

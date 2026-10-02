@@ -94,10 +94,11 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   Auto) stays idea-only. Plan: `.claude/PRPs/plans/note-capture-mode.plan.md`.
   A line guard enforces "never expand" in code: if a reply drops, rewords, adds or
   re-orders a line, the note keeps the model's title/tags over the user's own lines.
-  Follow-up (non-blocking, predates the guard): Finish/Re-enrich still send a note's
-  image-embed and `## Files` lines to the model, though they are re-added afterwards; a
-  reply that drops them trips the fallback and the note loses its checkboxes. Strip the
-  attachment lines from the enrichment input first (all re-enrichable modes).
+  Fixed follow-up: Finish/Re-enrich used to send a note's image-embed and `## Files`
+  lines to the model, though they are re-added afterwards, so a reply that dropped them
+  tripped the fallback and the note lost its checkboxes. The enrichment input now goes
+  through `stripInjectedAttachments` (`writerMarkdown.ts`, the inverse of
+  `injectAttachments`) in every re-enrichable mode.
   Known limitation: the `injectImageEmbed` fix stops *new* files from getting an image
   embed above their frontmatter, but doesn't repair ones v0.11.0 already wrote. A raw Idea
   with a photo whose enrichment failed still starts with `![](…)`, so `isPendingEnrich`

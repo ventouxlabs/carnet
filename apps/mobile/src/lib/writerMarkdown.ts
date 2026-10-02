@@ -159,6 +159,74 @@ export function injectAttachments(
   return md;
 }
 
+/** A line that is solely a paired-binary embed or link — the shape
+ * injectAttachments writes. The filename class is listPairedBinaries' own
+ * (`[^/\s)]+`), so every line this matches is one attachmentsFromBody will
+ * re-inject. Matched against the trimmed line. */
+const INJECTED_ATTACHMENT_LINE = /^!?\[[^\]]*\]\(\.\.\/(?:Photos|Audio|Files)\/[^/\s)]+\)$/;
+
+const isBlankLine = (line: string): boolean => line.trim().length === 0;
+
+/** Indices of the lines stripInjectedAttachments removes: every attachment
+ * line, plus a `## Files` heading whose section held nothing else. The section
+ * ends at the next H1/H2 — upsertSection's boundary. */
+function injectedLineIndices(lines: readonly string[]): Set<number> {
+  const drop = new Set<number>();
+  lines.forEach((line, i) => {
+    if (INJECTED_ATTACHMENT_LINE.test(line.trim())) drop.add(i);
+  });
+  lines.forEach((line, i) => {
+    const heading = line.replace(/\r$/, "");
+    if (heading !== "## Files" && heading !== "## File") return;
+    let content = 0;
+    let onlyAttachments = true;
+    for (let j = i + 1; j < lines.length && !/^##? /.test(lines[j]); j++) {
+      if (isBlankLine(lines[j])) continue;
+      content++;
+      if (!drop.has(j)) onlyAttachments = false;
+    }
+    if (content > 0 && onlyAttachments) drop.add(i);
+  });
+  return drop;
+}
+
+/**
+ * The inverse of injectAttachments: remove the attachment embeds/links (and a
+ * `## Files` heading left with nothing under it) from a note body.
+ *
+ * Finish enrichment and Re-enrich hand the on-disk body to a model and then
+ * re-inject the note's attachments themselves. Leaving the lines in means the
+ * model sees them too — and a reply that drops them trips the note line guard,
+ * which then falls back and loses the capture's checkboxes. With them stripped,
+ * the model sees what it saw at capture time.
+ *
+ * Removes only whole lines it can re-create; an inline link mid-sentence, a
+ * remote image, `## Places` and any prose under `## Files` stay. A removed line
+ * takes the blank run after it along when a blank (or the top) sits before it,
+ * so no gap is doubled and adjacent paragraphs never merge. If removal reaches
+ * the end, the body ends with a single line break, as upsertSection leaves it.
+ */
+export function stripInjectedAttachments(body: string): string {
+  const lines = body.split("\n");
+  const drop = injectedLineIndices(lines);
+  if (drop.size === 0) return body;
+  const out: string[] = [];
+  let lastKept = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (!drop.has(i)) {
+      out.push(lines[i]);
+      if (!isBlankLine(lines[i])) lastKept = i;
+      continue;
+    }
+    if (out.length === 0 || isBlankLine(out[out.length - 1])) {
+      while (i + 1 < lines.length && !drop.has(i + 1) && isBlankLine(lines[i + 1])) i++;
+    }
+  }
+  if (Math.max(...drop) < lastKept) return out.join("\n");
+  while (out.length > 0 && isBlankLine(out[out.length - 1])) out.pop();
+  return out.length > 0 && body.endsWith("\n") ? `${out.join("\n")}\n` : out.join("\n");
+}
+
 /** A named place attached to a capture: a display name plus the coordinates it
  * resolved to (from a Maps link or forward geocoding). Distinct from the
  * `location` frontmatter field, which is one day-file-scoped GPS scalar —

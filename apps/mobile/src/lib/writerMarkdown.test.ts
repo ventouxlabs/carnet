@@ -5,9 +5,11 @@ import {
   injectImageEmbed,
   injectAttachments,
   injectPlaces,
+  stripInjectedAttachments,
   type AttachmentRef,
   type Place,
 } from "./writerMarkdown";
+import { splitFrontmatter } from "./frontmatter";
 
 // ── injectImageEmbed ──────────────────────────────────────────────────────────
 
@@ -157,6 +159,67 @@ describe("injectAttachments", () => {
     expect(out.indexOf("![](../Photos/a.jpg)")).toBeLessThan(
       out.indexOf("## Files"),
     );
+  });
+});
+
+// ── stripInjectedAttachments ──────────────────────────────────────────────────
+
+describe("stripInjectedAttachments", () => {
+  const FM = "---\ncreated: 2026-10-02\nstatus: pending-enrich\n---\n";
+  const REFS: AttachmentRef[] = [
+    { kind: "image", rel: "../Photos/a.jpg", filename: "a.jpg" },
+    { kind: "image", rel: "../Photos/b.jpg", filename: "b.jpg" },
+    { kind: "file", rel: "../Files/spec.pdf", filename: "spec.pdf" },
+  ];
+  /** What injectAttachments did to `body`, read back the way Finish/Re-enrich
+   * read a note: frontmatter off, body only. */
+  const injectedBody = (body: string): string =>
+    splitFrontmatter(injectAttachments(FM + body, REFS)).body;
+
+  it("undoes injectAttachments on a raw save-first body (no H1)", () => {
+    const raw = "Errands for Saturday\n- [ ] buy milk\nthe ferns need water\n";
+    expect(injectedBody(raw)).toContain("![](../Photos/a.jpg)");
+    expect(stripInjectedAttachments(injectedBody(raw))).toBe(raw);
+  });
+
+  it("undoes injectAttachments on an enriched body (H1, then a blank line)", () => {
+    const enriched = "# Errands\n\nSaturday.\n\n- [ ] buy milk\n";
+    expect(stripInjectedAttachments(injectedBody(enriched))).toBe(enriched);
+  });
+
+  it("leaves a body with nothing app-owned in it byte-identical", () => {
+    const body = [
+      "# Trip",
+      "",
+      "![](https://example.com/remote.png)",
+      "",
+      "See [the spec](../Files/spec.pdf) before Monday.",
+      "",
+      "## Files",
+      "",
+      "Scans are still on the laptop.",
+      "",
+      "## Places",
+      "",
+      "[Gare de Lyon](geo:48.84430,2.37350)",
+      "",
+    ].join("\n");
+    expect(stripInjectedAttachments(body)).toBe(body);
+  });
+
+  it("drops the links from a Files section that has prose, but keeps the heading and prose", () => {
+    const body = "Body.\n\n## Files\n\nScans are on the laptop.\n\n[spec.pdf](../Files/spec.pdf)\n";
+    expect(stripInjectedAttachments(body)).toBe("Body.\n\n## Files\n\nScans are on the laptop.\n");
+  });
+
+  it("drops an embed the user moved mid-text without merging the lines around it", () => {
+    const body = "First paragraph.\n\n![](../Photos/a.jpg)\n\nSecond paragraph.\n";
+    expect(stripInjectedAttachments(body)).toBe("First paragraph.\n\nSecond paragraph.\n");
+  });
+
+  it("handles a CRLF body synced from a Windows workstation", () => {
+    const body = "![](../Photos/a.jpg)\r\n\r\nHello\r\n\r\n## Files\r\n\r\n[spec.pdf](../Files/spec.pdf)\r\n";
+    expect(stripInjectedAttachments(body)).toBe("Hello\r\n");
   });
 });
 
