@@ -107,11 +107,14 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   `## Files\r` heading isn't found, so a second section is appended; a filename with a
   space yields a broken link (`[^/\s)]+` stops at the space); `injectImageEmbed` takes a
   `# comment` inside a code fence for the title.
-  Known limitation: the `injectImageEmbed` fix stops *new* files from getting an image
-  embed above their frontmatter, but doesn't repair ones v0.11.0 already wrote. A raw Idea
-  with a photo whose enrichment failed still starts with `![](…)`, so `isPendingEnrich`
-  refuses it and "Finish enrichment" is unavailable. Follow-up: detect/repair that shape
-  (move a leading embed below the frontmatter) on read or via a one-shot sweep.
+  Fixed follow-up: files v0.11.0 already wrote with an image embed above their
+  frontmatter (and, when the capture had tags or a location, a second prepended block
+  holding them) are repaired on read by `lib/legacyEmbedRepair.ts`. `isPendingEnrich`,
+  Finish enrichment and Re-enrich read through it, so "Finish enrichment" is offered again
+  and keeps the note's tags and location; the enriched write is what rewrites the file —
+  there is deliberately no vault sweep. Not covered: the Journal day-file leak, and every
+  other reader (index, cards, Search) still sees such a file as broken until it is
+  enriched.
 
 ## Security follow-ups (from the note-capture review, 2026-09-29) — resolved
 

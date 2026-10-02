@@ -3,11 +3,11 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./writer", async () => ({
+vi.mock("./writer", async () => {
   // The real pure splicer — it is what decides what the model is shown.
-  stripInjectedAttachments: (
-    await vi.importActual<typeof import("./writerMarkdown")>("./writerMarkdown")
-  ).stripInjectedAttachments,
+  const md = await vi.importActual<typeof import("./writerMarkdown")>("./writerMarkdown");
+  return {
+  stripInjectedAttachments: md.stripInjectedAttachments,
   getModificationTime: vi.fn(async () => 1000),
   readNote: vi.fn(async () => {
     throw new Error("not stubbed");
@@ -26,7 +26,8 @@ vi.mock("./writer", async () => ({
     }
     return out;
   }),
-}));
+  };
+});
 // Fully mocked, not importActual: the real module reaches expo-modules-core,
 // which needs a React Native runtime (`__DEV__`). Same approach as
 // enhanceProse.test.ts's dispatcher mock.
@@ -83,6 +84,60 @@ describe("isPendingEnrich", () => {
 
   it("is false for a note with no frontmatter at all", () => {
     expect(isPendingEnrich("just prose")).toBe(false);
+  });
+
+  it("detects a raw capture v0.11.0 wrote with its photo embed above the frontmatter", () => {
+    expect(isPendingEnrich(V011_PENDING_WITH_PHOTO)).toBe(true);
+    // The no-tags variant: just the embed on top.
+    expect(isPendingEnrich(`![](../Photos/sketch.png)\n\n${PENDING}`)).toBe(true);
+  });
+});
+
+/** A raw Idea with a photo and tags as v0.11.0 wrote it: its body had no H1,
+ * so the embed landed on top of the file, and the tag/location merges then
+ * prepended a block of their own (legacyEmbedRepair.ts). */
+const V011_PENDING_WITH_PHOTO = `---
+tags: [travel]
+location: 47.20114,10.11660
+---
+![](../Photos/sketch.png)
+
+---
+created: 2026-08-08T13:54:22.852Z
+status: pending-enrich
+rev: r1
+---
+Stroudsburg Pennsylvania and the Pocono Mountains region.
+`;
+
+describe("a v0.11.0 note with its embed above the frontmatter", () => {
+  it("finishes enrichment with the note's tags, location, text and photo", async () => {
+    mockReadNote.mockResolvedValue(V011_PENDING_WITH_PHOTO);
+    const out = await finishPendingEnrichment({ body: V011_PENDING_WITH_PHOTO, filepath: "f.md" });
+    expect(out.kind).toBe("updated");
+    const arg = mockEnrich.mock.calls[0][0];
+    expect(arg.tags).toEqual(["travel"]);
+    expect(arg.location).toBe("47.20114,10.11660");
+    expect(arg.text).toBe("Stroudsburg Pennsylvania and the Pocono Mountains region.");
+    expect(arg.attachments).toEqual([
+      { kind: "image", rel: "../Photos/sketch.png", filename: "sketch.png" },
+    ]);
+    // The fields to carry come from the repaired note; the conflict guard
+    // compares against the bytes actually on disk, or it reports a phantom
+    // conflict and the repair never lands.
+    expect(arg.preserveFrontmatterFrom?.startsWith("---\n")).toBe(true);
+    expect(arg.expectedContent).toBe(V011_PENDING_WITH_PHOTO);
+  });
+
+  it("re-enriches with the note's tags and location", async () => {
+    const enrichedV011 = `---\ntags: [travel]\nlocation: 47.20114,10.11660\n---\n![](../Photos/sketch.png)\n\n${ENRICHED.replace("tags: [travel]\nlocation: 47.20114,10.11660\n", "")}`;
+    mockReadNote.mockResolvedValue(enrichedV011);
+    await reEnrichNoteInPlace({ body: enrichedV011, filepath: "f.md", mode: "idea" });
+    const arg = mockEnrich.mock.calls[0][0];
+    expect(arg.tags).toEqual(["travel"]);
+    expect(arg.location).toBe("47.20114,10.11660");
+    expect(arg.text).toBe("Stroudsburg Pennsylvania and the Pocono Mountains region.");
+    expect(arg.expectedContent).toBe(enrichedV011);
   });
 });
 

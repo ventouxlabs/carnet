@@ -7,7 +7,8 @@
  *   npm -w @carnet/mobile exec vitest run test/fixtures/repro.test.ts
  *
  * Fixtures live in ./vault (real-shaped notes: Idea, Idea w/ unicode title,
- * Journal same-day pair, Person) and ./omniroute (canned chat-completion
+ * Journal same-day pair, Person, a v0.11.0 Idea with its photo embed above
+ * the frontmatter) and ./omniroute (canned chat-completion
  * JSON: well-formed, malformed frontmatter, oversized). Each `describe`
  * below documents which historical bug class it reproduces and asserts the
  * current (fixed) behavior — a regression turns the matching test red.
@@ -123,7 +124,8 @@ import {
   writeNote,
   writePerson,
 } from "../../src/lib/writer";
-import { getFrontmatterTags } from "../../src/lib/frontmatter";
+import { extractFrontmatterField, getFrontmatterTags, splitFrontmatter } from "../../src/lib/frontmatter";
+import { repairEmbedsAboveFrontmatter } from "../../src/lib/legacyEmbedRepair";
 import { sanitizeAndNormalize } from "../../src/lib/enrichSanitize";
 import { extractChecklistLines } from "../../src/lib/checklist";
 import { keepsUserLines } from "../../src/lib/noteLineGuard";
@@ -327,5 +329,27 @@ describe("repro: note capture keeps every line (note-tasklist.json)", () => {
       "buy stamps",
       "renew passport",
     ]);
+  });
+});
+
+// v0.11.0's injectImageEmbed put a photo embed ABOVE the frontmatter of a raw
+// Idea with no H1, and the tag/location merges then prepended a second block.
+// The note's status was unreadable, so "Finish enrichment" was never offered.
+// finishEnrichment.ts reads every note through this repair.
+
+describe("repro: v0.11.0 embed above the frontmatter (idea-v0110-embed-above-frontmatter.md)", () => {
+  it("reads back as one pending note with its tags, location, photo and text", () => {
+    const onDisk = readVaultFixture("idea-v0110-embed-above-frontmatter.md");
+    // The bug: the first block is the merges' leftovers, so no status.
+    expect(extractFrontmatterField(onDisk, "status")).toBeNull();
+
+    const repaired = repairEmbedsAboveFrontmatter(onDisk);
+    expect(extractFrontmatterField(repaired, "status")).toBe("pending-enrich");
+    expect(extractFrontmatterField(repaired, "rev")).toBe("9f2c1a7e");
+    expect(extractFrontmatterField(repaired, "location")).toBe("48.85660,2.35220");
+    expect(getFrontmatterTags(repaired)).toEqual(["garden", "weekend"]);
+    expect(splitFrontmatter(repaired).body).toBe(
+      "![](../Photos/receipt-0920.jpg)\n\nthe ferns need water\n- [ ] buy compost\n",
+    );
   });
 });

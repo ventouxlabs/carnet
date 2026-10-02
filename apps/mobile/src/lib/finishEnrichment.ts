@@ -26,6 +26,7 @@
 import { extractFrontmatterField, getFrontmatterTags, isSynthesisNote, stripFrontmatter } from "./frontmatter";
 import { enrichIdeaInPlace, PENDING_ENRICH_STATUS, type EnrichIdeaOutcome } from "./ideaSaveFirst";
 import { enrichPersonInPlace, type EnrichInPlaceOutcome } from "./personInPlace";
+import { repairEmbedsAboveFrontmatter } from "./legacyEmbedRepair";
 import { isSaveFirstTextMode } from "./saveFirstRouting";
 import type { CaptureMode } from "./storage";
 import type { VaultContext } from "./vaultContext";
@@ -97,9 +98,15 @@ export function isReEnrichableMode(mode: CaptureMode): mode is ReEnrichableMode 
   return (RE_ENRICHABLE_MODES as readonly CaptureMode[]).includes(mode);
 }
 
-/** True when this note is a raw save-first capture still awaiting enrichment. */
+/** True when this note is a raw save-first capture still awaiting enrichment.
+ * Reads through repairEmbedsAboveFrontmatter: a raw Idea with a photo that
+ * v0.11.0 wrote has its embed above the frontmatter, and without the repair
+ * its status is unreadable and "Finish enrichment" is never offered. */
 export function isPendingEnrich(body: string): boolean {
-  return extractFrontmatterField(body, "status") === PENDING_ENRICH_STATUS;
+  return (
+    extractFrontmatterField(repairEmbedsAboveFrontmatter(body), "status") ===
+    PENDING_ENRICH_STATUS
+  );
 }
 
 /**
@@ -135,6 +142,10 @@ export async function finishPendingEnrichment(input: {
       // Unreadable: fall back to the caller's snapshot rather than refusing.
       // The mtime guard still protects the write.
     }
+    // Everything below reads the repaired note, so a v0.11.0 file keeps its
+    // tags and location; expectedContent stays the bytes on disk, and the
+    // enriched write is what repairs the file.
+    source = repairEmbedsAboveFrontmatter(source);
 
     if (!isPendingEnrich(source)) {
       return {
@@ -248,6 +259,8 @@ export async function reEnrichNoteInPlace(input: {
       // Unreadable: fall back to the caller's snapshot rather than refusing.
       // The mtime guard still protects the write.
     }
+    // See finishPendingEnrichment.
+    source = repairEmbedsAboveFrontmatter(source);
 
     if (isSynthesisNote(source)) {
       // RecentDetail gates on isSynthesisNote(body), but body is "" until the
