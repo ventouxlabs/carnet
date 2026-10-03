@@ -3,17 +3,18 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./writer", () => ({
-  readPairedBinaryFromNote: vi.fn(),
-  updateNote: vi.fn(async () => {}),
-  // Real-shape pure splicers so the assertions on the written body are meaningful.
-  injectImageEmbed: vi.fn(
-    (md: string, rel: string) => `![](${rel})\n\n${md}`,
-  ),
-  upsertSection: vi.fn(
-    (md: string, heading: string, body: string) => `${md}\n\n## ${heading}\n\n${body}\n`,
-  ),
-}));
+vi.mock("./writer", async () => {
+  // The real pure splicers, so the assertions on the written body are
+  // meaningful — a stand-in that puts the embed on top would hide exactly the
+  // frontmatter ordering these tests pin.
+  const md = await vi.importActual<typeof import("./writerMarkdown")>("./writerMarkdown");
+  return {
+    readPairedBinaryFromNote: vi.fn(),
+    updateNote: vi.fn(async () => {}),
+    injectImageEmbed: md.injectImageEmbed,
+    upsertSection: md.upsertSection,
+  };
+});
 vi.mock("./dispatcher", () => ({
   enrichSharedImage: vi.fn(),
   transcribeAudio: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("./dispatcher", () => ({
 import { findPairedLink, reEnrichNote, transcribeNote } from "./noteReprocess";
 import { readPairedBinaryFromNote, updateNote } from "./writer";
 import { enrichSharedImage, transcribeAudio } from "./dispatcher";
+import { extractFrontmatterField, getFrontmatterTags, splitFrontmatter } from "./frontmatter";
 
 const mockRead = vi.mocked(readPairedBinaryFromNote);
 const mockUpdateNote = vi.mocked(updateNote);
@@ -66,9 +68,76 @@ describe("reEnrichNote", () => {
     );
     expect(out).toEqual({
       kind: "updated",
-      nextBody: "![](../Photos/pic.jpg)\n\n# Fresh\n\nNew text.\n",
+      nextBody: "# Fresh\n\n![](../Photos/pic.jpg)\n\nNew text.\n",
     });
     expect(mockUpdateNote).toHaveBeenCalledWith("f.md", out.kind === "updated" && out.nextBody);
+  });
+
+  // A photo note's frontmatter holds things the vision prompt never sees: where
+  // it was taken, the Karakeep bookmark it was exported to, hand-added fields,
+  // and the user's own tags. Losing karakeepId means the next "Send to
+  // Karakeep" creates a duplicate bookmark instead of updating the first.
+  const PHOTO_NOTE =
+    "---\ncreated: 2026-09-01\nkind: screenshot\ntags: [garden, ferns]\n" +
+    "location: 48.85660, 2.35220\nkarakeepId: kk_123\nproject: allotment\n---\n" +
+    "# Old\n\n![](../Photos/pic.jpg)\n\nOld text.\n";
+
+  async function reEnrichPhotoNoteWith(reply: string): Promise<string> {
+    mockRead.mockResolvedValue({ base64: "AAA", mime: "image/jpeg" });
+    mockEnrich.mockResolvedValue({ markdown: reply } as never);
+    const out = await reEnrichNote({ body: PHOTO_NOTE, filepath: "f.md" });
+    if (out.kind !== "updated") throw new Error(`expected updated, got ${JSON.stringify(out)}`);
+    expect(mockUpdateNote).toHaveBeenCalledWith("f.md", out.nextBody);
+    return out.nextBody;
+  }
+
+  it("keeps the note's own frontmatter fields the model's reply lacks", async () => {
+    const next = await reEnrichPhotoNoteWith(
+      "---\ncreated: 2026-10-02\nkind: photo\ntags: [plants]\n---\n# Fresh\n\nNew text.\n",
+    );
+    expect(extractFrontmatterField(next, "location")).toBe("48.85660, 2.35220");
+    expect(extractFrontmatterField(next, "karakeepId")).toBe("kk_123");
+    expect(extractFrontmatterField(next, "project")).toBe("allotment");
+    // The model's own fresh tags are merged with the user's, not replaced.
+    expect([...getFrontmatterTags(next)].sort()).toEqual(["ferns", "garden", "plants"]);
+    // A value the model did provide beats the carried one.
+    expect(extractFrontmatterField(next, "kind")).toBe("photo");
+    expect(splitFrontmatter(next).body).toBe("# Fresh\n\n![](../Photos/pic.jpg)\n\nNew text.\n");
+  });
+
+  it("keeps the frontmatter and puts the embed below it when the reply has no H1", async () => {
+    const next = await reEnrichPhotoNoteWith(
+      "---\ncreated: 2026-10-02\nkind: photo\ntags: []\n---\nJust a caption.\n",
+    );
+    expect(next.startsWith("---\n")).toBe(true);
+    expect(extractFrontmatterField(next, "karakeepId")).toBe("kk_123");
+    expect(extractFrontmatterField(next, "location")).toBe("48.85660, 2.35220");
+    expect([...getFrontmatterTags(next)].sort()).toEqual(["ferns", "garden"]);
+    expect(splitFrontmatter(next).body).toBe("![](../Photos/pic.jpg)\n\nJust a caption.\n");
+  });
+
+  it("clears the markers that described the OLD reply", async () => {
+    // `fallback` names the provider that wrote the previous reply (re-enrich is
+    // how the "via relais" chip goes away) and `enhanced` vouches for a body
+    // this reply replaced. Neither may ride along onto the fresh one.
+    mockRead.mockResolvedValue({ base64: "AAA", mime: "image/jpeg" });
+    mockEnrich.mockResolvedValue({
+      markdown: "---\ncreated: 2026-10-02\nkind: photo\ntags: []\n---\n# Fresh\n",
+    } as never);
+    const body = PHOTO_NOTE.replace("project:", "fallback: relais\nenhanced: 2026-09-20\nproject:");
+    const out = await reEnrichNote({ body, filepath: "f.md" });
+    if (out.kind !== "updated") throw new Error("expected updated");
+    expect(extractFrontmatterField(out.nextBody, "fallback")).toBeNull();
+    expect(extractFrontmatterField(out.nextBody, "enhanced")).toBeNull();
+    expect(extractFrontmatterField(out.nextBody, "project")).toBe("allotment");
+  });
+
+  it("does not double the embed when the model echoes it", async () => {
+    const next = await reEnrichPhotoNoteWith(
+      "---\ncreated: 2026-10-02\nkind: photo\ntags: []\n---\n# Fresh\n\n![](../Photos/pic.jpg)\n\nNew text.\n",
+    );
+    expect(next.split("![](../Photos/pic.jpg)")).toHaveLength(2);
+    expect(extractFrontmatterField(next, "karakeepId")).toBe("kk_123");
   });
 
   it("fails cleanly when there is no paired image (no read, no write)", async () => {

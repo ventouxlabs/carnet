@@ -229,11 +229,27 @@ Review round (independent code + security review, 2026-09-30):
 - [x] **Dataview evaluates whole code BLOCKS too** — resolved by `4e3cde0` (see above).
   Dataview's default `inlineQueriesInCodeblocks: true` evaluates a code block whose
   trimmed text starts with `=` (or `$=` with `enableInlineDataviewJs`).
-- [ ] **Image re-enrich drops app-owned frontmatter** (pre-existing, logged by the review,
-  not fixed) — `noteReprocess.ts` (~:69-77) writes `injectImageEmbed(result.markdown, …)`
-  over the whole note, with no `preserveFrontmatterFields`, so re-enriching a photo note
-  loses its `location` and `karakeepId` (and anything else not in the model's reply).
-  Mirror `personInPlace.ts`/`ideaSaveFirst.ts`, which carry the original's fields across.
+- [x] **Image re-enrich drops app-owned frontmatter** — fixed: `noteReprocess.reEnrichNote`
+  now carries the note's own frontmatter onto the model's reply
+  (`preserveFrontmatterFields`, `tags` excluded) and merges the user's tags back, in
+  `personInPlace.ts`'s order. A re-enriched photo note keeps `location`, `karakeepId` (so
+  the next Karakeep export updates its bookmark instead of duplicating it) and hand-added
+  fields. The `fallback` provider marker and the `enhanced` stamp are deliberately NOT
+  carried: they describe the reply being replaced.
+- [ ] **Text re-enrich carries `fallback`/`enhanced` forward** (pre-existing, found by the
+  review of the item above) — `reEnrichNoteInPlace` hands the old note to
+  `preserveFrontmatterFields` for Idea/Note (`ideaSaveFirst.ts` `NEVER_PRESERVED_FIELDS`)
+  and Person (`personInPlace.ts`, excludes only `tags`), so re-enriching on the primary
+  provider leaves the "via relais" chip and a stale `enhanced` stamp behind. Add both
+  fields to those exclusion lists.
+- [ ] **Re-enrich resets `created` to today** (pre-existing, every re-enrich path) — the
+  prompts hardcode `created: ${today}` (`prompts.ts`), and the model's value beats the
+  carried one, so re-enriching an old note re-dates it. Keep the original `created`.
+- [ ] **Image re-enrich has no conflict guard** (pre-existing, found while fixing the item
+  above) — `reEnrichNote` overwrites with `updateNote`, built from the screen's snapshot
+  of the body, with no baseline-before-the-call mtime/content check. A Syncthing write or
+  WYSIWYG edit landing during the vision call is clobbered. The text paths
+  (`finishEnrichment.ts`) read from disk and use `updateNoteIfUnchanged`; mirror them.
 
 ## Deferred to v0.3
 

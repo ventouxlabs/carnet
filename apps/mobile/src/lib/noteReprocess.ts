@@ -18,6 +18,8 @@ import {
 } from "./writer";
 import { enrichSharedImage } from "./dispatcher";
 import { transcribeAudio } from "./dispatcher";
+import { getFrontmatterTags, preserveFrontmatterFields } from "./frontmatter";
+import { mergeUserTags } from "./tags";
 import type { VaultContext } from "./vaultContext";
 import type { Root } from "./vaultRoot";
 
@@ -31,6 +33,17 @@ export function findPairedLink(body: string, subdir: string): string | null {
   const match = body.match(new RegExp(`\\.\\./${subdir}/([^/\\s)]+)`));
   return match ? match[1] : null;
 }
+
+/** Fields the old note carries that must not outlive a fresh vision reply.
+ *
+ * `tags` belongs to mergeUserTags: preserving it first would overwrite the
+ * model's fresh tags before the merge sees them. `fallback`
+ * (dispatcher.ts FALLBACK_PROVIDER_FIELD) names the provider that wrote the
+ * OLD reply — re-enrich is how a user clears the "via relais" chip — and
+ * `enhanced` (enhanceProse.ts ENHANCED_FIELD) vouches for a body this reply
+ * replaced. Literals, not imports: dispatcher is mocked in the tests, and an
+ * undefined entry would silently exclude nothing. */
+const REPROCESS_OWNED_FIELDS = ["tags", "fallback", "enhanced"] as const;
 
 /**
  * Outcome of a re-enrich / transcribe attempt:
@@ -47,6 +60,11 @@ export type ReprocessOutcome =
  * the fresh result (the original image embed is re-injected). Re-enrich uses an
  * empty context — the original context-at-capture isn't recoverable from the
  * saved markdown without a brittle parse.
+ *
+ * The model sees only the image, so the note's own frontmatter (`location`,
+ * `karakeepId`, hand-added fields, the user's tags) is carried onto its reply —
+ * the same preserve → attachments → tags order as personInPlace.ts. Dropping
+ * `karakeepId` would turn the next Karakeep export into a duplicate bookmark.
  */
 export async function reEnrichNote(input: {
   body: string;
@@ -70,12 +88,15 @@ export async function reEnrichNote(input: {
       { base64, mimeType: mime, context: "" },
       { vaultContext: input.vaultContext },
     );
-    const withImage = injectImageEmbed(
+    const preserved = preserveFrontmatterFields(
       result.markdown,
-      `../Photos/${imageFilename}`,
+      input.body,
+      REPROCESS_OWNED_FIELDS,
     );
-    await updateNote(input.filepath, withImage);
-    return { kind: "updated", nextBody: withImage };
+    const withImage = injectImageEmbed(preserved, `../Photos/${imageFilename}`);
+    const next = mergeUserTags(withImage, getFrontmatterTags(input.body));
+    await updateNote(input.filepath, next);
+    return { kind: "updated", nextBody: next };
   } catch (e: unknown) {
     const reason = e instanceof Error ? e.message : String(e);
     console.warn("[RecentDetail] re-enrich failed:", reason);
