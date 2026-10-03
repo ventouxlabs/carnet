@@ -94,10 +94,19 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   Auto) stays idea-only. Plan: `.claude/PRPs/plans/note-capture-mode.plan.md`.
   A line guard enforces "never expand" in code: if a reply drops, rewords, adds or
   re-orders a line, the note keeps the model's title/tags over the user's own lines.
-  Follow-up (non-blocking, predates the guard): Finish/Re-enrich still send a note's
-  image-embed and `## Files` lines to the model, though they are re-added afterwards; a
-  reply that drops them trips the fallback and the note loses its checkboxes. Strip the
-  attachment lines from the enrichment input first (all re-enrichable modes).
+  Fixed follow-up: Finish/Re-enrich used to send a note's image-embed and `## Files`
+  lines to the model, though they are re-added afterwards, so a reply that dropped them
+  tripped the fallback and the note lost its checkboxes. The enrichment input now goes
+  through `stripInjectedAttachments` (`writerMarkdown.ts`, the inverse of
+  `injectAttachments`) in every re-enrichable mode. It removes only the exact lines in
+  the exact places injection writes them (bare `../Photos/` embeds under the first H1 or
+  at the top, a trailing `## Files` section of `[name](../Files/name)` links), so a line
+  carrying the user's own words is never hidden from the model or the guard.
+  Pre-existing re-injection edge cases the review found, not fixed: `upsertSection`
+  replaces any prose the user wrote under `## Files` on every enrichment; a CRLF
+  `## Files\r` heading isn't found, so a second section is appended; a filename with a
+  space yields a broken link (`[^/\s)]+` stops at the space); `injectImageEmbed` takes a
+  `# comment` inside a code fence for the title.
   Known limitation: the `injectImageEmbed` fix stops *new* files from getting an image
   embed above their frontmatter, but doesn't repair ones v0.11.0 already wrote. A raw Idea
   with a photo whose enrichment failed still starts with `![](…)`, so `isPendingEnrich`

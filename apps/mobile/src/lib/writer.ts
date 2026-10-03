@@ -736,6 +736,7 @@ export {
   injectImageEmbed,
   injectAttachments,
   injectPlaces,
+  stripInjectedAttachments,
   type AttachmentRef,
   type Place,
 } from "./writerMarkdown";

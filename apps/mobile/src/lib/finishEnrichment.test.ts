@@ -3,7 +3,11 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./writer", () => ({
+vi.mock("./writer", async () => ({
+  // The real pure splicer — it is what decides what the model is shown.
+  stripInjectedAttachments: (
+    await vi.importActual<typeof import("./writerMarkdown")>("./writerMarkdown")
+  ).stripInjectedAttachments,
   getModificationTime: vi.fn(async () => 1000),
   readNote: vi.fn(async () => {
     throw new Error("not stubbed");
@@ -43,6 +47,8 @@ import {
 import { getModificationTime, readNote } from "./writer";
 import { enrichIdeaInPlace } from "./ideaSaveFirst";
 import { enrichPersonInPlace } from "./personInPlace";
+import { keepsUserLines } from "./noteLineGuard";
+import { splitFrontmatter } from "./frontmatter";
 
 const mockMtime = vi.mocked(getModificationTime);
 const mockReadNote = vi.mocked(readNote);
@@ -115,6 +121,28 @@ describe("finishPendingEnrichment", () => {
     expect(mockEnrich.mock.calls[0][0].attachments).toEqual([
       { kind: "image", rel: "../Photos/sketch.png", filename: "sketch.png" },
     ]);
+  });
+
+  it("shows the model the raw text without the attachment lines it re-injects", async () => {
+    const pendingWithAttachments =
+      PENDING.replace("Stroudsburg", "![](../Photos/sketch.png)\n\nStroudsburg") +
+      "\n## Files\n\n[spec.pdf](../Files/spec.pdf)\n";
+    mockReadNote.mockResolvedValue(pendingWithAttachments);
+    await finishPendingEnrichment({ body: pendingWithAttachments, filepath: "f.md" });
+    const arg = mockEnrich.mock.calls[0][0];
+    expect(arg.text).toBe("Stroudsburg Pennsylvania and the Pocono Mountains region.");
+    expect(arg.attachments).toHaveLength(2);
+  });
+
+  it("refuses a pending note whose body is nothing but attachments", async () => {
+    const onlyPhoto = PENDING.replace(
+      "Stroudsburg Pennsylvania and the Pocono Mountains region.\n",
+      "![](../Photos/sketch.png)\n",
+    );
+    mockReadNote.mockResolvedValue(onlyPhoto);
+    const out = await finishPendingEnrichment({ body: onlyPhoto, filepath: "f.md" });
+    expect(out).toEqual({ kind: "failed", reason: "This note has no text to enrich." });
+    expect(mockEnrich).not.toHaveBeenCalled();
   });
 
   it("captures the mtime baseline BEFORE the model call", async () => {
@@ -299,6 +327,30 @@ describe("reEnrichNoteInPlace", () => {
     ]);
   });
 
+  it("shows the Idea prompt the note without its attachment lines", async () => {
+    mockReadNote.mockResolvedValue(WITH_ATTACHMENTS);
+    await reEnrichNoteInPlace({ body: WITH_ATTACHMENTS, filepath: "f.md", mode: "idea" });
+    expect(mockEnrich.mock.calls[0][0].text).toBe(
+      "# Pocono notes\n\nStroudsburg Pennsylvania and the Pocono Mountains region.",
+    );
+  });
+
+  it("shows the Person prompt the note without its attachment lines", async () => {
+    mockReadNote.mockResolvedValue(WITH_ATTACHMENTS);
+    await reEnrichNoteInPlace({ body: WITH_ATTACHMENTS, filepath: "p.md", mode: "person" });
+    expect(mockPerson.mock.calls[0][0].ocrResult).toBe(
+      "# Pocono notes\n\nStroudsburg Pennsylvania and the Pocono Mountains region.",
+    );
+  });
+
+  it("refuses a note whose body is nothing but attachments", async () => {
+    const onlyPhoto = "---\nstatus: seedling\n---\n![](../Photos/sketch.png)\n";
+    mockReadNote.mockResolvedValue(onlyPhoto);
+    const out = await reEnrichNoteInPlace({ body: onlyPhoto, filepath: "f.md", mode: "idea" });
+    expect(out).toEqual({ kind: "failed", reason: "This note has no text to enrich." });
+    expect(mockEnrich).not.toHaveBeenCalled();
+  });
+
   it("carries the note's existing attachments back into the Person enrichment", async () => {
     // A Person note's card photo lives in exactly such an embed.
     mockReadNote.mockResolvedValue(WITH_ATTACHMENTS);
@@ -423,6 +475,27 @@ describe("note mode", () => {
     expect(mockReadNote).toHaveBeenCalledWith("s.md");
     expect(mockEnrich).not.toHaveBeenCalled();
     expect(mockPerson).not.toHaveBeenCalled();
+  });
+
+  it("judges a Note reply against the same stripped text the model saw", async () => {
+    // A note with a photo: the reply drops the embed, as a model told to
+    // return the user's lines would. The guard must not fall back over that
+    // (the embed is re-injected afterwards); judged against the unstripped
+    // body, it did, and the capture lost its checkboxes.
+    const withPhoto = CAPTURED_NOTE.replace(
+      "# Weekend errands\n",
+      "# Weekend errands\n\n![](../Photos/receipt.jpg)\n",
+    );
+    mockReadNote.mockResolvedValue(withPhoto);
+    await reEnrichNoteInPlace({ body: withPhoto, filepath: "n.md", mode: "note" });
+    const shown = mockEnrich.mock.calls[0][0].text;
+    expect(shown).toBe("# Weekend errands\n\n- [ ] call the dentist");
+    const reply = "---\ncreated: 2026-09-27\ntags: [errands]\n---\n# Weekend errands\n\n- [ ] call the dentist\n";
+    expect(keepsUserLines(shown, reply)).toBe(true);
+    expect(keepsUserLines(splitFrontmatter(withPhoto).body, reply)).toBe(false);
+    expect(mockEnrich.mock.calls[0][0].attachments).toEqual([
+      { kind: "image", rel: "../Photos/receipt.jpg", filename: "receipt.jpg" },
+    ]);
   });
 
   it("finishes a pending Note with the note prompt", async () => {

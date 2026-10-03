@@ -5,9 +5,11 @@ import {
   injectImageEmbed,
   injectAttachments,
   injectPlaces,
+  stripInjectedAttachments,
   type AttachmentRef,
   type Place,
 } from "./writerMarkdown";
+import { splitFrontmatter } from "./frontmatter";
 
 // ── injectImageEmbed ──────────────────────────────────────────────────────────
 
@@ -157,6 +159,65 @@ describe("injectAttachments", () => {
     expect(out.indexOf("![](../Photos/a.jpg)")).toBeLessThan(
       out.indexOf("## Files"),
     );
+  });
+});
+
+// ── stripInjectedAttachments ──────────────────────────────────────────────────
+
+describe("stripInjectedAttachments", () => {
+  const FM = "---\ncreated: 2026-10-02\nstatus: pending-enrich\n---\n";
+  const REFS: AttachmentRef[] = [
+    { kind: "image", rel: "../Photos/a.jpg", filename: "a.jpg" },
+    { kind: "image", rel: "../Photos/b.jpg", filename: "b.jpg" },
+    { kind: "file", rel: "../Files/spec.pdf", filename: "spec.pdf" },
+  ];
+  /** What injectAttachments did to `body`, read back the way Finish/Re-enrich
+   * read a note: frontmatter off, body only. */
+  const injectedBody = (body: string): string =>
+    splitFrontmatter(injectAttachments(FM + body, REFS)).body;
+
+  it("undoes injectAttachments on a raw save-first body (no H1)", () => {
+    const raw = "Errands for Saturday\n- [ ] buy milk\nthe ferns need water\n";
+    expect(injectedBody(raw)).toContain("![](../Photos/a.jpg)");
+    expect(stripInjectedAttachments(injectedBody(raw))).toBe(raw);
+  });
+
+  it("undoes injectAttachments on an enriched body (H1, then a blank line)", () => {
+    const enriched = "# Errands\n\nSaturday.\n\n- [ ] buy milk\n";
+    expect(stripInjectedAttachments(injectedBody(enriched))).toBe(enriched);
+  });
+
+  it("undoes injectAttachments on a title followed directly by text", () => {
+    const enriched = "# Weekend errands\n- [ ] call the dentist\n";
+    expect(stripInjectedAttachments(injectedBody(enriched))).toBe(enriched);
+  });
+
+  it("undoes injectAttachments when the H1 is not the first line", () => {
+    const body = "Saturday list\n# Errands\n\n- [ ] buy milk\n";
+    expect(stripInjectedAttachments(injectedBody(body))).toBe(body);
+  });
+
+  it("handles a CRLF body synced from a Windows workstation", () => {
+    const body = "\r\n![](../Photos/a.jpg)\r\n\r\nHello\r\n\r\n## Files\r\n\r\n[spec.pdf](../Files/spec.pdf)\r\n";
+    expect(stripInjectedAttachments(body).trim()).toBe("Hello");
+  });
+
+  it.each([
+    [
+      "nothing app-owned",
+      "# Trip\n\n![](https://example.com/remote.png)\n\nSee [the spec](../Files/spec.pdf) before Monday.\n\n## Places\n\n[Gare de Lyon](geo:48.84430,2.37350)\n",
+    ],
+    // The user's own words on the line: stripping it would lose them, since
+    // only the bare `[spec.pdf](…)` form is re-injected.
+    ["a link with the user's own label", "# T\n\n[Read before Monday](../Files/spec.pdf)\n"],
+    ["an embed with alt text", "# T\n\n![Receipt from Saturday](../Photos/a.jpg)\n\nBody.\n"],
+    ["an embed the user moved mid-text", "# T\n\nFirst.\n\n![](../Photos/a.jpg)\n\nSecond.\n"],
+    ["an indented embed", "# T\n\n    ![](../Photos/a.jpg)\n\nBody.\n"],
+    ["a Files link with the user's own label", "Body.\n\n## Files\n\n[Spec, read first](../Files/spec.pdf)\n"],
+    ["a Files section with prose", "Body.\n\n## Files\n\nScans are on the laptop.\n\n[spec.pdf](../Files/spec.pdf)\n"],
+    ["a Files section another section follows", "Body.\n\n## Files\n\n[spec.pdf](../Files/spec.pdf)\n\n## Places\n\n[Home](geo:1,2)\n"],
+  ])("leaves a body with %s byte-identical", (_label, body) => {
+    expect(stripInjectedAttachments(body)).toBe(body);
   });
 });
 
