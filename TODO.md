@@ -177,6 +177,10 @@ stray text. Found on-device 2026-10-03; fixed by `patches/expo-file-system+19.0.
 - [x] **CI source-build evidence** — `8b6ce24` makes the `mobile-android` job assert
   that `:expo-file-system:compileDebugKotlin` ran, proving the patched module was
   compiled from source rather than only checking the `buildFromSource` configuration.
+- [x] **On-device shorter-rewrite verification (2026-10-04)** — a fresh 148-character
+  raw Idea was replaced in rich text with `SAF-short-rewrite-ok`, then saved and
+  reopened containing only `SAF-short-rewrite-ok`. The disposable verification note was
+  archived.
 - [ ] **`"wt"` empties a file before a base64 decode fails** — harmless today (every
   `writeBinaryBytes` caller writes a fresh file); decode before opening the stream if that
   ever changes.
