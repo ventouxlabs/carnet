@@ -165,11 +165,10 @@ SAF vault rewrites didn't truncate, so a shorter rewrite left the old file's tai
 stray text. Found on-device 2026-10-03; fixed by `patches/expo-file-system+19.0.23.patch`
 (`"wt"`) plus building expo-file-system from source (see CLAUDE.md, patches).
 
-- [ ] **Scan existing SAF vaults for stray tails** — notes rewritten shorter before the
-  fix (Note enrichment, Enhance, re-enrich, WYSIWYG deletes) may end in a fragment of
-  their previous version, and the next rewrite now saves it as real content. A repair
-  can't know where the real content ends; a detector (trailing partial line that repeats
-  an earlier line's suffix) plus a manual review is the realistic shape.
+- [x] **Manual scan for existing SAF tails** — Home offers an explicit, read-only scan
+  for a conservative trailing-partial-line heuristic. It lists metadata-only candidates
+  for manual review and never changes or caches a vault; run it in every affected vault.
+  A repair can't know where the real content ends, so Carnet will not attempt one.
 - [ ] **The new `expo-file-system` API is unpatched** — `SAFDocumentFile.kt:74` still
   opens with the default `"w"`. Carnet only uses `expo-file-system/legacy` today;
   patch it (with a `"w"` fallback, since it serves every `content://` provider) before

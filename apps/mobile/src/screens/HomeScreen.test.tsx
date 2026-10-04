@@ -68,6 +68,11 @@ vi.mock("../lib/vault", () => ({
   })),
   refreshNoteIndex: vi.fn(async () => ({ builtAt: 2, notes: [] })),
   resolveNoteEntry: vi.fn(async () => null),
+  scanPossibleSafStaleTails: vi.fn(async () => ({
+    candidates: [],
+    scanned: 0,
+    unreadable: 0,
+  })),
 }));
 vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
 
@@ -119,15 +124,21 @@ import { drainPendingKarakeepExports } from "../lib/pendingSyncRunner";
 import { listNoteFiles, listSyncConflictFiles } from "../lib/writer";
 import { reportColdStart } from "../lib/startupTiming";
 import { refreshActiveVault } from "../lib/vaultRefreshService";
+import { resolveNoteEntry, scanPossibleSafStaleTails } from "../lib/vault";
 
 type ScreenProps = Parameters<typeof HomeScreen>[0];
 
 function makeNavigation() {
+  const listeners = new Map<string, () => void>();
   return {
     setOptions: vi.fn(),
     navigate: vi.fn(),
-    addListener: vi.fn(() => vi.fn()),
+    addListener: vi.fn((event: string, listener: () => void) => {
+      listeners.set(event, listener);
+      return () => listeners.delete(event);
+    }),
     goBack: vi.fn(),
+    emit: (event: string) => listeners.get(event)?.(),
   };
 }
 
@@ -285,6 +296,130 @@ describe("HomeScreen", () => {
     renderScreen();
     await screen.findByText("Jack's Baseball Team");
     expect(screen.queryByText(/sync conflict/)).toBeNull();
+  });
+
+  it("scans historical SAF rewrites only when asked and opens a candidate for manual review", async () => {
+    const { navigation } = renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    expect(scanPossibleSafStaleTails).not.toHaveBeenCalled();
+
+    vi.mocked(scanPossibleSafStaleTails).mockResolvedValueOnce({
+      candidates: [
+        {
+          uri: "file:///v/Ideas/possible-tail.md",
+          name: "possible-tail.md",
+          subdir: "Ideas",
+        },
+      ],
+      scanned: 1,
+      unreadable: 0,
+    });
+    vi.mocked(resolveNoteEntry).mockResolvedValueOnce({
+      id: "tail",
+      mode: "idea",
+      title: "Possible tail",
+      filepath: "file:///v/Ideas/possible-tail.md",
+      createdAt: 0,
+    });
+
+    fireEvent.click(screen.getByText("Scan"));
+    expect(await screen.findByText("Possible leftover text")).toBeTruthy();
+    expect(screen.getByText("Ideas/possible-tail.md")).toBeTruthy();
+    expect(screen.queryByText("distinctive leftover fragment")).toBeNull();
+
+    fireEvent.click(screen.getByText("Open note"));
+    await waitFor(() =>
+      expect(navigation.navigate).toHaveBeenCalledWith("RecentDetail", {
+        entry: expect.objectContaining({ id: "tail" }),
+        vaultContext: { profileId: "default", rootUri: "" },
+      }),
+    );
+  });
+
+  it("clears completed SAF-tail results after a profile switch", async () => {
+    const { navigation } = renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    vi.mocked(scanPossibleSafStaleTails).mockResolvedValueOnce({
+      candidates: [{ uri: "file:///v/Ideas/tail.md", name: "tail.md", subdir: "Ideas" }],
+      scanned: 1,
+      unreadable: 0,
+    });
+
+    fireEvent.click(screen.getByText("Scan"));
+    expect(await screen.findByText("Ideas/tail.md")).toBeTruthy();
+
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    navigation.emit("focus");
+
+    await waitFor(() => expect(screen.queryByText("Ideas/tail.md")).toBeNull());
+    expect(screen.getByText("Check older SAF rewrites for possible leftover text (read-only)")).toBeTruthy();
+  });
+
+  it("does not open a tail candidate after its vault changes during note resolution", async () => {
+    const { navigation } = renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    vi.mocked(scanPossibleSafStaleTails).mockResolvedValueOnce({
+      candidates: [{ uri: "file:///v/Ideas/tail.md", name: "tail.md", subdir: "Ideas" }],
+      scanned: 1,
+      unreadable: 0,
+    });
+    let finishResolve!: (entry: CaptureEntry | null) => void;
+    vi.mocked(resolveNoteEntry).mockImplementationOnce(
+      () => new Promise<CaptureEntry | null>((resolve) => { finishResolve = resolve; }),
+    );
+
+    fireEvent.click(screen.getByText("Scan"));
+    fireEvent.click(await screen.findByText("Open note"));
+    await waitFor(() => expect(resolveNoteEntry).toHaveBeenCalledOnce());
+
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    navigation.emit("focus");
+    await waitFor(() => expect(screen.queryByText("Ideas/tail.md")).toBeNull());
+    finishResolve({
+      id: "tail",
+      mode: "idea",
+      title: "Tail",
+      filepath: "file:///v/Ideas/tail.md",
+      createdAt: 0,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(navigation.navigate).not.toHaveBeenCalledWith(
+      "RecentDetail",
+      expect.objectContaining({ entry: expect.objectContaining({ id: "tail" }) }),
+    );
+  });
+
+  it("starts only one SAF-tail scan for rapid repeated taps", async () => {
+    renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    let finishScan!: (result: { candidates: []; scanned: number; unreadable: number }) => void;
+    vi.mocked(scanPossibleSafStaleTails).mockImplementationOnce(
+      () => new Promise((resolve) => { finishScan = resolve; }),
+    );
+
+    const scan = screen.getByText("Scan");
+    fireEvent.click(scan);
+    fireEvent.click(scan);
+    expect(scanPossibleSafStaleTails).toHaveBeenCalledOnce();
+
+    finishScan({ candidates: [], scanned: 1, unreadable: 0 });
+    await screen.findByText("No possible leftover text found in the notes checked");
   });
 
   it("shows the sync-conflict banner and pairs copies to originals in the review dialog", async () => {

@@ -37,6 +37,7 @@ import {
   noteIndexKey,
 } from "./vaultStorageKeys";
 import { DEFAULT_VAULT_PROFILE_ID } from "./vaultProfiles";
+import { hasPossibleSafStaleTail } from "./safTailDetector";
 
 /** One AsyncStorage blob holding per-note metadata for browse + search; the tag
  * index is derived from it (deriveTagIndex). One scan, one blob keeps the
@@ -751,6 +752,57 @@ export async function readNoteBodies(
     signal,
   );
   return bodies;
+}
+
+// ── Historical SAF truncate review ───────────────────────────────────────────
+
+/** A note the read-only historical-tail heuristic suggests opening manually. */
+export interface PossibleSafTailCandidate {
+  uri: string;
+  name: string;
+  subdir: NoteSubdir;
+}
+
+export interface PossibleSafTailScan {
+  candidates: PossibleSafTailCandidate[];
+  /** Includes unreadable notes: each enumerated ref gets one bounded attempt. */
+  scanned: number;
+  unreadable: number;
+}
+
+/**
+ * Explicit, uncached review scan for notes that may retain a tail written by
+ * the pre-fix SAF backend. It only reads note bytes and returns file metadata;
+ * it never writes, caches, or exposes note text. Read failures are skipped so
+ * one revoked/deleted document cannot prevent review of the remaining vault.
+ */
+export async function scanPossibleSafStaleTails(
+  rootOverride?: Root,
+): Promise<PossibleSafTailScan> {
+  const files = rootOverride ? await listNoteFilesInRoot(rootOverride) : await listNoteFiles();
+  // Preserve vault enumeration order even when SAF read completion is not
+  // ordered, so the review list does not jump around between runs.
+  const candidateSlots: (PossibleSafTailCandidate | null)[] = new Array(files.length).fill(null);
+  let scanned = 0;
+  let unreadable = 0;
+
+  await mapWithConcurrency(files.map((file, i) => ({ file, i })), SCAN_CONCURRENCY, async ({ file, i }) => {
+    try {
+      if (hasPossibleSafStaleTail(await readNote(file.uri))) {
+        candidateSlots[i] = { uri: file.uri, name: file.name, subdir: file.subdir };
+      }
+    } catch {
+      unreadable += 1;
+    } finally {
+      scanned += 1;
+    }
+  });
+
+  return {
+    candidates: candidateSlots.filter((candidate): candidate is PossibleSafTailCandidate => candidate !== null),
+    scanned,
+    unreadable,
+  };
 }
 
 /**
