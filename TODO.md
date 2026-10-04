@@ -174,9 +174,9 @@ stray text. Found on-device 2026-10-03; fixed by `patches/expo-file-system+19.0.
   opens with the default `"w"`. Carnet only uses `expo-file-system/legacy` today;
   patch it (with a `"w"` fallback, since it serves every `content://` provider) before
   any migration to the new API.
-- [ ] **CI doesn't prove the module builds from source** — the guard test pins the
-  `buildFromSource` config, not its effect. Assert `:expo-file-system:compileDebugKotlin`
-  ran in the `mobile-android` job.
+- [x] **CI source-build evidence** — `8b6ce24` makes the `mobile-android` job assert
+  that `:expo-file-system:compileDebugKotlin` ran, proving the patched module was
+  compiled from source rather than only checking the `buildFromSource` configuration.
 - [ ] **`"wt"` empties a file before a base64 decode fails** — harmless today (every
   `writeBinaryBytes` caller writes a fresh file); decode before opening the stream if that
   ever changes.
