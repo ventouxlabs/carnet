@@ -28,6 +28,10 @@ const legacyModule = readFileSync(
   join(pkgDir, "android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt"),
   "utf8",
 );
+const unifiedSafModule = readFileSync(
+  join(pkgDir, "android/src/main/java/expo/modules/filesystem/unifiedfile/SAFDocumentFile.kt"),
+  "utf8",
+);
 
 describe("SAF writes truncate (patches/expo-file-system)", () => {
   it("opens SAF documents for writing with \"wt\"", () => {
@@ -36,6 +40,23 @@ describe("SAF writes truncate (patches/expo-file-system)", () => {
 
   it("leaves no untruncated SAF output stream in the legacy module", () => {
     expect(legacyModule).not.toMatch(/openOutputStream\(uri\)/);
+  });
+
+  it("prefers truncating writes in the unified SAF API", () => {
+    expect(unifiedSafModule).toContain("import java.io.FileNotFoundException");
+    expect(unifiedSafModule).toContain('context.contentResolver.openOutputStream(uri, "wt")');
+  });
+
+  it("falls back to default writes only when a unified SAF provider rejects or omits \"wt\"", () => {
+    expect(unifiedSafModule).toMatch(
+      /val outputStream = try \{\s+context\.contentResolver\.openOutputStream\(uri, "wt"\)\s+\} catch \(_: FileNotFoundException\) \{\s+null\s+\} \?: context\.contentResolver\.openOutputStream\(uri, "w"\)/,
+    );
+    expect(unifiedSafModule).toContain(
+      '?: throw IllegalStateException("Unable to open output stream for URI: $uri")',
+    );
+    expect(unifiedSafModule).not.toMatch(
+      /catch\s*\(\s*[^:)]*:\s*(?:Exception|RuntimeException|SecurityException|IOException|Throwable)\s*\)/,
+    );
   });
 
   // SDK 54 links most expo modules as prebuilt AARs, which a source patch never

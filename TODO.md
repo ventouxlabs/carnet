@@ -169,10 +169,10 @@ stray text. Found on-device 2026-10-03; fixed by `patches/expo-file-system+19.0.
   for a conservative trailing-partial-line heuristic. It lists metadata-only candidates
   for manual review and never changes or caches a vault; run it in every affected vault.
   A repair can't know where the real content ends, so Carnet will not attempt one.
-- [ ] **The new `expo-file-system` API is unpatched** — `SAFDocumentFile.kt:74` still
-  opens with the default `"w"`. Carnet only uses `expo-file-system/legacy` today;
-  patch it (with a `"w"` fallback, since it serves every `content://` provider) before
-  any migration to the new API.
+- [x] **The new `expo-file-system` API is patched** — `SAFDocumentFile.kt` now tries
+  truncating `"wt"` first, then falls back to `"w"` only when a provider rejects that
+  mode with `FileNotFoundException` or returns no stream. The fallback cannot truncate
+  on providers that only support `"w"`; Carnet still uses `expo-file-system/legacy` today.
 - [x] **CI source-build evidence** — `8b6ce24` makes the `mobile-android` job assert
   that `:expo-file-system:compileDebugKotlin` ran, proving the patched module was
   compiled from source rather than only checking the `buildFromSource` configuration.
