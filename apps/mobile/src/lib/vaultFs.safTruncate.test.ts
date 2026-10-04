@@ -34,7 +34,7 @@ describe("SAF writes truncate (patches/expo-file-system)", () => {
     expect(legacyModule).toContain('uri.isSAFUri -> context.contentResolver.openOutputStream(uri, "wt")!!');
   });
 
-  it("has no untruncated SAF output stream left", () => {
+  it("leaves no untruncated SAF output stream in the legacy module", () => {
     expect(legacyModule).not.toMatch(/openOutputStream\(uri\)/);
   });
 

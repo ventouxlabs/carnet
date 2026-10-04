@@ -93,7 +93,8 @@ export interface VaultFs {
   writeString(uri: string, content: string): Promise<void>;
   /** Read a file as base64. */
   readBinary(uri: string): Promise<string>;
-  /** Overwrite a file with base64-encoded bytes. */
+  /** Overwrite a file with base64-encoded bytes. Same SAF "wt" patch as
+   * writeString. */
   writeBinaryBytes(uri: string, base64: string): Promise<void>;
   /** Delete a file. */
   delete(uri: string): Promise<void>;
