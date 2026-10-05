@@ -26,19 +26,27 @@ Branch: `fix/saf-write-truncate`. Implementation HEAD: `01d1934`.
 ## Verification and limits
 
 Latest mobile validation passed: 2,678 tests across 156 files, typecheck, and lint.
-Independent review approved the implementation. Android build output showed
-`:expo-file-system:compileDebugKotlin`; this handoff does not assert a complete app
-build without a final `BUILD SUCCESSFUL` record.
+Independent review approved the implementation. The later signed release build
+completed with `BUILD SUCCESSFUL in 5m 24s` and installed in place with `Success`
+on Pixel 10 Pro Fold `57211FDCG0023C` (version 0.11.0, versionCode 9).
+Build log: `/tmp/carnet-saf-scan-device-build-resume.log`.
+APK SHA-256: `181474a44c0c9cfce52f5a70a02066543cade750f93c116d7f5bf2f763a59273`.
 
 Physical shorter-rewrite verification covered the legacy writer only. The new Home
-scan UI and modern API path still need physical smoke testing. The scan flags possible
+scan UI completed on-device and displayed "No possible leftover text found in the
+notes checked" with "Scan again". However, this phone's active Default vault uses
+the app sandbox and has no SAF folder selected, so that result does not verify a SAF
+vault scan. Zero candidates meant the review dialog and candidate navigation could
+not be exercised. No settings or notes were changed; the phone was returned to Home.
+The modern API path also still needs physical testing. The scan flags possible
 tails, not proven corruption; repair remains manual because the original content
 boundary cannot be recovered reliably.
 
 ## Next steps and repository state
 
-- Smoke-test the explicit scan on a real SAF vault when a phone is available; review
-  candidates manually. Run the scan separately in each affected vault.
+- Select the intended SAF vault on the phone before verifying a real SAF scan;
+  folder selection may trigger migration, so obtain the user's folder choice first.
+  Review candidates manually and run the scan separately in each affected vault.
 - Keep the base64 decode-before-open TODO deferred: every current binary write targets
   a fresh file. Revisit before introducing binary overwrites, because `"wt"` empties an
   existing file before a decode failure.
