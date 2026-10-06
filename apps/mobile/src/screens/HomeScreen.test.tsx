@@ -8,10 +8,11 @@
 // headerRight, outside this component tree — its presence is asserted via
 // the setOptions call.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { PaperProvider } from "react-native-paper";
+import { useWindowDimensions } from "react-native";
 
-import { carnetLight } from "../lib/theme";
+import { carnetDark, carnetLight } from "../lib/theme";
 import type { CaptureEntry } from "../lib/storage";
 
 const RECENTS: CaptureEntry[] = [
@@ -30,6 +31,11 @@ const RECENTS: CaptureEntry[] = [
     createdAt: Date.now() - 3_600_000,
   },
 ];
+
+vi.mock("react-native", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-native")>(),
+  useWindowDimensions: vi.fn(() => ({ width: 360, height: 640, scale: 1, fontScale: 1 })),
+}));
 
 vi.mock("../lib/storage", () => ({
   getRecentCaptures: vi.fn(async () => RECENTS),
@@ -142,10 +148,10 @@ function makeNavigation() {
   };
 }
 
-function renderScreen() {
+function renderScreen(theme = carnetLight) {
   const navigation = makeNavigation();
   render(
-    <PaperProvider theme={carnetLight}>
+    <PaperProvider theme={theme}>
       <HomeScreen
         navigation={navigation as unknown as ScreenProps["navigation"]}
         route={{ key: "h", name: "Home" } as ScreenProps["route"]}
@@ -157,6 +163,7 @@ function renderScreen() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(useWindowDimensions).mockReturnValue({ width: 360, height: 640, scale: 1, fontScale: 1 });
   vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
   pendingSyncListeners.clear();
 });
@@ -419,7 +426,53 @@ describe("HomeScreen", () => {
     expect(scanPossibleSafStaleTails).toHaveBeenCalledOnce();
 
     finishScan({ candidates: [], scanned: 1, unreadable: 0 });
-    await screen.findByText("No possible leftover text found in the notes checked");
+    await screen.findByText("Scan complete: 1 note checked; 0 skipped because they could not be read. No possible leftover text found in the notes checked.");
+  });
+
+  it.each([
+    [0, 0, "No notes found in this vault. 0 notes checked; 0 skipped."],
+    [6, 0, "Scan complete: 6 notes checked; 0 skipped because they could not be read. No possible leftover text found in the notes checked."],
+    [6, 2, "Partial scan: 4 notes checked; 2 skipped because they could not be read. No possible leftover text found in the notes checked."],
+    [6, 6, "Scan incomplete: no notes could be read. 0 notes checked; 6 skipped because they could not be read."],
+  ])("reports scan coverage for %i attempts and %i unreadable notes", async (scanned, unreadable, message) => {
+    renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    vi.mocked(scanPossibleSafStaleTails).mockResolvedValueOnce({ candidates: [], scanned, unreadable });
+    fireEvent.click(screen.getByText("Scan"));
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.queryByText("Review")).toBeNull();
+    if (unreadable === scanned && scanned > 0) {
+      expect(screen.queryByText(/No possible leftover text found/)).toBeNull();
+    }
+  });
+
+  it.each([[640, carnetLight], [320, carnetDark]] as const)("keeps candidates scrollable with coverage and Close outside the list at height %i", async (height, theme) => {
+    vi.mocked(useWindowDimensions).mockReturnValue({ width: 360, height, scale: 1, fontScale: 1 });
+    renderScreen(theme);
+    await screen.findByText("Jack's Baseball Team");
+    vi.mocked(scanPossibleSafStaleTails).mockResolvedValueOnce({
+      candidates: Array.from({ length: 40 }, (_, i) => ({
+        uri: `file:///v/Ideas/tail-${i}.md`, name: `tail-${i}.md`, subdir: "Ideas" as const,
+      })),
+      scanned: 42,
+      unreadable: 2,
+    });
+    fireEvent.click(screen.getByText("Scan"));
+    const list = await screen.findByTestId("saf-tail-candidates");
+    expect(within(list).getAllByText("Open note")).toHaveLength(40);
+    expect(within(list).getByText("Ideas/tail-39.md")).toBeTruthy();
+    expect(getComputedStyle(list).overflowY).toMatch(/auto|scroll/);
+    expect(list.parentElement?.style.maxHeight).toMatch(/px$/);
+    expect(Number.parseFloat(list.parentElement!.style.maxHeight)).toBe(height * 0.35);
+    const summary = screen.getByText("40 notes checked; 2 skipped because they could not be read.");
+    expect(list.contains(summary)).toBe(false);
+    expect(screen.getByText(/Partial scan: 40 notes checked; 2 skipped/)).toBeTruthy();
+    const close = screen.getByText("Close");
+    expect(list.contains(close)).toBe(false);
+    fireEvent.click(close);
+    await waitFor(() => expect(screen.queryByTestId("saf-tail-candidates")).toBeNull());
+    fireEvent.click(screen.getByText("Review"));
+    expect(await screen.findByText("40 notes checked; 2 skipped because they could not be read.")).toBeTruthy();
   });
 
   it("shows the sync-conflict banner and pairs copies to originals in the review dialog", async () => {

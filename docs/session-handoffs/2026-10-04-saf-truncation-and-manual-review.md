@@ -25,7 +25,7 @@ Branch: `fix/saf-write-truncate`. Implementation HEAD: `01d1934`.
 
 ## Verification and limits
 
-Latest mobile validation passed: 2,678 tests across 156 files, typecheck, and lint.
+Latest full mobile validation passed: 2,678 tests across 156 files, typecheck, and lint.
 Independent review approved the implementation. The later signed release build
 completed with `BUILD SUCCESSFUL in 5m 24s` and installed in place with `Success`
 on Pixel 10 Pro Fold `57211FDCG0023C` (version 0.11.0, versionCode 9).
@@ -47,6 +47,14 @@ the approved folder remains selected, and the phone was returned to Home.
 The modern API path also still needs physical testing. The scan flags possible
 tails, not proven corruption; repair remains manual because the original content
 boundary cannot be recovered reliably.
+
+The final combined-diff review identified two UI gaps, subsequently repaired:
+candidate rows now scroll in a viewport-bounded list with explanation and Close
+outside it, and results distinguish complete, partial, empty, and unreadable scans
+with checked/skipped counts. Independent re-review approved these changes. The
+focused Home/vault/detector suite passed 79 tests, including 40-candidate layouts
+in light and dark themes. The earlier device check used the pre-repair UI, so it
+does not physically verify the new counts or scrolling layout.
 
 ## Next steps and repository state
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { FlatList, StyleSheet, View } from "react-native";
+import { FlatList, ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
 import {
   Banner,
   Button,
@@ -64,6 +64,7 @@ type NoteMeta = Pick<NoteIndexEntry, "excerpt" | "tags" | "status">;
 
 export default function HomeScreen({ navigation }: Props) {
   const theme = useCarnetTheme();
+  const { height: windowHeight } = useWindowDimensions();
   // null = first load in flight → skeleton cards, not a spinner.
   const [recent, setRecent] = useState<CaptureEntry[] | null>(null);
   const [recentVaultContext, setRecentVaultContext] = useState({
@@ -97,6 +98,21 @@ export default function HomeScreen({ navigation }: Props) {
   } | null>(null);
   const [tailScanning, setTailScanning] = useState(false);
   const [tailDialogVisible, setTailDialogVisible] = useState(false);
+  const tailReadCount = tailScan ? tailScan.scanned - tailScan.unreadable : 0;
+  const tailReadSummary = tailScan
+    ? `${tailReadCount} note${tailReadCount === 1 ? "" : "s"} checked; ${tailScan.unreadable} skipped because they could not be read.`
+    : "";
+  const tailResultSummary = !tailScan
+    ? "Check older SAF rewrites for possible leftover text (read-only)"
+    : tailScan.scanned === 0
+      ? "No notes found in this vault. 0 notes checked; 0 skipped."
+      : tailReadCount === 0
+        ? `Scan incomplete: no notes could be read. ${tailReadSummary}`
+        : `${tailScan.unreadable > 0 ? "Partial scan: " : "Scan complete: "}${tailReadSummary} ${
+            tailScan.candidates.length > 0
+              ? `${tailScan.candidates.length} note${tailScan.candidates.length === 1 ? " may" : "s may"} have leftover text from an older SAF rewrite.`
+              : "No possible leftover text found in the notes checked."
+          }`;
   // Selection mode: enter via long-press, toggle rows via tap, auto-exit
   // when selection empties or the screen blurs.
   const [selectionMode, setSelectionMode] = useState(false);
@@ -519,11 +535,7 @@ export default function HomeScreen({ navigation }: Props) {
                   : []),
               ]}
             >
-              {tailScan
-                ? tailScan.candidates.length > 0
-                  ? `${tailScan.candidates.length} note${tailScan.candidates.length === 1 ? " may" : "s may"} have leftover text from an older SAF rewrite`
-                  : "No possible leftover text found in the notes checked"
-                : "Check older SAF rewrites for possible leftover text (read-only)"}
+              {tailResultSummary}
             </Banner>
             {selectionMode ? (
               <View
@@ -712,7 +724,7 @@ export default function HomeScreen({ navigation }: Props) {
         <Dialog
           visible={tailDialogVisible}
           onDismiss={() => setTailDialogVisible(false)}
-          style={{ borderRadius: theme.carnet.radius.sheet }}
+          style={{ borderRadius: theme.carnet.radius.sheet, maxHeight: windowHeight - theme.carnet.spacing.xxxl }}
         >
           <Dialog.Title>Possible leftover text</Dialog.Title>
           <Dialog.Content style={{ gap: theme.carnet.spacing.md }}>
@@ -720,17 +732,25 @@ export default function HomeScreen({ navigation }: Props) {
               These are conservative hints from a read-only scan. Carnet did not change
               any files. Open each note and decide whether it needs editing.
             </Text>
-            {tailScan && tailScanContext ? tailScan.candidates.map((candidate) => (
-              <View key={candidate.uri} style={styles.conflictActions}>
-                <Text variant="bodySmall" style={{ flex: 1 }} numberOfLines={1}>
-                  {`${candidate.subdir}/${candidate.name}`}
-                </Text>
-                <Button compact onPress={() => void openPossibleSafTail(candidate, tailScanContext)}>
-                  Open note
-                </Button>
-              </View>
-            )) : null}
+            <Text variant="bodySmall">{tailReadSummary}</Text>
           </Dialog.Content>
+          <Dialog.ScrollArea style={{ maxHeight: windowHeight * 0.35, flexShrink: 1 }}>
+            <ScrollView
+              testID="saf-tail-candidates"
+              contentContainerStyle={{ gap: theme.carnet.spacing.md, paddingVertical: theme.carnet.spacing.md }}
+            >
+              {tailScan && tailScanContext ? tailScan.candidates.map((candidate) => (
+                <View key={candidate.uri} style={styles.conflictActions}>
+                  <Text variant="bodySmall" style={{ flex: 1 }} numberOfLines={1}>
+                    {`${candidate.subdir}/${candidate.name}`}
+                  </Text>
+                  <Button compact onPress={() => void openPossibleSafTail(candidate, tailScanContext)}>
+                    Open note
+                  </Button>
+                </View>
+              )) : null}
+            </ScrollView>
+          </Dialog.ScrollArea>
           <Dialog.Actions>
             <Button onPress={() => setTailDialogVisible(false)}>Close</Button>
           </Dialog.Actions>
