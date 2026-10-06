@@ -32,21 +32,27 @@ on Pixel 10 Pro Fold `57211FDCG0023C` (version 0.11.0, versionCode 9).
 Build log: `/tmp/carnet-saf-scan-device-build-resume.log`.
 APK SHA-256: `181474a44c0c9cfce52f5a70a02066543cade750f93c116d7f5bf2f763a59273`.
 
-Physical shorter-rewrite verification covered the legacy writer only. The new Home
-scan UI completed on-device and displayed "No possible leftover text found in the
-notes checked" with "Scan again". However, this phone's active Default vault uses
-the app sandbox and has no SAF folder selected, so that result does not verify a SAF
-vault scan. Zero candidates meant the review dialog and candidate navigation could
-not be exercised. No settings or notes were changed; the phone was returned to Home.
+Physical shorter-rewrite verification covered the legacy writer only. An initial
+Home scan exercised sandbox storage only. On 2026-10-05, with the user's explicit
+approval, the existing `Documents/Carnet-Agent-Verification-20260914-Pixel10` folder
+was selected, Android access granted, and Carnet Settings saved. Reopening Settings
+confirmed the selection persisted; Android retained the matching
+`content://com.android.externalstorage.documents/tree` grant.
+The Home scan then completed on that SAF vault and displayed "No possible leftover
+text found in the notes checked" with "Scan again". A separate read-only filesystem
+count found six Markdown files; the UI exposes no scanned/unreadable counts, so six
+is not a proven scan-read count. Zero candidates meant the review dialog and candidate
+navigation could not be exercised. No manual note edits or deletions were performed;
+the approved folder remains selected, and the phone was returned to Home.
 The modern API path also still needs physical testing. The scan flags possible
 tails, not proven corruption; repair remains manual because the original content
 boundary cannot be recovered reliably.
 
 ## Next steps and repository state
 
-- Select the intended SAF vault on the phone before verifying a real SAF scan;
-  folder selection may trigger migration, so obtain the user's folder choice first.
-  Review candidates manually and run the scan separately in each affected vault.
+- The explicit scan has completed on the approved SAF verification vault. Run it
+  separately in each affected vault and review any candidates manually; the device
+  Review/Open path remains unverified because this scan found none.
 - Keep the base64 decode-before-open TODO deferred: every current binary write targets
   a fresh file. Revisit before introducing binary overwrites, because `"wt"` empties an
   existing file before a decode failure.
