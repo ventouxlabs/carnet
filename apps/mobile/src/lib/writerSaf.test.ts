@@ -315,14 +315,21 @@ describe("updateNoteIfUnchanged (SAF)", () => {
     await expect(readNote(filepath)).resolves.toBe("# Forced\n");
   });
 
-  it("consults the content baseline ONLY when there is no mtime baseline", async () => {
-    // The two baselines are a fast path and its fallback, not two votes. A
-    // caller that has an mtime never pays for the file read — pinned here with
-    // a deliberately mismatched content baseline that must be ignored.
+  it("uses known content even when a supplied mtime is unavailable", async () => {
     const { filepath } = await writeIdea("guarded", "# v1\n");
-    const result = await updateNoteIfUnchanged(filepath, "# v2\n", 12345, "# not-what-is-on-disk\n");
-    expect(result).toEqual({ ok: true });
-    await expect(readNote(filepath)).resolves.toBe("# v2\n");
+    const result = await updateNoteIfUnchanged(filepath, "# v2\n", 12345, "# stale\n");
+    expect(result).toEqual({ ok: false, reason: "conflict" });
+    await expect(readNote(filepath)).resolves.toBe("# v1\n");
+  });
+
+  it("refuses a guarded write when the SAF note cannot be read", async () => {
+    const { filepath } = await writeIdea("guarded", "# v1\n");
+    vi.mocked(FileSystem.StorageAccessFramework.readAsStringAsync).mockRejectedValueOnce(new Error("Permission revoked"));
+    const write = vi.mocked(FileSystem.StorageAccessFramework.writeAsStringAsync);
+    write.mockClear();
+    const result = await updateNoteIfUnchanged(filepath, "# v2\n", null, "# v1\n");
+    expect(result).toEqual({ ok: false, reason: "conflict" });
+    expect(write).not.toHaveBeenCalled();
   });
 });
 
