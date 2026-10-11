@@ -1,0 +1,40 @@
+diff --git a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt
+index 73a8bd5..da5c739 100644
+--- a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt
++++ b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt
+@@ -1071,6 +1071,8 @@ open class FileSystemLegacyModule : Module() {
+   @Throws(IOException::class)
+   private fun getOutputStream(uri: Uri) = when {
+     uri.scheme == "file" -> FileOutputStream(uri.toFile())
+-    uri.isSAFUri -> context.contentResolver.openOutputStream(uri)!!
++    // "wt", not the default "w": ExternalStorageProvider does not truncate on
++    // "w", so a shorter rewrite left the old file's tail behind (carnet patch).
++    uri.isSAFUri -> context.contentResolver.openOutputStream(uri, "wt")!!
+     else -> throw IOException("Unsupported scheme for location '$uri'.")
+   }
+diff --git a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/unifiedfile/SAFDocumentFile.kt b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/unifiedfile/SAFDocumentFile.kt
+index 9f3cfb4..51e145c 100644
+--- a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/unifiedfile/SAFDocumentFile.kt
++++ b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/unifiedfile/SAFDocumentFile.kt
+@@ -4,5 +4,6 @@ import android.content.Context
+ import android.net.Uri
+ import androidx.documentfile.provider.DocumentFile
+ import expo.modules.kotlin.AppContext
++import java.io.FileNotFoundException
+ import java.io.InputStream
+ import java.io.OutputStream
+@@ -72,5 +73,13 @@ class SAFDocumentFile(private val context: Context, override val uri: Uri) : Uni
+   override fun outputStream(): OutputStream {
+-    return context.contentResolver.openOutputStream(uri)
++    // Prefer truncating writes, but preserve compatibility with providers that
++    // reject the mode even though they accept the default write mode.
++    val outputStream = try {
++      context.contentResolver.openOutputStream(uri, "wt")
++    } catch (_: FileNotFoundException) {
++      null
++    } ?: context.contentResolver.openOutputStream(uri, "w")
++
++    return outputStream
+       ?: throw IllegalStateException("Unable to open output stream for URI: $uri")
+   }
+ 

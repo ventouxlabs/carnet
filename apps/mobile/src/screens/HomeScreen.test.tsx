@@ -8,10 +8,11 @@
 // headerRight, outside this component tree — its presence is asserted via
 // the setOptions call.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { PaperProvider } from "react-native-paper";
+import { useWindowDimensions } from "react-native";
 
-import { carnetLight } from "../lib/theme";
+import { carnetDark, carnetLight } from "../lib/theme";
 import type { CaptureEntry } from "../lib/storage";
 
 const RECENTS: CaptureEntry[] = [
@@ -30,6 +31,11 @@ const RECENTS: CaptureEntry[] = [
     createdAt: Date.now() - 3_600_000,
   },
 ];
+
+vi.mock("react-native", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-native")>(),
+  useWindowDimensions: vi.fn(() => ({ width: 360, height: 640, scale: 1, fontScale: 1 })),
+}));
 
 vi.mock("../lib/storage", () => ({
   getRecentCaptures: vi.fn(async () => RECENTS),
@@ -68,6 +74,11 @@ vi.mock("../lib/vault", () => ({
   })),
   refreshNoteIndex: vi.fn(async () => ({ builtAt: 2, notes: [] })),
   resolveNoteEntry: vi.fn(async () => null),
+  scanPossibleSafStaleTails: vi.fn(async () => ({
+    candidates: [],
+    scanned: 0,
+    unreadable: 0,
+  })),
 }));
 vi.mock("../lib/vaultRefreshService", () => ({ refreshActiveVault: vi.fn(async () => {}) }));
 
@@ -119,22 +130,28 @@ import { drainPendingKarakeepExports } from "../lib/pendingSyncRunner";
 import { listNoteFiles, listSyncConflictFiles } from "../lib/writer";
 import { reportColdStart } from "../lib/startupTiming";
 import { refreshActiveVault } from "../lib/vaultRefreshService";
+import { resolveNoteEntry, scanPossibleSafStaleTails } from "../lib/vault";
 
 type ScreenProps = Parameters<typeof HomeScreen>[0];
 
 function makeNavigation() {
+  const listeners = new Map<string, () => void>();
   return {
     setOptions: vi.fn(),
     navigate: vi.fn(),
-    addListener: vi.fn(() => vi.fn()),
+    addListener: vi.fn((event: string, listener: () => void) => {
+      listeners.set(event, listener);
+      return () => listeners.delete(event);
+    }),
     goBack: vi.fn(),
+    emit: (event: string) => listeners.get(event)?.(),
   };
 }
 
-function renderScreen() {
+function renderScreen(theme = carnetLight) {
   const navigation = makeNavigation();
   render(
-    <PaperProvider theme={carnetLight}>
+    <PaperProvider theme={theme}>
       <HomeScreen
         navigation={navigation as unknown as ScreenProps["navigation"]}
         route={{ key: "h", name: "Home" } as ScreenProps["route"]}
@@ -146,6 +163,7 @@ function renderScreen() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(useWindowDimensions).mockReturnValue({ width: 360, height: 640, scale: 1, fontScale: 1 });
   vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
   pendingSyncListeners.clear();
 });
@@ -285,6 +303,176 @@ describe("HomeScreen", () => {
     renderScreen();
     await screen.findByText("Jack's Baseball Team");
     expect(screen.queryByText(/sync conflict/)).toBeNull();
+  });
+
+  it("scans historical SAF rewrites only when asked and opens a candidate for manual review", async () => {
+    const { navigation } = renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    expect(scanPossibleSafStaleTails).not.toHaveBeenCalled();
+
+    vi.mocked(scanPossibleSafStaleTails).mockResolvedValueOnce({
+      candidates: [
+        {
+          uri: "file:///v/Ideas/possible-tail.md",
+          name: "possible-tail.md",
+          subdir: "Ideas",
+        },
+      ],
+      scanned: 1,
+      unreadable: 0,
+    });
+    vi.mocked(resolveNoteEntry).mockResolvedValueOnce({
+      id: "tail",
+      mode: "idea",
+      title: "Possible tail",
+      filepath: "file:///v/Ideas/possible-tail.md",
+      createdAt: 0,
+    });
+
+    fireEvent.click(screen.getByText("Scan"));
+    expect(await screen.findByText("Possible leftover text")).toBeTruthy();
+    expect(screen.getByText("Ideas/possible-tail.md")).toBeTruthy();
+    expect(screen.queryByText("distinctive leftover fragment")).toBeNull();
+
+    fireEvent.click(screen.getByText("Open note"));
+    await waitFor(() =>
+      expect(navigation.navigate).toHaveBeenCalledWith("RecentDetail", {
+        entry: expect.objectContaining({ id: "tail" }),
+        vaultContext: { profileId: "default", rootUri: "" },
+      }),
+    );
+  });
+
+  it("clears completed SAF-tail results after a profile switch", async () => {
+    const { navigation } = renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    vi.mocked(scanPossibleSafStaleTails).mockResolvedValueOnce({
+      candidates: [{ uri: "file:///v/Ideas/tail.md", name: "tail.md", subdir: "Ideas" }],
+      scanned: 1,
+      unreadable: 0,
+    });
+
+    fireEvent.click(screen.getByText("Scan"));
+    expect(await screen.findByText("Ideas/tail.md")).toBeTruthy();
+
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    navigation.emit("focus");
+
+    await waitFor(() => expect(screen.queryByText("Ideas/tail.md")).toBeNull());
+    expect(screen.getByText("Check older SAF rewrites for possible leftover text (read-only)")).toBeTruthy();
+  });
+
+  it("does not open a tail candidate after its vault changes during note resolution", async () => {
+    const { navigation } = renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    vi.mocked(scanPossibleSafStaleTails).mockResolvedValueOnce({
+      candidates: [{ uri: "file:///v/Ideas/tail.md", name: "tail.md", subdir: "Ideas" }],
+      scanned: 1,
+      unreadable: 0,
+    });
+    let finishResolve!: (entry: CaptureEntry | null) => void;
+    vi.mocked(resolveNoteEntry).mockImplementationOnce(
+      () => new Promise<CaptureEntry | null>((resolve) => { finishResolve = resolve; }),
+    );
+
+    fireEvent.click(screen.getByText("Scan"));
+    fireEvent.click(await screen.findByText("Open note"));
+    await waitFor(() => expect(resolveNoteEntry).toHaveBeenCalledOnce());
+
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///work",
+      vaultProfiles: [
+        { id: "default", name: "Personal", rootUri: "file:///personal", createdAt: 0 },
+        { id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 },
+      ],
+      activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    navigation.emit("focus");
+    await waitFor(() => expect(screen.queryByText("Ideas/tail.md")).toBeNull());
+    finishResolve({
+      id: "tail",
+      mode: "idea",
+      title: "Tail",
+      filepath: "file:///v/Ideas/tail.md",
+      createdAt: 0,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(navigation.navigate).not.toHaveBeenCalledWith(
+      "RecentDetail",
+      expect.objectContaining({ entry: expect.objectContaining({ id: "tail" }) }),
+    );
+  });
+
+  it("starts only one SAF-tail scan for rapid repeated taps", async () => {
+    renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    let finishScan!: (result: { candidates: []; scanned: number; unreadable: number }) => void;
+    vi.mocked(scanPossibleSafStaleTails).mockImplementationOnce(
+      () => new Promise((resolve) => { finishScan = resolve; }),
+    );
+
+    const scan = screen.getByText("Scan");
+    fireEvent.click(scan);
+    fireEvent.click(scan);
+    expect(scanPossibleSafStaleTails).toHaveBeenCalledOnce();
+
+    finishScan({ candidates: [], scanned: 1, unreadable: 0 });
+    await screen.findByText("Scan complete: 1 note checked; 0 skipped because they could not be read. No possible leftover text found in the notes checked.");
+  });
+
+  it.each([
+    [0, 0, "No notes found in this vault. 0 notes checked; 0 skipped."],
+    [6, 0, "Scan complete: 6 notes checked; 0 skipped because they could not be read. No possible leftover text found in the notes checked."],
+    [6, 2, "Partial scan: 4 notes checked; 2 skipped because they could not be read. No possible leftover text found in the notes checked."],
+    [6, 6, "Scan incomplete: no notes could be read. 0 notes checked; 6 skipped because they could not be read."],
+  ])("reports scan coverage for %i attempts and %i unreadable notes", async (scanned, unreadable, message) => {
+    renderScreen();
+    await screen.findByText("Jack's Baseball Team");
+    vi.mocked(scanPossibleSafStaleTails).mockResolvedValueOnce({ candidates: [], scanned, unreadable });
+    fireEvent.click(screen.getByText("Scan"));
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.queryByText("Review")).toBeNull();
+    if (unreadable === scanned && scanned > 0) {
+      expect(screen.queryByText(/No possible leftover text found/)).toBeNull();
+    }
+  });
+
+  it.each([[640, carnetLight], [320, carnetDark]] as const)("keeps candidates scrollable with coverage and Close outside the list at height %i", async (height, theme) => {
+    vi.mocked(useWindowDimensions).mockReturnValue({ width: 360, height, scale: 1, fontScale: 1 });
+    renderScreen(theme);
+    await screen.findByText("Jack's Baseball Team");
+    vi.mocked(scanPossibleSafStaleTails).mockResolvedValueOnce({
+      candidates: Array.from({ length: 40 }, (_, i) => ({
+        uri: `file:///v/Ideas/tail-${i}.md`, name: `tail-${i}.md`, subdir: "Ideas" as const,
+      })),
+      scanned: 42,
+      unreadable: 2,
+    });
+    fireEvent.click(screen.getByText("Scan"));
+    const list = await screen.findByTestId("saf-tail-candidates");
+    expect(within(list).getAllByText("Open note")).toHaveLength(40);
+    expect(within(list).getByText("Ideas/tail-39.md")).toBeTruthy();
+    expect(getComputedStyle(list).overflowY).toMatch(/auto|scroll/);
+    expect(list.parentElement?.style.maxHeight).toMatch(/px$/);
+    expect(Number.parseFloat(list.parentElement!.style.maxHeight)).toBe(height * 0.35);
+    const summary = screen.getByText("40 notes checked; 2 skipped because they could not be read.");
+    expect(list.contains(summary)).toBe(false);
+    expect(screen.getByText(/Partial scan: 40 notes checked; 2 skipped/)).toBeTruthy();
+    const close = screen.getByText("Close");
+    expect(list.contains(close)).toBe(false);
+    fireEvent.click(close);
+    await waitFor(() => expect(screen.queryByTestId("saf-tail-candidates")).toBeNull());
+    fireEvent.click(screen.getByText("Review"));
+    expect(await screen.findByText("40 notes checked; 2 skipped because they could not be read.")).toBeTruthy();
   });
 
   it("shows the sync-conflict banner and pairs copies to originals in the review dialog", async () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { FlatList, StyleSheet, View } from "react-native";
+import { FlatList, ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
 import {
   Banner,
   Button,
@@ -30,8 +30,11 @@ import { reportColdStart } from "../lib/startupTiming";
 import {
   loadCachedNoteIndex,
   resolveNoteEntry,
+  scanPossibleSafStaleTails,
   type NoteIndex,
   type NoteIndexEntry,
+  type PossibleSafTailCandidate,
+  type PossibleSafTailScan,
 } from "../lib/vault";
 import { getSyncStatus, type SyncStatus } from "../lib/syncStatus";
 import {
@@ -61,12 +64,14 @@ type NoteMeta = Pick<NoteIndexEntry, "excerpt" | "tags" | "status">;
 
 export default function HomeScreen({ navigation }: Props) {
   const theme = useCarnetTheme();
+  const { height: windowHeight } = useWindowDimensions();
   // null = first load in flight → skeleton cards, not a spinner.
   const [recent, setRecent] = useState<CaptureEntry[] | null>(null);
   const [recentVaultContext, setRecentVaultContext] = useState({
     profileId: DEFAULT_VAULT_PROFILE_ID,
     rootUri: "",
   });
+  const recentVaultContextRef = useRef(recentVaultContext);
   const [noteMeta, setNoteMeta] = useState<Map<string, NoteMeta>>(new Map());
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [syncDialogVisible, setSyncDialogVisible] = useState(false);
@@ -83,6 +88,31 @@ export default function HomeScreen({ navigation }: Props) {
   const [conflictFiles, setConflictFiles] = useState<NoteFileRef[]>([]);
   const [conflictDialogVisible, setConflictDialogVisible] = useState(false);
   const [conflictPairs, setConflictPairs] = useState<ConflictPair[]>([]);
+  // Historical SAF writes could retain bytes after a shorter rewrite. This is
+  // strictly user-triggered and result-only: no background scan, cache, or
+  // automatic repair can alter vault data.
+  const [tailScan, setTailScan] = useState<PossibleSafTailScan | null>(null);
+  const [tailScanContext, setTailScanContext] = useState<{
+    profileId: string;
+    rootUri: string;
+  } | null>(null);
+  const [tailScanning, setTailScanning] = useState(false);
+  const [tailDialogVisible, setTailDialogVisible] = useState(false);
+  const tailReadCount = tailScan ? tailScan.scanned - tailScan.unreadable : 0;
+  const tailReadSummary = tailScan
+    ? `${tailReadCount} note${tailReadCount === 1 ? "" : "s"} checked; ${tailScan.unreadable} skipped because they could not be read.`
+    : "";
+  const tailResultSummary = !tailScan
+    ? "Check older SAF rewrites for possible leftover text (read-only)"
+    : tailScan.scanned === 0
+      ? "No notes found in this vault. 0 notes checked; 0 skipped."
+      : tailReadCount === 0
+        ? `Scan incomplete: no notes could be read. ${tailReadSummary}`
+        : `${tailScan.unreadable > 0 ? "Partial scan: " : "Scan complete: "}${tailReadSummary} ${
+            tailScan.candidates.length > 0
+              ? `${tailScan.candidates.length} note${tailScan.candidates.length === 1 ? " may" : "s may"} have leftover text from an older SAF rewrite.`
+              : "No possible leftover text found in the notes checked."
+          }`;
   // Selection mode: enter via long-press, toggle rows via tap, auto-exit
   // when selection empties or the screen blurs.
   const [selectionMode, setSelectionMode] = useState(false);
@@ -91,6 +121,9 @@ export default function HomeScreen({ navigation }: Props) {
   // Guards against fast double-tap on the bulk-delete confirm so the
   // archive loop doesn't run twice.
   const bulkDeletingRef = useRef(false);
+  // State updates do not take effect until React re-renders, so it cannot
+  // prevent two same-tick presses from starting duplicate SAF walks.
+  const tailScanInFlightRef = useRef(false);
   // Single-flight guard for the background index rebuild below.
   const rebuildingIndexRef = useRef(false);
   // A late profile refresh must never repaint an already-focused newer vault.
@@ -123,7 +156,16 @@ export default function HomeScreen({ navigation }: Props) {
     }
     const { profileId } = context;
     if (!isCurrent()) return;
+    const changedVault =
+      recentVaultContextRef.current.profileId !== context.profileId ||
+      recentVaultContextRef.current.rootUri !== context.rootUri;
+    recentVaultContextRef.current = context;
     setRecentVaultContext(context);
+    if (changedVault) {
+      setTailScan(null);
+      setTailScanContext(null);
+      setTailDialogVisible(false);
+    }
     const items = await getRecentCaptures(profileId);
     if (!isCurrent()) return;
     setRecent(items);
@@ -202,6 +244,50 @@ export default function HomeScreen({ navigation }: Props) {
       navigation.navigate("RecentDetail", { entry, vaultContext: recentVaultContext });
     },
     [navigation, recentVaultContext],
+  );
+
+  const scanForPossibleSafTails = useCallback(async () => {
+    if (tailScanInFlightRef.current) return;
+    tailScanInFlightRef.current = true;
+    const context = recentVaultContext;
+    setTailScanning(true);
+    try {
+      const result = await scanPossibleSafStaleTails(resolveContextRoot(context));
+      // A profile switch may happen while SAF reads are in flight. Do not
+      // display candidates from the prior vault in the new profile's Home.
+      if (
+        recentVaultContextRef.current.profileId === context.profileId &&
+        recentVaultContextRef.current.rootUri === context.rootUri
+      ) {
+        setTailScan(result);
+        setTailScanContext(context);
+        if (result.candidates.length > 0) setTailDialogVisible(true);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("[Home] historical SAF-tail scan failed:", msg);
+    } finally {
+      tailScanInFlightRef.current = false;
+      setTailScanning(false);
+    }
+  }, [recentVaultContext]);
+
+  const openPossibleSafTail = useCallback(
+    async (candidate: PossibleSafTailCandidate, originContext: { profileId: string; rootUri: string }) => {
+      if (
+        recentVaultContextRef.current.profileId !== originContext.profileId ||
+        recentVaultContextRef.current.rootUri !== originContext.rootUri
+      ) return;
+      const entry = await resolveNoteEntry(candidate.uri);
+      if (
+        !entry ||
+        recentVaultContextRef.current.profileId !== originContext.profileId ||
+        recentVaultContextRef.current.rootUri !== originContext.rootUri
+      ) return;
+      setTailDialogVisible(false);
+      navigation.navigate("RecentDetail", { entry, vaultContext: originContext });
+    },
+    [navigation],
   );
 
   // Banner Retry: run a pending-export drain pass now (reachability probe
@@ -435,6 +521,22 @@ export default function HomeScreen({ navigation }: Props) {
                 } in the vault — two versions of the same note exist`}
               </Banner>
             ) : null}
+            <Banner
+              visible
+              icon="file-search-outline"
+              style={{ borderRadius: theme.carnet.radius.md }}
+              actions={[
+                {
+                  label: tailScanning ? "Scanning…" : tailScan ? "Scan again" : "Scan",
+                  onPress: () => void scanForPossibleSafTails(),
+                },
+                ...(tailScan && tailScan.candidates.length > 0
+                  ? [{ label: "Review", onPress: () => setTailDialogVisible(true) }]
+                  : []),
+              ]}
+            >
+              {tailResultSummary}
+            </Banner>
             {selectionMode ? (
               <View
                 style={[
@@ -616,6 +718,41 @@ export default function HomeScreen({ navigation }: Props) {
             <Button onPress={() => setConflictDialogVisible(false)}>
               Close
             </Button>
+          </Dialog.Actions>
+        </Dialog>
+
+        <Dialog
+          visible={tailDialogVisible}
+          onDismiss={() => setTailDialogVisible(false)}
+          style={{ borderRadius: theme.carnet.radius.sheet, maxHeight: windowHeight - theme.carnet.spacing.xxxl }}
+        >
+          <Dialog.Title>Possible leftover text</Dialog.Title>
+          <Dialog.Content style={{ gap: theme.carnet.spacing.md }}>
+            <Text variant="bodyMedium">
+              These are conservative hints from a read-only scan. Carnet did not change
+              any files. Open each note and decide whether it needs editing.
+            </Text>
+            <Text variant="bodySmall">{tailReadSummary}</Text>
+          </Dialog.Content>
+          <Dialog.ScrollArea style={{ maxHeight: windowHeight * 0.35, flexShrink: 1 }}>
+            <ScrollView
+              testID="saf-tail-candidates"
+              contentContainerStyle={{ gap: theme.carnet.spacing.md, paddingVertical: theme.carnet.spacing.md }}
+            >
+              {tailScan && tailScanContext ? tailScan.candidates.map((candidate) => (
+                <View key={candidate.uri} style={styles.conflictActions}>
+                  <Text variant="bodySmall" style={{ flex: 1 }} numberOfLines={1}>
+                    {`${candidate.subdir}/${candidate.name}`}
+                  </Text>
+                  <Button compact onPress={() => void openPossibleSafTail(candidate, tailScanContext)}>
+                    Open note
+                  </Button>
+                </View>
+              )) : null}
+            </ScrollView>
+          </Dialog.ScrollArea>
+          <Dialog.Actions>
+            <Button onPress={() => setTailDialogVisible(false)}>Close</Button>
           </Dialog.Actions>
         </Dialog>
 

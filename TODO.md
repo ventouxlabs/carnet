@@ -159,6 +159,31 @@ acceptance gates have evidence.
   other reader (index, cards, Search) still sees such a file as broken until it is
   enriched.
 
+## SAF rewrite truncation — fixed (`fix/saf-write-truncate`), follow-ups open
+
+SAF vault rewrites didn't truncate, so a shorter rewrite left the old file's tail as
+stray text. Found on-device 2026-10-03; fixed by `patches/expo-file-system+19.0.23.patch`
+(`"wt"`) plus building expo-file-system from source (see CLAUDE.md, patches).
+
+- [x] **Manual scan for existing SAF tails** — Home offers an explicit, read-only scan
+  for a conservative trailing-partial-line heuristic. It lists metadata-only candidates
+  for manual review and never changes or caches a vault; run it in every affected vault.
+  A repair can't know where the real content ends, so Carnet will not attempt one.
+- [x] **The new `expo-file-system` API is patched** — `SAFDocumentFile.kt` now tries
+  truncating `"wt"` first, then falls back to `"w"` only when a provider rejects that
+  mode with `FileNotFoundException` or returns no stream. The fallback cannot truncate
+  on providers that only support `"w"`; Carnet still uses `expo-file-system/legacy` today.
+- [x] **CI source-build evidence** — `8b6ce24` makes the `mobile-android` job assert
+  that `:expo-file-system:compileDebugKotlin` ran, proving the patched module was
+  compiled from source rather than only checking the `buildFromSource` configuration.
+- [x] **On-device shorter-rewrite verification (2026-10-04)** — a fresh 148-character
+  raw Idea was replaced in rich text with `SAF-short-rewrite-ok`, then saved and
+  reopened containing only `SAF-short-rewrite-ok`. The disposable verification note was
+  archived.
+- [ ] **`"wt"` empties a file before a base64 decode fails** — harmless today (every
+  `writeBinaryBytes` caller writes a fresh file); decode before opening the stream if that
+  ever changes.
+
 ## Security follow-ups (from the note-capture review, 2026-09-29) — resolved
 
 The six pre-existing, all-mode weaknesses this review surfaced (inline DataviewJS, extra

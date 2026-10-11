@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 interface FakeNote {
   uri: string;
   name: string;
-  subdir: "Ideas" | "Journal" | "People";
+  subdir: "Ideas" | "Journal" | "People" | "Notes";
 }
 
 const _notes: Map<string, string> = new Map(); // uri -> markdown
@@ -58,6 +58,7 @@ import {
   synthesizeEntry,
   tagsForNote,
   upsertNoteInIndex,
+  scanPossibleSafStaleTails,
   type NoteIndex,
   type TagIndex,
 } from "./vault";
@@ -122,6 +123,38 @@ describe("buildNoteIndex titles", () => {
     expect(index.notes[0].excerpt).toBe(
       "Jack made the team. See the roster.",
     );
+  });
+});
+
+describe("scanPossibleSafStaleTails", () => {
+  it("returns only conservative candidates and skips unreadable notes", async () => {
+    addNote(
+      "file:///v/Ideas/candidate.md",
+      "Ideas",
+      "# Candidate\n\nThe old line ends in a distinctive leftover fragment\nShort replacement\ndistinctive leftover fragment",
+    );
+    addNote(
+      "file:///v/Notes/ordinary.md",
+      "Notes",
+      "# Ordinary\n\nA normal note ending with a newline.\n",
+    );
+    addNote("file:///v/Ideas/unreadable.md", "Ideas", "ignored");
+    _unreadable.add("file:///v/Ideas/unreadable.md");
+
+    const result = await scanPossibleSafStaleTails();
+
+    expect(result).toEqual({
+      candidates: [
+        {
+          uri: "file:///v/Ideas/candidate.md",
+          name: "candidate.md",
+          subdir: "Ideas",
+        },
+      ],
+      scanned: 3,
+      unreadable: 1,
+    });
+    expect(readNote).toHaveBeenCalledTimes(3);
   });
 });
 

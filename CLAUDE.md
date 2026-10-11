@@ -50,8 +50,8 @@ class that actually shipped here; scope was change-controlled via
 same scope discussion.** Gates per workspace remain `tsc --noEmit` + vitest (+ this lint,
 in the `mobile` CI job).
 
-`npm ci`/`npm install` runs a `postinstall: patch-package` hook — see `patches/`. Two
-patches, both fixing real, on-device-reproduced upstream native-Kotlin crashes:
+`npm ci`/`npm install` runs a `postinstall: patch-package` hook — see `patches/`. Three
+patches, each fixing a real, on-device-reproduced upstream native-Kotlin defect:
 - `expo-speech-recognition+3.1.3.patch` — `PromiseAlreadySettledException` in
   `getSupportedLocales` when a recognizer package fires both `onSupportResult` and a
   duplicate `onError` (observed with `com.google.android.tts`).
@@ -62,10 +62,17 @@ patches, both fixing real, on-device-reproduced upstream native-Kotlin crashes:
   2026-07-14, Android 17). The patch makes metadata gathering best-effort and defaults a
   missing MIME type to `application/octet-stream` (the library's own JS parser calls
   `mimeType.startsWith` unguarded, so a null would silently drop the share).
+- `expo-file-system+19.0.23.patch` — SAF writes opened the document with
+  ContentResolver's default `"w"` mode, which ExternalStorageProvider does not
+  truncate. Every in-place rewrite that made an SAF vault file *shorter* left the old
+  file's tail as stray text: an enriched Note, Enhance, a WYSIWYG delete. Observed
+  2026-10-03, when a 196-byte note landed in a 204-byte file. The patch opens with
+  `"wt"`. `src/lib/vaultFs.safTruncate.test.ts` pins the installed source, so a
+  dropped or non-applying patch fails CI.
 
-If bumping either dependency, re-verify its patch still applies (`npx patch-package
-<pkg> --exclude 'android/build/'` regenerates it) — don't silently drop them, the
-crashes are real and reproducible.
+If bumping any of these dependencies, re-verify its patch still applies (`npx
+patch-package <pkg> --exclude 'android/build/'` regenerates it) — don't silently drop
+them, the defects are real and reproducible.
 
 ## CI (`.github/workflows/ci.yml`)
 Four jobs: `shared` → `mobile`, `mobile-android` (parallel, both

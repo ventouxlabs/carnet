@@ -127,7 +127,12 @@ jobs:
       - uses: ./.github/actions/android-toolchain
 
       - name: Compile generated Kotlin
-        run: cd apps/mobile/android && ./gradlew :app:compileDebugKotlin --console=plain
+        shell: bash
+        run: |
+          set -o pipefail
+          cd apps/mobile/android
+          ./gradlew :app:compileDebugKotlin --console=plain | tee gradle-output.log
+          grep -Eq '^> Task :expo-file-system:compileDebugKotlin( |$)' gradle-output.log
 
   # Installable release APK attached to every run — download it from the
   # run's Artifacts. Signed with the shared release keystore (repo secrets

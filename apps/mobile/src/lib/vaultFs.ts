@@ -87,11 +87,14 @@ export interface VaultFs {
   createFile(parentUri: string, name: string, mime: string): Promise<string>;
   /** Read a file's UTF-8 string content. */
   readString(uri: string): Promise<string>;
-  /** Overwrite a file with UTF-8 string content. */
+  /** Overwrite a file with UTF-8 string content. On SAF this truncates only
+   * because patches/expo-file-system opens the document "wt" — see
+   * vaultFs.safTruncate.test.ts. */
   writeString(uri: string, content: string): Promise<void>;
   /** Read a file as base64. */
   readBinary(uri: string): Promise<string>;
-  /** Overwrite a file with base64-encoded bytes. */
+  /** Overwrite a file with base64-encoded bytes. Same SAF "wt" patch as
+   * writeString. */
   writeBinaryBytes(uri: string, base64: string): Promise<void>;
   /** Delete a file. */
   delete(uri: string): Promise<void>;
