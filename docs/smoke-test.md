@@ -59,7 +59,9 @@ apply to those bounded fixture runs, not general acceptance across devices. The
 [extended handoff](session-handoffs/2026-10-11-extended-device-verification.md) records
 unfolded checks, isolated-user/provider execution and a reproduced root-cache
 isolation failure. The implemented cache fix passed the automated verification gates;
-a new fixed build still needs the root-change retest.)_
+the [fixed-build root-folder retest](session-handoffs/2026-10-11-root-folder-retest.md)
+passed the observed A → B → A case with independent installed-APK and cleanup
+review. Its timing and byte-audit limits remain explicit.)_
 
 - [x] Prepare notes with distinct dates, modes and tags; include open and
       completed tasks, duplicate task text, and two distinct files sharing a title.
@@ -85,12 +87,17 @@ a new fixed build still needs the root-change retest.)_
 - [x] Switch profiles using the same owned root; confirm each profile retains its
       own view choices and returning restores them. A fresh profile showed default
       Open/newest/ungrouped; the first restored Completed/Source/grouped.
-- [ ] Change the root within a profile; confirm choices and tasks belong to the
-      active root and return when switching back, before manual refresh. The
-      2026-10-11 isolated Android-user run failed immediate task isolation: B showed
-      cached A tasks until pull-to-refresh. Completed/Group restored at A; source-title
-      sorting was not confirmed. Retest after the cache fix in a fresh owned Android
-      user: Settings Save can migrate global internal captures.
+- [x] Change the root within the same Default profile; confirm tasks and view
+      choices belong to the active root and return before manual refresh. The fixed
+      APK restored A’s 14 tasks and All/Source title/Group after genuinely picked
+      empty B showed default Open and no A rows at its first observation, about
+      four seconds after Save. Independent review approved this bounded case and
+      owned-user cleanup. Source title retention was visually confirmed; returned
+      XML did not identify the selected sort. The earlier APK’s failure remains in
+      the extended handoff. A fresh owned Android user isolated Settings Save’s
+      global internal-capture migration. The A-last-refresh → B-Save interval was
+      not measured, and every transient frame was not observed; no physical
+      30-second throttle or unchanged-note-byte result is claimed.
 - [ ] Exercise query/filter combinations beyond the separate text/title searches
       and combined mode/tag/status checks above.
 - [x] Repeat layout, keyboard and scrolling checks unfolded (2076 × 2152):
