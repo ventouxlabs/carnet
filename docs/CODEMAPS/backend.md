@@ -1,5 +1,5 @@
 # Device Pipeline & Integrations
-<!-- Generated: 2026-09-08 | Files scanned: 308 (171 src + 137 tests) | Token estimate: ~1600 -->
+<!-- Verified: 2026-10-11 -->
 
 The mobile app has no required HTTP server. Its "backend" is the **on-device enrichment +
 persistence pipeline**, plus an opt-in **Karakeep export** REST client. `apps/mdcrm` is an
@@ -27,7 +27,7 @@ Share    ShareReceive    → enrichSharedImage / Link / raw file → writeIdea /
                            scoped-storage-unreadable)
 ```
 
-## LLM client — `lib/llmClient.ts` (701 ln)
+## LLM client — `lib/llmClient.ts`
 The single OpenAI-compatible client behind the dispatcher. `lib/omniroute.ts` and
 `lib/localLlm.ts` were consolidated into it and **no longer exist**; older docs and
 archived plans naming them are history, not drift.
@@ -37,7 +37,7 @@ archived plans naming them are history, not drift.
 errors: `isNotConfiguredError` `isPermanentError` `isInsecureTransportError`;
 `withSystemOverride` `assertModelConfigured` `assertUrlConfigured`.
 
-## Shared HTTP core — `lib/httpClient.ts` (118 ln)
+## Shared HTTP core — `lib/httpClient.ts`
 The security surface BOTH network clients share (was hand-duplicated):
 `HttpError` base (status + notConfigured; OmniRouteError/KarakeepError are thin
 subclasses), `sanitizeErrorMessage` (THE canonical Bearer redactor — the queues
@@ -45,7 +45,7 @@ re-export it via asyncQueueUtils), `withTimeout(ms, makeTimeoutError, run)`,
 unified `parseErrorBody`. Per-client: error names, user-facing messages, the
 3-line HTTPS-or-LAN wrappers (policy lives in netAllowlist).
 
-## Persistence — `lib/writer.ts` (~1000 ln) + `lib/vaultFs.ts` (243 ln)
+## Persistence — `lib/writer.ts` + `lib/vaultFs.ts`
 Storage backends live behind the `VaultFs` seam (vaultFs.ts: SafFs/FileFs,
 selected ONCE in resolveRoot / fsForUri) — writer.ts is branch-free logic on
 top (collision naming, enumeration, archiving). SAF quirks the seam owns:
@@ -62,11 +62,11 @@ Home banner + review dialog).
 `slugify` `personFilename` `mimeFromFilename`.
 Frontmatter helpers live in `lib/frontmatter.ts` (byte-exact header preservation).
 
-## Offline queue — `lib/queue.ts` (AsyncStorage, 321 ln)
+## Offline queue — `lib/queue.ts` (AsyncStorage)
 `enqueue` → `drainQueue` (on reconnect); `getQueueDepth` `getAllQueueRows` `clearFailedRows`.
 Both online (`confirmSave`) and offline (`processRow`) paths inject tags + location frontmatter.
 
-## Pending-sync queue — `lib/pendingSync.ts` (227) · `pendingSyncRunner.ts` (79) · `hostReachability.ts` (43)
+## Pending-sync queue — `lib/pendingSync.ts` · `pendingSyncRunner.ts` · `hostReachability.ts`
 Karakeep exports that failed with status-0 (host unreachable — VPN/Tailscale down; never
 4xx/5xx) queue as `{filepath, entryTitle}` pointers; the note body is re-read at drain
 time. `drainPendingExports` takes INJECTED deps (unit-testable); runner binds settings +
@@ -76,7 +76,7 @@ Distinct from `queue.ts` (raw captures awaiting enrichment) — do not merge.
 Shared queue scaffolding (createLock/localId/sanitizeError) lives in
 `lib/asyncQueueUtils.ts`.
 
-## Karakeep export — `lib/karakeep.ts` (390) · `lib/karakeepExport.ts` (75) · `lib/karakeepAssetSync.ts` (76)
+## Karakeep export — `lib/karakeep.ts` · `lib/karakeepExport.ts` · `lib/karakeepAssetSync.ts`
 Opt-in REST client to a self-hosted Karakeep (`{url}/api/v1`, Bearer key, HTTPS-or-LAN).
 `createTextBookmark` · `updateTextBookmark` (PATCH — re-export in place, 404→create) · `attachTags` ·
 `uploadAsset` (multipart) · `attachAssetToBookmark`. Shared `karakeepFetch` core (hard timeout,
@@ -107,7 +107,7 @@ delimiters, open a header naming a real note in the bundle, and get a fabricated
 claim attributed to it. Body brackets are deliberately kept (legitimate
 cross-references); title brackets are stripped.
 
-## Retrospective query — `lib/retrospective.ts` (pure, 209 ln)
+## Retrospective query — `lib/retrospective.ts` (pure)
 Selection and presentation for "what have I been thinking about X?".
 `orderCandidates` (body matches first, then Search's own order, deduped by uri —
 it owns dedup, callers must not re-implement it) → `pickForRead` (`MAX_NOTES`) →
@@ -123,10 +123,10 @@ prompt-side delimiter stripping protects.
 `normalizeLeadingMarkdown` is DISPLAY-ONLY; `buildSynthesisNote` saves real
 markdown because Obsidian renders it natively (a test reads `writeSynthesis`'s
 payload to keep those apart).
-`lib/askExplainer.ts` (61 ln) gates the one-time remote-backend disclosure on
+`lib/askExplainer.ts` gates the one-time remote-backend disclosure on
 `isLocalProvider`; `carnet:askExplainerSeen:v1`.
 
-## Vault subdir derivation — `lib/noteSubdirs.ts` (pure, zero imports, 45 ln)
+## Vault subdir derivation — `lib/noteSubdirs.ts` (pure, zero imports)
 `NOTE_SUBDIRS` / `NoteSubdir` / `parentSegment` / `subdirForUri`. Zero imports by
 design: `vault.ts` pulls AsyncStorage at import time, so test mocks can import
 the real `subdirForUri` instead of hand-copying it.
@@ -158,3 +158,25 @@ notifications `lib/captureNotification.ts`.
 
 (`apps/desktop`, the Tauri placeholder stub, was deprecated and removed 2026-07-25 — see
 `.claude/PRPs/plans/completed/desktop-fate.plan.md`.)
+
+Text and image re-enrichment preservation and the image conflict guard live in
+`lib/noteReprocess.ts` and `lib/personInPlace.ts`; merged implementation does not itself
+mean physical LLM re-enrichment acceptance has passed.
+
+## Vault index, Todos, and refresh
+`lib/vault.ts` scans/aggregates note metadata and checklist lines; `lib/todoView.ts`
+filters by text/title, status, capture mode, and source tags, sorts by source date or
+source title, and groups by source URI. `lib/todoViewPreferences.ts` stores view choices
+in AsyncStorage under a JSON tuple of profile id and root URI. The note index cache uses
+`noteIndexKey()` in `lib/vaultStorageKeys.ts` (`carnet:noteindex:v3:<profile>:<encoded-root>`).
+Per-profile/root mutation revisions preserve writes made during scans, and
+`lib/vaultRefreshCoordinator.ts` coalesces concurrent refreshes, tracks status, and
+throttles successful refreshes for 30 seconds. Home's explicit scan also reports
+possible SAF stale tails through `lib/safTailDetector.ts`; candidates are metadata-only
+and require manual review.
+
+On SAF, writes request `"wt"` and fall back to `"w"` only when the provider rejects
+truncating mode or returns no stream. That fallback cannot guarantee truncation.
+Permission-denied/revoked refresh failures are surfaced as unavailable; there is no
+fallback to another root. Physical provider and Syncthing behavior remain device-level
+checks, not implied by automated tests.

@@ -1,5 +1,5 @@
 # Frontend — screens & components
-<!-- Generated: 2026-09-08 | Files scanned: 308 (171 src + 137 tests) | Token estimate: ~1000 -->
+<!-- Verified: 2026-10-11 -->
 
 ## Navigation — `apps/mobile/App.tsx` (native-stack)
 ```
@@ -9,22 +9,26 @@ Home → Capture | PhotoCapture | AudioCapture | ShareReceive | RecentDetail
 Capture modes route through `CaptureFab` (Idea one-tap; Journal/Contact/Photo/Audio
 behind the "more modes" chevron sheet).
 
-## Screens (`apps/mobile/src/screens`) — smoke tests exist for all (headless)
+## Screens (`apps/mobile/src/screens`)
 | screen | ln | role |
 |---|---|---|
-| `HomeScreen` | ~600 | recents + `CaptureFab`; voice/pending-Karakeep/sync-conflict banners; conflict review dialog; cold-start report |
-| `CaptureScreen` | 803 | Idea/Journal/Contact text capture; dictation; Tags+Location; save-first |
-| `PhotoCaptureScreen` | 507 | camera → vision enrichment (Photo) |
-| `AudioCaptureScreen` | 629 | record → on-device transcribe → journal |
-| `RecentDetailScreen` | ~1560 | note view + WYSIWYG edit, tags, geo, attachments, Related card (lib/relatedNotes), Karakeep export (unreachable → pending-sync queue) |
-| `ShareReceiveScreen` | 633 | Android share-sheet intake (image / audio / link / any file; reads via content:// grant) |
-| `SearchScreen` | 609 | vault full-text/tag search (B6), stamp-based filters; "Ask about these N notes" → `AskScreen` (N = what will be *sent*, capped at `MAX_NOTES`) |
-| `AskScreen` | 380 | retrospective query: reads the selected notes, asks via `dispatcher.askVault`, renders a cited answer, explicit Save → `Notes/` |
-| `TodosScreen` | 262 | vault-wide checklist aggregation (v0.10.0); text-anchored toggle write-back |
-| `TagBrowserScreen` | 140 | tags + counts → routes into Search |
-| `SettingsScreen` | 802 | OmniRoute URL/key + chat/vision models, Karakeep, voice check, flags |
+| `HomeScreen` | — | recents + `CaptureFab`; voice/pending-Karakeep/sync-conflict banners; conflict review dialog; cold-start report |
+| `CaptureScreen` | — | Idea/Journal/Contact text capture; dictation; Tags+Location; save-first |
+| `PhotoCaptureScreen` | — | camera → vision enrichment (Photo) |
+| `AudioCaptureScreen` | — | record → on-device transcribe → journal |
+| `RecentDetailScreen` | — | note view + WYSIWYG edit, tags, geo, attachments, Related card, Karakeep export |
+| `ShareReceiveScreen` | — | Android share-sheet intake (image / audio / link / any file; reads via content:// grant) |
+| `SearchScreen` | — | vault full-text/tag search, stamp filters; "Ask about these N notes" → `AskScreen` |
+| `AskScreen` | — | retrospective query, cited answer, explicit Save → `Notes/` |
+| `TodosScreen` | — | vault-wide checklist aggregation; text/title query, Open/Completed/All, mode/tag filters, date/title sort, optional source grouping, text-anchored toggle write-back |
+| `TagBrowserScreen` | — | tags + counts → routes into Search |
+| `SettingsScreen` | — | provider/model settings, Karakeep, voice check, flags |
 
-`App.tsx` (295) also mounts the pending-sync drain trigger (cold start + AppState→active,
+Todos behavior lives in `lib/todoView.ts` (normalization, filtering, sorting, URI-based
+grouping) and `lib/todoViewPreferences.ts` (profile + root scoped saved choices). The
+screen loads the cached note index and refreshes through `lib/vaultRefreshCoordinator.ts`.
+
+`App.tsx` also mounts the pending-sync drain trigger (cold start + AppState→active,
 30s throttle) — see backend.md "Pending-sync queue".
 
 Business logic lives in extracted `lib/*.ts` modules (ideaSaveFirst, saveFirstOutcome,
@@ -82,6 +86,6 @@ Verification ladder — each rung catches what the one above cannot:
 inflates; an unsupported RemoteViews view fails only here).
 
 ## State & theming
-React local state; `lib/settings.ts` (AsyncStorage blob `carnet:settings:v2`; API keys
+React local state; `lib/settings.ts` (AsyncStorage blob `carnet:settings:v4`; API keys
 in SecureStore). Theming via `lib/theme.ts` `useCarnetTheme` tokens — DESIGN.md is the
 visual contract (Stamped Paper). Maestro flows in `apps/mobile/.maestro/`.

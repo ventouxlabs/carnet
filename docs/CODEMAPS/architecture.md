@@ -1,5 +1,5 @@
 # Architecture — Carnet
-<!-- Generated: 2026-09-08 | Files scanned: 308 (171 src + 137 tests) | Token estimate: ~900 -->
+<!-- Verified: 2026-10-11 -->
 
 Mobile-first knowledge capture. The Android app writes Markdown into a local folder;
 Syncthing replicates it peer-to-peer into an Obsidian vault on the workstation. The app
@@ -52,8 +52,8 @@ Export (opt-in, per note, from RecentDetail)
 ```
 
 ## Layer boundaries
-- **UI** `screens/` (11), `components/` (40) — capture + review + search + ask
-- **Domain** `lib/` (100 modules, each with co-located tests) — enrichment (dispatcher
+- **UI** `screens/`, `components/` — capture + review + search + ask
+- **Domain** `lib/` (small domain modules with co-located tests) — enrichment (dispatcher
   seam covers ALL backend-divergent calls incl. transcribe/OCR/listModels), sanitize,
   markdown/frontmatter, vault IO behind the `VaultFs` seam (SAF/file:// selected once)
   + tag/search index + sync-conflict detection, offline queue + pending-sync (Karakeep)
