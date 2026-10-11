@@ -23,7 +23,7 @@ index 9f3cfb4..51e145c 100644
 +import java.io.FileNotFoundException
  import java.io.InputStream
  import java.io.OutputStream
-@@ -72,4 +73,12 @@ class SAFDocumentFile(private val context: Context, override val uri: Uri) : Uni
+@@ -72,5 +73,13 @@ class SAFDocumentFile(private val context: Context, override val uri: Uri) : Uni
    override fun outputStream(): OutputStream {
 -    return context.contentResolver.openOutputStream(uri)
 +    // Prefer truncating writes, but preserve compatibility with providers that
