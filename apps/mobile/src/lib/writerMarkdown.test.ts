@@ -31,7 +31,7 @@ describe("injectImageEmbed", () => {
   it("inserts embed under H1 with CRLF line ending", () => {
     const md = "# Title\r\nbody\r\n";
     expect(injectImageEmbed(md, "../Photos/a.jpg")).toBe(
-      "# Title\n\n![](../Photos/a.jpg)\nbody\r\n",
+      "# Title\r\n\r\n![](../Photos/a.jpg)\r\nbody\r\n",
     );
   });
 
@@ -412,5 +412,68 @@ describe("injectPlaces", () => {
     expect(out).toContain("## Files");
     expect(out).toContain("[spec.pdf](../Files/spec.pdf)");
     expect(out).toContain("## Places");
+  });
+});
+
+
+describe("attachment reinjection regressions", () => {
+  const refs: AttachmentRef[] = [{ kind: "file", rel: "../Files/spec.pdf", filename: "spec.pdf" }];
+  it("retains authored Files prose, existing links and subsequent sections", () => {
+    const original = "# T\n\n## Files\n\nKeep the paper originals.\n\n[old.pdf](../Files/old.pdf)\n\n## Next\n\nDo this tomorrow.\n";
+    const once = injectAttachments(original, refs);
+    expect(once).toContain("Keep the paper originals.");
+    expect(once).toContain("[old.pdf](../Files/old.pdf)");
+    expect(once).toContain("## Next\n\nDo this tomorrow.\n");
+    expect(injectAttachments(once, refs)).toBe(once);
+    expect(stripInjectedAttachments(once)).toContain("Keep the paper originals.");
+  });
+  it("recognizes CRLF Files headings without duplicating sections", () => {
+    const original = "# T\r\n\r\n## Files\r\n\r\nKeep originals.\r\n";
+    const once = injectAttachments(original, refs);
+    expect(once.match(/^## Files\r?$/gm)).toHaveLength(1);
+    expect(once).toContain("Keep originals.\r\n");
+    expect(injectAttachments(once, refs)).toBe(once);
+  });
+  it.each(["```", "~~~~"])("ignores H1 and Files headings inside %s fences", (fence) => {
+    const original = `${fence}\n# example\n## Files\nkeep code\n${fence}\n\n# Real title\n\nbody\n`;
+    const once = injectAttachments(original, [{ kind: "image", rel: "../Photos/a.jpg", filename: "a.jpg" }, ...refs]);
+    expect(once).toContain(`${fence}\n# example\n## Files\nkeep code\n${fence}`);
+    expect(once).toContain("# Real title\n\n![](../Photos/a.jpg)");
+    expect(stripInjectedAttachments(once)).toBe(original);
+    expect(injectAttachments(once, refs)).toBe(once);
+  });
+  it("round-trips spaced and parenthesized filenames through injection and stripping", () => {
+    const original = "# T\n\nbody\n";
+    const refs: AttachmentRef[] = [
+      { kind: "image", filename: "a photo (1).jpg", rel: "../Photos/a photo (1).jpg" },
+      { kind: "file", filename: "a spec (final).pdf", rel: "../Files/a spec (final).pdf" },
+    ];
+    const once = injectAttachments(original, refs);
+    expect(once).toContain("![](<../Photos/a photo (1).jpg>)");
+    expect(once).toContain("[a spec (final).pdf](<../Files/a spec (final).pdf>)");
+    expect(stripInjectedAttachments(once)).toBe(original);
+    expect(injectAttachments(once, refs)).toBe(once);
+  });
+  it("preserves CRLF body bytes across image/file injection and stripping", () => {
+    const body = "# T\r\n\r\nbody\r\n";
+    const refs: AttachmentRef[] = [
+      { kind: "image", filename: "a.jpg", rel: "../Photos/a.jpg" },
+      { kind: "file", filename: "spec.pdf", rel: "../Files/spec.pdf" },
+    ];
+    expect(stripInjectedAttachments(injectAttachments(body, refs))).toBe(body);
+  });
+  it("does not duplicate a legacy spaced/parenthesized image destination", () => {
+    const original = "# T\n\n![](../Photos/a photo (1).jpg)\n\nbody\n";
+    expect(injectImageEmbed(original, "../Photos/a photo (1).jpg")).toBe(original);
+  });
+  it("does not duplicate a legacy spaced file destination", () => {
+    const original = "# T\n\n## Files\n\nKeep originals.\n\n[a spec (1).pdf](../Files/a spec (1).pdf)\n";
+    expect(injectAttachments(original, [{ kind: "file", filename: "a spec (1).pdf", rel: "../Files/a spec (1).pdf" }])).toBe(original);
+  });
+  it("keeps frontmatter first when the only H1 is fenced code", () => {
+    const original = "---\nkind: note\n---\n```\n# example\n```\n";
+    const once = injectImageEmbed(original, "../Photos/a.jpg");
+    expect(once).toBe("---\nkind: note\n---\n![](../Photos/a.jpg)\n\n```\n# example\n```\n");
+    expect(stripInjectedAttachments(splitFrontmatter(once).body)).toBe(splitFrontmatter(original).body);
   });
 });

@@ -18,6 +18,42 @@
 // this cannot form a cycle back into writer.ts.
 import { formatCoords, type Coords } from "./location";
 import { splitFrontmatter } from "./frontmatter";
+import { attachmentDestination, pairedMarkdownLinks } from "./pairedMarkdownLinks";
+
+/** Only headings outside fenced code can anchor generated content. */
+function headingLines(lines: readonly string[]): Set<number> {
+  const headings = new Set<number>();
+  let fence: { char: string; length: number } | null = null;
+  lines.forEach((raw, i) => {
+    const line = raw.replace(/\r$/, "");
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (close && close[1][0] === fence.char && close[1].length >= fence.length) fence = null;
+      return;
+    }
+    const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (open && !(open[1][0] === "`" && open[2].includes("`"))) {
+      fence = { char: open[1][0], length: open[1].length };
+      return;
+    }
+    if (/^#{1,2} /.test(line)) headings.add(i);
+  });
+  return headings;
+}
+
+function firstH1(body: string): RegExpMatchArray | null {
+  const lines = body.split("\n");
+  const headings = headingLines(lines);
+  let offset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (headings.has(i) && /^# /.test(lines[i])) {
+      const match = /^(#\s+.+?)(\r?\n|$)/.exec(body.slice(offset));
+      if (match) { match.index = offset; return match; }
+    }
+    offset += lines[i].length + 1;
+  }
+  return null;
+}
 
 /**
  * Idempotently insert-or-replace an H2 section in a markdown body.
@@ -31,7 +67,8 @@ import { splitFrontmatter } from "./frontmatter";
  * `## Transcript ` with trailing space does not, neither does `##  Foo`
  * with double space). This is deliberate: Obsidian's heading parser is
  * strict, and exact-match means re-runs always find their own section
- * back without surprises from whitespace drift.
+ * back without surprises from whitespace drift. CRLF terminators are accepted;
+ * headings within fenced code do not count.
  *
  * Section boundary stops at H1 and H2 only. H3+ subheadings are treated as
  * part of the current section's body, so a transcript can include
@@ -54,21 +91,23 @@ export function upsertSection(
 
   const headingLine = `## ${heading}`;
   const lines = markdown.split("\n");
-  const startIdx = lines.findIndex((l) => l === headingLine);
+  const headings = headingLines(lines);
+  const startIdx = lines.findIndex((l, i) => headings.has(i) && l.replace(/\r$/, "") === headingLine);
 
   if (startIdx === -1) {
     // Append. Normalize trailing newlines so output always ends with
     // exactly one newline after the appended body. Skip the leading "\n\n"
     // separator entirely when markdown is empty so the output doesn't start
     // with phantom blank lines.
-    const trimmed = markdown.replace(/\n+$/, "");
-    const separator = trimmed.length === 0 ? "" : "\n\n";
-    return `${trimmed}${separator}${headingLine}\n\n${body}\n`;
+    const eol = markdown.includes("\r\n") ? "\r\n" : "\n";
+    const trimmed = markdown.replace(/(?:\r?\n)+$/, "");
+    const separator = trimmed.length === 0 ? "" : eol + eol;
+    return `${trimmed}${separator}${headingLine}${eol}${eol}${body.replace(/\r?\n/g, eol)}${eol}`;
   }
 
   let endIdx = lines.length;
   for (let i = startIdx + 1; i < lines.length; i++) {
-    if (lines[i].startsWith("## ") || lines[i].startsWith("# ")) {
+    if (headings.has(i)) {
       endIdx = i;
       break;
     }
@@ -99,20 +138,23 @@ export function upsertSection(
  * the embed. This helper handles `\n` and end-of-string equally.
  */
 export function injectImageEmbed(markdown: string, relPath: string): string {
-  const embed = `![](${relPath})`;
-  if (markdown.includes(embed)) return markdown;
+  const embed = `![](${attachmentDestination(relPath)})`;
+  if (markdown.includes(embed) || pairedMarkdownLinks(markdown).some((link) =>
+    link.image && link.label === "" && link.rel === relPath)) return markdown;
   const { header, body } = splitFrontmatter(markdown);
+  const eol = body.includes("\r\n") ? "\r\n" : "\n";
   // Match the body's H1 line and capture its trailing newline (if any).
-  const match = body.match(/^(#\s+.+?)(\r?\n|$)/m);
+  const match = firstH1(body);
   if (!match) {
     // A closing fence at end-of-file has no newline of its own to stand on.
-    const fenceEnd = header && !header.endsWith("\n") ? "\n" : "";
-    return `${header}${fenceEnd}${embed}\n\n${body}`;
+    const fenceEnd = header && !header.endsWith("\n") ? eol : "";
+    return `${header}${fenceEnd}${embed}${eol}${eol}${body}`;
   }
   const idx = match.index ?? 0;
   const before = body.slice(0, idx + match[1].length);
   const after = body.slice(idx + match[0].length);
-  return `${header}${before}\n\n${embed}\n${after}`;
+  const anchorEol = match[2] || eol;
+  return `${header}${before}${anchorEol}${anchorEol}${embed}${anchorEol}${after}`;
 }
 
 /** A binary attachment carried alongside a capture: the storage subdir, the
@@ -131,7 +173,8 @@ export interface AttachmentRef {
 /**
  * Fold attachment references into an enriched markdown body. Images become
  * `![](rel)` embeds under the H1 (order preserved); non-image files are
- * collected into a single `## Files` section as a markdown link list.
+ * collected into a single `## Files` section as a markdown link list, keeping
+ * existing authored content and adding only references not already present.
  *
  * Pure function — the caller writes the binaries to disk first (so `rel`
  * resolves) and persists the returned markdown. Shared by the online capture
@@ -153,20 +196,45 @@ export function injectAttachments(
   if (files.length > 0) {
     // Blank line between links so adjacent ones don't soft-break onto a single
     // line in raw markdown (Obsidian); each still strips cleanly for display.
-    const body = files.map((f) => `[${f.filename}](${f.rel})`).join("\n\n");
-    md = upsertSection(md, "Files", body);
+    const links = files.map((f) => `[${f.filename}](${attachmentDestination(f.rel)})`);
+    md = appendFileLinks(md, links);
   }
   return md;
 }
 
-/** An image embed exactly as injectImageEmbed writes it: no alt text, no
- * indent, a `../Photos/` link with listPairedBinaries' filename class. */
-const INJECTED_EMBED_LINE = /^!\[\]\(\.\.\/Photos\/[^/\s)]+\)\r?$/;
-/** A `## Files` link exactly as injectAttachments writes it: the label IS the
- * filename. attachmentsFromBody files everything but Photos as a file. */
-const INJECTED_FILE_LINE = /^\[([^\]/\s)]+)\]\(\.\.\/(?:Files|Audio)\/\1\)\r?$/;
-/** injectImageEmbed's own H1 matcher — the embeds go under its first match. */
-const EMBED_ANCHOR_H1 = /^(#\s+.+?)(\r?\n|$)/m;
+/** Match a whole app-owned link, never inline prose or a custom label. */
+function ownedLink(line: string, image: boolean): boolean {
+  const text = line.replace(/\r$/, "");
+  const links = pairedMarkdownLinks(text);
+  return links.length === 1 && links[0].start === 0 && links[0].end === text.length &&
+    links[0].image === image && (image
+      ? links[0].subdir === "Photos" && links[0].label === ""
+      : links[0].subdir !== "Photos" && links[0].label === links[0].filename);
+}
+
+/** Add missing file links without replacing user-authored section content. */
+function appendFileLinks(markdown: string, links: readonly string[]): string {
+  const { header, body } = splitFrontmatter(markdown);
+  const lines = body.split("\n");
+  const headings = headingLines(lines);
+  const start = lines.findIndex((line, i) => headings.has(i) && line.replace(/\r$/, "") === "## Files");
+  if (start === -1) return upsertSection(markdown, "Files", links.join("\n\n"));
+  let end = start + 1;
+  while (end < lines.length && !headings.has(end)) end++;
+  const existing = lines.slice(start + 1, end).map(line => line.replace(/\r$/, ""));
+  const existingPaths = new Set(existing.filter(line => ownedLink(line, false))
+    .map(line => pairedMarkdownLinks(line)[0].rel));
+  const missing = [...new Set(links)].filter(link =>
+    !existing.includes(link) && !existingPaths.has(pairedMarkdownLinks(link)[0]?.rel));
+  if (missing.length === 0) return markdown;
+  const offset = lines.slice(0, end).reduce((sum, line) => sum + line.length + 1, 0);
+  const at = Math.min(offset, body.length);
+  const before = body.slice(0, at);
+  const after = body.slice(at);
+  const eol = lines[start].endsWith("\r") ? "\r\n" : "\n";
+  const separator = before.endsWith(eol + eol) ? "" : before.endsWith(eol) ? eol : eol + eol;
+  return header + before + separator + missing.join(eol + eol) + eol + (after ? eol : "") + after;
+}
 
 const isBlankLine = (line: string | undefined): boolean =>
   line !== undefined && line.trim().length === 0;
@@ -174,11 +242,11 @@ const isBlankLine = (line: string | undefined): boolean =>
 /** The embed run injectImageEmbed leaves: under the body's first H1 it is
  * `(blank, embed)` pairs; with no H1, `(embed, blank)` pairs at the top. */
 function injectedEmbedRun(body: string, lines: readonly string[]): number[] {
-  const h1 = EMBED_ANCHOR_H1.exec(body);
+  const h1 = firstH1(body);
   const run: number[] = [];
   if (h1) {
     let i = body.slice(0, h1.index).split("\n").length; // the line after the H1
-    while (isBlankLine(lines[i]) && INJECTED_EMBED_LINE.test(lines[i + 1] ?? "")) {
+    while (isBlankLine(lines[i]) && ownedLink(lines[i + 1] ?? "", true)) {
       run.push(i, i + 1);
       i += 2;
     }
@@ -186,7 +254,7 @@ function injectedEmbedRun(body: string, lines: readonly string[]): number[] {
   }
   let i = 0;
   while (isBlankLine(lines[i])) i++; // a CRLF body keeps a leading "\r" line
-  while (INJECTED_EMBED_LINE.test(lines[i] ?? "") && isBlankLine(lines[i + 1])) {
+  while (ownedLink(lines[i] ?? "", true) && isBlankLine(lines[i + 1])) {
     run.push(i, i + 1);
     i += 2;
   }
@@ -198,10 +266,11 @@ function injectedEmbedRun(body: string, lines: readonly string[]): number[] {
  * followed would not be one. Its lines and the blank run before it, but not
  * the final "" that keeps the body's own closing line break. */
 function injectedFilesSection(lines: readonly string[]): number[] {
-  const start = lines.findIndex((line) => line.replace(/\r$/, "") === "## Files");
+  const headings = headingLines(lines);
+  const start = lines.findIndex((line, i) => headings.has(i) && line.replace(/\r$/, "") === "## Files");
   if (start === -1) return [];
   const content = lines.slice(start + 1).filter((line) => !isBlankLine(line));
-  if (content.length === 0 || !content.every((line) => INJECTED_FILE_LINE.test(line))) return [];
+  if (content.length === 0 || !content.every((line) => ownedLink(line, false))) return [];
   let from = start;
   while (from > 0 && isBlankLine(lines[from - 1])) from--;
   const to = lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
@@ -247,12 +316,13 @@ export interface Place {
 function readSection(markdown: string, heading: string): string | null {
   const headingLine = `## ${heading}`;
   const lines = markdown.split("\n");
-  const startIdx = lines.findIndex((l) => l === headingLine);
+  const headings = headingLines(lines);
+  const startIdx = lines.findIndex((l, i) => headings.has(i) && l.replace(/\r$/, "") === headingLine);
   if (startIdx === -1) return null;
 
   let endIdx = lines.length;
   for (let i = startIdx + 1; i < lines.length; i++) {
-    if (lines[i].startsWith("## ") || lines[i].startsWith("# ")) {
+    if (headings.has(i)) {
       endIdx = i;
       break;
     }

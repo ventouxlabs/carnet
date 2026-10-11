@@ -26,16 +26,16 @@ import { mergeUserTags } from "./tags";
 import type { VaultContext } from "./vaultContext";
 import { resolveContextRoot, resolveRoot, type Root } from "./vaultRoot";
 import { repairEmbedsAboveFrontmatter } from "./legacyEmbedRepair";
+import { pairedMarkdownLinks } from "./pairedMarkdownLinks";
 
 /**
  * Locate the first paired-binary filename of a given subdir in a note body.
- * The link convention is `../{subdir}/{filename}`; the filename class rejects
- * `/` and whitespace so a crafted traversal link can't match out of the subdir.
+ * The link convention is `../{subdir}/{filename}`. The shared parser accepts
+ * spaced/parenthesized names and rejects traversal without returning partial paths.
  * Returns the filename (e.g. `photo.jpg`) or null when there is no such link.
  */
 export function findPairedLink(body: string, subdir: string): string | null {
-  const match = body.match(new RegExp(`\\.\\./${subdir}/([^/\\s)]+)`));
-  return match ? match[1] : null;
+  return pairedMarkdownLinks(body).find((link) => link.subdir === subdir)?.filename ?? null;
 }
 
 /** Fields the old note carries that must not outlive a fresh vision reply.

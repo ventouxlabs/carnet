@@ -65,16 +65,18 @@ beforeEach(() => {
 });
 
 describe("findPairedLink", () => {
+  it.each(["![](<../Photos/a photo (1).jpg>)", "![](../Photos/a photo (1).jpg)"])("reads full names from %s", (body) => {
+    expect(findPairedLink(body, "Photos")).toBe("a photo (1).jpg");
+  });
+
   it("extracts the filename for the requested subdir", () => {
     const body = "# T\n\n![](../Photos/pic-01.jpg)\n";
     expect(findPairedLink(body, "Photos")).toBe("pic-01.jpg");
     expect(findPairedLink(body, "Audio")).toBeNull();
   });
 
-  it("captures only up to the next slash (the filename class rejects '/')", () => {
-    // Faithful to writer's link regex: the capture stops at the slash, so a
-    // crafted `../Photos/../secret` yields just `..`, never the traversal tail.
-    expect(findPairedLink("[x](../Photos/../secret)", "Photos")).toBe("..");
+  it("rejects traversal rather than returning a partial filename", () => {
+    expect(findPairedLink("[x](../Photos/../secret)", "Photos")).toBeNull();
   });
 
   it("returns null when the subdir link is absent", () => {
