@@ -73,6 +73,15 @@ Six capture modes:
 
 All modes go through OmniRoute for LLM enrichment, then write directly to the local capture folder. Offline captures are queued on-device (AsyncStorage) and drained on reconnect. Photo capture shares the same vision pipeline used by the Android share-target (Share → carnet on an image). Quick captures also work from the persistent notification's inline reply, and the vault is browsable/searchable in-app (tags + full text).
 
+The **Todos** screen collects Markdown checkboxes across the active vault. Search
+matches task text or the source note title. Choose **Open**, **Completed**, or
+**All**; filter by capture mode and source-note tags (any selected mode and any
+selected tag match, with the filter categories combined). Sort by **Newest** or
+**Oldest** using the source note's date, or by **Source**. Optional source grouping
+keeps tasks from each file together, even when notes share a title. View choices
+are remembered separately for each profile and vault folder. Task completion
+still updates the checkbox in its original Markdown file.
+
 Any note can optionally be pushed to a self-hosted **Karakeep** instance from its detail screen ("Send to Karakeep" → text bookmark + tags + image/file attachments). Export is opt-in and configured per device.
 
 ## Layout
