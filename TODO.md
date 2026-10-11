@@ -33,7 +33,13 @@ review confirms the bounded layout/provider/modern checks and cleanup.
 B initially showed A tasks until manual refresh. Completed/Group restored at A,
 but source-title sorting was not confirmed. The cache fix is implemented;
 independent review passed 90 focused tests. Shared build/typecheck/12 tests, mobile typecheck/lint/2,823 tests, capture-flow 763 tests, stale-plan and diff checks passed.
-Physical A → B → A acceptance of a new fixed build remains open. Real Syncthing refresh and #228 LLM
+The fixed CI APK subsequently passed the observed same-profile A → B → A retest:
+A’s 14 tasks → empty B at the first observation about four seconds after Save,
+without Refresh → A’s 14 tasks and All/Source title/Group choices restored.
+Independent installed-APK and cleanup review approved this bounded case; see [the
+root-folder retest handoff](docs/session-handoffs/2026-10-11-root-folder-retest.md).
+The A-last-refresh → B-Save interval was not measured, so physical 30-second
+throttle acceptance is not claimed. Real Syncthing refresh and #228 LLM
 re-enrichment acceptance remain open.
 
 ## Resolved in v0.2
