@@ -10,6 +10,7 @@ import {
   type Place,
 } from "./writerMarkdown";
 import { splitFrontmatter } from "./frontmatter";
+import { attachmentDestination, pairedMarkdownLinks } from "./pairedMarkdownLinks";
 
 // ── injectImageEmbed ──────────────────────────────────────────────────────────
 
@@ -475,5 +476,42 @@ describe("attachment reinjection regressions", () => {
     const once = injectImageEmbed(original, "../Photos/a.jpg");
     expect(once).toBe("---\nkind: note\n---\n![](../Photos/a.jpg)\n\n```\n# example\n```\n");
     expect(stripInjectedAttachments(splitFrontmatter(once).body)).toBe(splitFrontmatter(original).body);
+  });
+});
+
+
+describe("attachment deduplication keeps Markdown code examples", () => {
+  const cases = ["\n", "\r\n"].flatMap(eol => ["simple", "spaced (1)"].map(name => ({ eol, name })));
+  it.each(cases)("injects actual images alongside fenced examples: $name / $eol", ({ eol, name }) => {
+    const rel = `../Photos/${name}.jpg`;
+    const embed = `![](${attachmentDestination(rel)})`;
+    const code = ["```md", embed, "```"].join(eol);
+    const original = ["# T", "", code, "", "body", ""].join(eol);
+    const once = injectImageEmbed(original, rel);
+    expect(once).toContain(code);
+    expect(once).toContain(`# T${eol}${eol}${embed}`);
+    expect(pairedMarkdownLinks(once).map(link => link.rel)).toEqual([rel]);
+    expect(injectImageEmbed(once, rel)).toBe(once);
+    expect(stripInjectedAttachments(once)).toBe(original);
+  });
+  it.each(cases)("injects actual files alongside fenced Files examples: $name / $eol", ({ eol, name }) => {
+    const filename = `${name}.pdf`;
+    const rel = `../Files/${filename}`;
+    const link = `[${filename}](${attachmentDestination(rel)})`;
+    const code = ["~~~~md", link, "~~~~"].join(eol);
+    const original = ["# T", "", "## Files", "", "Keep originals.", "", code, "", "## Next", "", "Next task.", ""].join(eol);
+    const refs: AttachmentRef[] = [{ kind: "file", filename, rel }];
+    const once = injectAttachments(original, refs);
+    expect(once).toContain(code);
+    expect(once).toContain(`Keep originals.${eol}`);
+    expect(once).toContain(`## Next${eol}${eol}Next task.${eol}`);
+    expect(pairedMarkdownLinks(once).map(link => link.rel)).toEqual([rel]);
+    expect(injectAttachments(once, refs)).toBe(once);
+  });
+  it("does not treat image-looking frontmatter as a body attachment", () => {
+    const original = '---\nexample: "![](../Photos/a.jpg)"\n---\n# T\n\nbody\n';
+    const once = injectImageEmbed(original, "../Photos/a.jpg");
+    expect(splitFrontmatter(once).header).toBe(splitFrontmatter(original).header);
+    expect(pairedMarkdownLinks(splitFrontmatter(once).body).map(link => link.rel)).toEqual(["../Photos/a.jpg"]);
   });
 });

@@ -139,9 +139,9 @@ export function upsertSection(
  */
 export function injectImageEmbed(markdown: string, relPath: string): string {
   const embed = `![](${attachmentDestination(relPath)})`;
-  if (markdown.includes(embed) || pairedMarkdownLinks(markdown).some((link) =>
-    link.image && link.label === "" && link.rel === relPath)) return markdown;
   const { header, body } = splitFrontmatter(markdown);
+  if (pairedMarkdownLinks(body).some((link) =>
+    link.image && link.label === "" && link.rel === relPath)) return markdown;
   const eol = body.includes("\r\n") ? "\r\n" : "\n";
   // Match the body's H1 line and capture its trailing newline (if any).
   const match = firstH1(body);
@@ -221,14 +221,21 @@ function appendFileLinks(markdown: string, links: readonly string[]): string {
   if (start === -1) return upsertSection(markdown, "Files", links.join("\n\n"));
   let end = start + 1;
   while (end < lines.length && !headings.has(end)) end++;
-  const existing = lines.slice(start + 1, end).map(line => line.replace(/\r$/, ""));
-  const existingPaths = new Set(existing.filter(line => ownedLink(line, false))
-    .map(line => pairedMarkdownLinks(line)[0].rel));
-  const missing = [...new Set(links)].filter(link =>
-    !existing.includes(link) && !existingPaths.has(pairedMarkdownLinks(link)[0]?.rel));
-  if (missing.length === 0) return markdown;
+  const sectionFrom = lines.slice(0, start + 1).reduce((sum, line) => sum + line.length + 1, 0);
   const offset = lines.slice(0, end).reduce((sum, line) => sum + line.length + 1, 0);
   const at = Math.min(offset, body.length);
+  // Parse the complete body once: a standalone link inside fenced code is an
+  // example, not an existing attachment. Preserve the whole-line ownership rule.
+  const existingPaths = new Set(pairedMarkdownLinks(body).filter(link => {
+    const before = link.start === 0 || body[link.start - 1] === "\n";
+    const after = link.end === body.length || body[link.end] === "\n" ||
+      (body[link.end] === "\r" && body[link.end + 1] === "\n");
+    return link.start >= sectionFrom && link.end <= at && before && after &&
+      !link.image && link.subdir !== "Photos" && link.label === link.filename;
+  }).map(link => link.rel));
+  const missing = [...new Set(links)].filter(link =>
+    !existingPaths.has(pairedMarkdownLinks(link)[0]?.rel));
+  if (missing.length === 0) return markdown;
   const before = body.slice(0, at);
   const after = body.slice(at);
   const eol = lines[start].endsWith("\r") ? "\r\n" : "\n";
