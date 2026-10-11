@@ -6,8 +6,8 @@
  * local flip that reverts on failure.
  */
 import { useCallback, useMemo, useRef, useState } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
-import { Checkbox, SegmentedButtons, Snackbar, Text } from "react-native-paper";
+import { FlatList, SectionList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
+import { Button, Checkbox, Snackbar, Text } from "react-native-paper";
 import { useFocusEffect } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
@@ -30,7 +30,9 @@ import { resolveContextRoot } from "../lib/vaultRoot";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Todos">;
 
-type TodoFilter = "open" | "all";
+import { TodoViewControls } from "../components/TodoViewControls";
+import { defaultTodoViewPreferences, normalizeTodoViewPreferences, selectTodos, getTodoFilterOptions, groupTodosBySource, type TodoViewPreferences } from "../lib/todoView";
+import { getTodoViewPreferences, setTodoViewPreferences } from "../lib/todoViewPreferences";
 
 /** Return a NEW NoteIndex with the note's todo at `(uri, ordinal)` flipped to
  * `!checked` (its OWN current checked, not `todo.checked`) — never mutates
@@ -84,68 +86,138 @@ export default function TodosScreen({ navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<TodoFilter>("open");
+  const [view, setView] = useState(defaultTodoViewPreferences);
+  const [hydrated, setHydrated] = useState(false);
+  const [preferenceError, setPreferenceError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const generationRef = useRef(0);
+  const [renderedContext, setRenderedContext] = useState<ReturnType<typeof captureVaultContext> | null>(null);
+  const viewRef = useRef(view);
+  const saveRevisionRef = useRef(0);
 
   useFocusEffect(
     useCallback(() => {
-      let active = true;
+      // A retry starts a new guarded load generation for the focused screen.
+      void loadAttempt;
+      const generation = ++generationRef.current;
+      const current = () => generationRef.current === generation;
       vaultContextRef.current = null;
       indexRef.current = null;
+      setRenderedContext(null);
       setIndex(null);
+      const defaults = defaultTodoViewPreferences();
+      setView(defaults);
+      viewRef.current = defaults;
+      setHydrated(false);
       setLoading(true);
-      void getSettings().then((settings) => captureVaultContext(settings)).then((context) => {
-        if (!active) return;
-        vaultContextRef.current = context;
-        return getNoteIndex(context.profileId, resolveContextRoot(context))
-          .then((next) => {
-            if (active && vaultContextRef.current === context) {
-              indexRef.current = next;
-              setIndex(next);
-            }
-          })
-          .then(() => refreshActiveVault(context))
-          .then((next) => {
-            if (active && vaultContextRef.current === context && next) {
-              indexRef.current = next;
-              setIndex(next);
-            }
-          });
-      })
-        .finally(() => {
-          if (active) setLoading(false);
-        });
+      setRefreshing(false);
+      setLoadError(null);
+      setPreferenceError(null);
+      setRefreshError(null);
+      setToggleError(null);
+      void (async () => {
+        try {
+          const context = captureVaultContext(await getSettings());
+          if (!current()) return;
+          vaultContextRef.current = context;
+          setRenderedContext(context);
+          const matches = () => current() && vaultContextRef.current === context;
+          // Index and preferences are independent: a preference failure must
+          // not hide the cache, and neither result may cross a focus boundary.
+          await Promise.all([
+            (async () => {
+              try {
+                const preferences = await getTodoViewPreferences(context);
+                if (matches()) {
+                  viewRef.current = preferences;
+                  setView(preferences);
+                  setHydrated(true);
+                }
+              } catch (error) {
+                if (matches()) setPreferenceError(`Couldn't load view preferences: ${error instanceof Error ? error.message : String(error)}`);
+              }
+            })(),
+            (async () => {
+              try {
+                const cached = await getNoteIndex(context.profileId, resolveContextRoot(context));
+                if (!matches()) return;
+                indexRef.current = cached;
+                setIndex(cached);
+                setLoading(false);
+                const next = await refreshActiveVault(context);
+                if (matches() && next) {
+                  indexRef.current = next;
+                  setIndex(next);
+                }
+              } catch (error) {
+                if (matches()) setLoadError(`Couldn't load todos: ${error instanceof Error ? error.message : String(error)}`);
+              } finally {
+                if (matches()) setLoading(false);
+              }
+            })(),
+          ]);
+        } catch (error) {
+          if (current()) {
+            setLoadError(`Couldn't load todos: ${error instanceof Error ? error.message : String(error)}`);
+            setLoading(false);
+          }
+        }
+      })();
       return () => {
-        active = false;
+        ++generationRef.current;
         vaultContextRef.current = null;
         indexRef.current = null;
       };
-    }, []),
+    }, [loadAttempt]),
   );
 
+  const saveView = useCallback((next: TodoViewPreferences) => {
+    const context = renderedContext;
+    if (!hydrated || !context || vaultContextRef.current !== context) return;
+    next = normalizeTodoViewPreferences(next);
+    const generation = generationRef.current;
+    const revision = ++saveRevisionRef.current;
+    setView(next);
+    viewRef.current = next;
+    setPreferenceError(null);
+    void setTodoViewPreferences(context, next).catch((error: unknown) => {
+      if (generationRef.current === generation && vaultContextRef.current === context && revision === saveRevisionRef.current) {
+        setPreferenceError(`Couldn't save view preferences: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+  }, [hydrated, renderedContext]);
+
   const onRefresh = useCallback(async () => {
+    const context = vaultContextRef.current;
+    if (!context) return;
+    const generation = generationRef.current;
+    const matches = () => generationRef.current === generation && vaultContextRef.current === context;
     setRefreshing(true);
     setRefreshError(null);
     try {
-      const context = vaultContextRef.current;
-      if (!context) return;
       const next = await refreshNoteIndex(context.profileId, resolveContextRoot(context));
-      if (vaultContextRef.current === context) {
+      if (matches()) {
         indexRef.current = next;
         setIndex(next);
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setRefreshError(`Refresh failed — showing cached results: ${msg}`);
+      if (matches()) setRefreshError(`Refresh failed — showing cached results: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setRefreshing(false);
+      if (matches()) setRefreshing(false);
     }
   }, []);
 
-  const todos = useMemo<AggregatedTodo[]>(() => {
-    if (!index) return [];
-    const all = getAllTodos(index);
-    return filter === "open" ? all.filter((t) => !t.checked) : all;
-  }, [index, filter]);
+  const todos = useMemo(() => index ? selectTodos(index, view) : [], [index, view]);
+  const options = useMemo(() => index ? getTodoFilterOptions(index) : { modes: [], tags: [] }, [index]);
+  const sections = useMemo(() => groupTodosBySource(todos), [todos]);
+  const allTodos = useMemo(() => index ? getAllTodos(index) : [], [index]);
+  const emptyMessage = allTodos.length === 0
+    ? 'No checklist items yet — add "- [ ]" in a note.'
+    : view.query.trim() ? "No todos match your search."
+    : view.modes.length || view.tags.length ? "No todos match these filters."
+    : view.status === "completed" ? "No completed todos yet."
+    : "No open todos — nice work.";
 
   const openNote = useCallback(
     async (uri: string) => {
@@ -227,11 +299,15 @@ export default function TodosScreen({ navigation }: Props) {
   const renderItem = useCallback(
     ({ item }: { item: AggregatedTodo }) => (
       <View style={[styles.row, { gap: theme.carnet.spacing.sm }]}>
-        <Checkbox.Android
-          status={item.checked ? "checked" : "unchecked"}
-          onPress={() => void onToggle(item)}
+        <Pressable onPress={() => void onToggle(item)} accessibilityRole="checkbox"
+          accessibilityState={{ checked: item.checked }}
           accessibilityLabel={`${item.checked ? "Mark as not done" : "Mark as done"}: ${item.text}`}
+          style={{ minHeight: MIN_TAP_TARGET, minWidth: MIN_TAP_TARGET, justifyContent: "center", alignItems: "center" }}>
+        <Checkbox.Android
+          pointerEvents="none" accessible={false}
+          status={item.checked ? "checked" : "unchecked"}
         />
+        </Pressable>
         <View style={styles.rowText}>
           <Text variant="bodyMedium">{item.text}</Text>
           <Pressable
@@ -252,16 +328,16 @@ export default function TodosScreen({ navigation }: Props) {
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <View style={{ padding: theme.carnet.spacing.md }}>
-        <SegmentedButtons
-          value={filter}
-          onValueChange={(v) => setFilter(v as TodoFilter)}
-          buttons={[
-            { value: "open", label: "Open" },
-            { value: "all", label: "All" },
-          ]}
-        />
-      </View>
+      <TodoViewControls view={view} options={options} disabled={!hydrated} onChange={saveView} />
+      {loadError && <View style={{ padding: theme.carnet.spacing.md }}>
+        <Text style={{ color: theme.colors.error }}>{loadError}</Text>
+        <Button onPress={() => setLoadAttempt((attempt) => attempt + 1)} contentStyle={{ minHeight: MIN_TAP_TARGET }}>Retry loading todos</Button>
+      </View>}
+      {preferenceError && <View style={{ padding: theme.carnet.spacing.md }}>
+        <Text style={{ color: theme.colors.error }}>{preferenceError}</Text>
+        <Button onPress={() => hydrated ? saveView(viewRef.current) : setLoadAttempt((attempt) => attempt + 1)}
+          contentStyle={{ minHeight: MIN_TAP_TARGET }}>Retry view preferences</Button>
+      </View>}
 
       {loading ? (
         <View
@@ -281,26 +357,31 @@ export default function TodosScreen({ navigation }: Props) {
           ))}
         </View>
       ) : (
-        <FlatList
-          data={todos}
-          keyExtractor={(item) => `${item.uri}#${item.ordinal}`}
-          renderItem={renderItem}
-          contentContainerStyle={[
-            todos.length === 0 ? styles.center : null,
-            {
-              paddingHorizontal: theme.carnet.spacing.md,
-              paddingBottom: theme.carnet.spacing.xl,
-              gap: theme.carnet.spacing.sm,
-            },
-          ]}
+        view.groupBySource ? <SectionList
+          sections={sections} keyExtractor={(item) => `${item.uri}#${item.ordinal}`}
+          renderItem={renderItem} stickySectionHeadersEnabled={false}
+          renderSectionHeader={({ section }) => <Pressable
+            onPress={() => void openNote(section.uri)} accessibilityRole="button"
+            accessibilityLabel={`Open source note ${section.title}, ${section.data.length} todos`}
+            style={{ minHeight: MIN_TAP_TARGET, justifyContent: "center", backgroundColor: theme.colors.background }}>
+            <Text variant="titleSmall">{section.title} ({section.data.length})</Text>
+          </Pressable>}
+          contentContainerStyle={{ paddingHorizontal: theme.carnet.spacing.md, paddingBottom: theme.carnet.spacing.xl }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={
-            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
-              {filter === "open"
-                ? "No open todos — nice work."
-                : "No checklist items yet — add \"- [ ]\" in a note."}
-            </Text>
-          }
+          ListEmptyComponent={<View><Text>{emptyMessage}</Text><Button disabled={!hydrated} onPress={() => saveView(defaultTodoViewPreferences())} contentStyle={{ minHeight: MIN_TAP_TARGET }}>Reset view</Button></View>}
+        /> : <FlatList
+          data={todos} keyExtractor={(item) => `${item.uri}#${item.ordinal}`}
+          renderItem={renderItem}
+          contentContainerStyle={[todos.length === 0 ? styles.center : null, {
+            paddingHorizontal: theme.carnet.spacing.md, paddingBottom: theme.carnet.spacing.xl,
+            gap: theme.carnet.spacing.sm,
+          }]}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          ListEmptyComponent={<View>
+            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>{emptyMessage}</Text>
+            {allTodos.length > 0 && <Button disabled={!hydrated} onPress={() => saveView(defaultTodoViewPreferences())}
+              contentStyle={{ minHeight: MIN_TAP_TARGET }}>Reset view</Button>}
+          </View>}
         />
       )}
 

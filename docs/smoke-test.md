@@ -47,6 +47,40 @@ rest of the checklist — an attached device, a working adb, a synced vault.)_
       vault `~/Obsidian/Carnet/` — see [sync-setup.md](sync-setup.md)
 - [ ] *(Optional)* A reachable Karakeep instance + API key, for the export tests
 
+## Todos discovery and completion
+
+_(device-only: keyboard, scrolling, checkbox interaction, profile/root switching,
+and real Syncthing refresh. Automated filtering, preference isolation and screen
+wiring coverage passed locally: `npm -w @carnet/mobile test -- todoView todoViewPreferences TodosScreen` (41 focused tests). See the
+[session handoff](session-handoffs/2026-10-11-todo-discovery.md) for full gate evidence.
+No attached adb device was available on 2026-10-11, so these boxes remain open.)_
+
+- [ ] Prepare two notes with distinct dates, modes and tags; include open and
+      completed tasks, duplicate task text, and two distinct files sharing a title.
+      Open **Todos** and confirm default Open view, newest source note first.
+- [ ] Search for task text, then a source title. Clear the query; compare **Open**,
+      **Completed**, and **All** against the source Markdown checkboxes.
+- [ ] Select multiple modes and tags: any selected mode and any selected source
+      tag match; mode, tag, status and query requirements combine. Clear filters
+      and confirm hidden tasks return.
+- [ ] Compare **Newest**, **Oldest**, and **Source**. Date order follows source
+      note dates, not a newly invented task timestamp. Enable source grouping;
+      distinct files with identical titles must remain distinct groups.
+- [ ] Complete and reopen a task whose text is unique within its source note;
+      confirm only that original checkbox changes on disk. Open the source note
+      and check the result. Identical text in a different note must remain unchanged:
+      completion targets the selected source URI.
+- [ ] Try completing a task whose matching text and checkbox state appear more
+      than once in the same source note. Confirm the ambiguity notice appears,
+      the file remains unchanged, and
+      the optimistic checkbox change rolls back. Sorting and grouping must retain
+      row identity without allowing an ambiguous write.
+- [ ] Leave and reopen Todos, then restart Carnet; confirm view choices persist.
+      Switch profiles and vault roots; confirm choices and tasks belong to the
+      active profile/root and return when switching back.
+- [ ] Edit task text/status on the workstation and allow Syncthing to finish.
+      Refresh Todos; confirm the changed source appears without stale tasks.
+
 ## First launch & configuration
 
 _(automated coverage: `npm -w @carnet/mobile test -- settings` — the

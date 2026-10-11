@@ -7,10 +7,10 @@
 // upsertNoteInIndex) and writer functions (readNote, updateChecklistItem)
 // are mocked.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PaperProvider } from "react-native-paper";
 
-import { carnetLight } from "../lib/theme";
+import { carnetLight, carnetDark } from "../lib/theme";
 import type { NoteIndex } from "../lib/vault";
 import type { CaptureEntry } from "../lib/storage";
 
@@ -20,14 +20,27 @@ vi.mock("../lib/vaultRoot", () => ({
   resolveContextRoot: vi.fn(() => ({ uri: "file:///vault", fs: {} })),
 }));
 
+const focus = vi.hoisted(() => ({ focused: true, listeners: new Set<() => void>() }));
 vi.mock("@react-navigation/native", async () => {
-  const { useEffect } = await import("react");
+  const { useEffect, useSyncExternalStore } = await import("react");
   return {
     useFocusEffect: (cb: () => void | (() => void)) => {
-      useEffect(cb, [cb]);
+      const focused = useSyncExternalStore((listener) => {
+        focus.listeners.add(listener);
+        return () => { focus.listeners.delete(listener); };
+      }, () => focus.focused);
+      useEffect(() => focused ? cb() : undefined, [cb, focused]);
     },
   };
 });
+function setFocused(value: boolean) {
+  act(() => { focus.focused = value; focus.listeners.forEach((listener) => listener()); });
+}
+const preferences = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(async () => {}) }));
+vi.mock("../lib/todoViewPreferences", () => ({
+  getTodoViewPreferences: preferences.get, setTodoViewPreferences: preferences.set,
+}));
+import { defaultTodoViewPreferences } from "../lib/todoView";
 
 const SEEDED_INDEX: NoteIndex = {
   builtAt: 1,
@@ -101,10 +114,10 @@ function makeNavigation() {
   };
 }
 
-function renderScreen() {
+function renderScreen(theme = carnetLight) {
   const navigation = makeNavigation();
   const rendered = render(
-    <PaperProvider theme={carnetLight}>
+    <PaperProvider theme={theme}>
       <TodosScreen
         navigation={navigation as unknown as ScreenProps["navigation"]}
         route={{ key: "t", name: "Todos", params: undefined } as ScreenProps["route"]}
@@ -116,6 +129,10 @@ function renderScreen() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  focus.focused = true;
+  preferences.get.mockResolvedValue(defaultTodoViewPreferences());
+  preferences.set.mockResolvedValue(undefined);
+  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
   getNoteIndex.mockResolvedValue(SEEDED_INDEX);
   refreshNoteIndex.mockResolvedValue(SEEDED_INDEX);
   resolveNoteEntry.mockResolvedValue(null);
@@ -258,6 +275,7 @@ describe("TodosScreen", () => {
       ],
     };
     getNoteIndex.mockResolvedValue(dupIndex);
+    preferences.get.mockResolvedValue({ ...defaultTodoViewPreferences(), groupBySource: true, sort: "oldest" });
     // A real successful write for ONE specific line — this is the case the
     // old text-only matching got wrong: it had no way to tell the two rows
     // apart, so a successful write to one line flipped BOTH in the local
@@ -267,7 +285,8 @@ describe("TodosScreen", () => {
 
     // "All" filter, not the default "open" — a successfully-checked row must
     // stay visible after the toggle for this assertion to see both rows.
-    fireEvent.click(await screen.findByText("All"));
+    await screen.findAllByLabelText("Mark as done: Water plants");
+    fireEvent.click(screen.getByText("All"));
 
     const before = await screen.findAllByLabelText("Mark as done: Water plants");
     expect(before).toHaveLength(2);
@@ -290,6 +309,131 @@ describe("TodosScreen", () => {
 
     expect(await screen.findByText("Call mom")).toBeTruthy();
   });
+  it("composes search, completed status, mode and tags without Markdown IO", async () => {
+    getNoteIndex.mockResolvedValue({ ...SEEDED_INDEX, notes: SEEDED_INDEX.notes.map((note) => ({ ...note, tags: ["home"] })) });
+    renderScreen();
+    await screen.findByText("Buy milk");
+    fireEvent.click(screen.getByText("Completed"));
+    fireEvent.change(screen.getByLabelText("Search todos"), { target: { value: "Note A" } });
+    fireEvent.click(screen.getByLabelText("View options"));
+    fireEvent.click(screen.getByLabelText("Mode: idea"));
+    fireEvent.click(screen.getByLabelText("Tag: home"));
+    expect(screen.getByText("Call mom")).toBeTruthy();
+    expect(screen.queryByText("Write report")).toBeNull();
+    expect(screen.getByLabelText("Mode: journal")).toBeTruthy();
+    expect(readNote).not.toHaveBeenCalled();
+    expect(updateChecklistItem).not.toHaveBeenCalled();
+    expect(preferences.set).toHaveBeenLastCalledWith(expect.objectContaining({ profileId: "default" }), expect.objectContaining({ query: "Note A", status: "completed", modes: ["idea"], tags: ["home"] }));
+  });
+
+  it("disables edits until hydration and does not save initial defaults", async () => {
+    let release!: (value: ReturnType<typeof defaultTodoViewPreferences>) => void;
+    preferences.get.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    renderScreen();
+    await screen.findByText("Buy milk");
+    expect(screen.getByLabelText("Search todos").getAttribute("readonly")).not.toBeNull();
+    fireEvent.click(screen.getByText("All"));
+    expect(preferences.set).not.toHaveBeenCalled();
+    await act(async () => release({ ...defaultTodoViewPreferences(), status: "completed" }));
+    expect(screen.getByText("Call mom")).toBeTruthy();
+    expect(screen.queryByText("Buy milk")).toBeNull();
+    expect(preferences.set).not.toHaveBeenCalled();
+  });
+
+  it.each(["root", "profile"] as const)("ignores old index and preference hydration after blur and %s replacement", async (replacement) => {
+    let releaseIndex!: (value: NoteIndex) => void;
+    let releasePreferences!: (value: ReturnType<typeof defaultTodoViewPreferences>) => void;
+    getNoteIndex.mockReturnValueOnce(new Promise((resolve) => { releaseIndex = resolve; }));
+    preferences.get.mockReturnValueOnce(new Promise((resolve) => { releasePreferences = resolve; }));
+    renderScreen();
+    await waitFor(() => expect(preferences.get).toHaveBeenCalledTimes(1));
+    setFocused(false);
+    vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "file:///replacement",
+      ...(replacement === "profile" ? { vaultProfiles: [{ id: "work", name: "Work", rootUri: "file:///replacement", createdAt: 1 }], activeVaultProfileId: "work" } : {}),
+    } as Awaited<ReturnType<typeof getSettings>>);
+    getNoteIndex.mockResolvedValue({ builtAt: 2, notes: [{ ...SEEDED_INDEX.notes[1], title: "New vault" }] });
+    preferences.get.mockResolvedValue(defaultTodoViewPreferences());
+    setFocused(true);
+    await screen.findByText("New vault");
+    await act(async () => {
+      releaseIndex(SEEDED_INDEX);
+      releasePreferences({ ...defaultTodoViewPreferences(), query: "Old vault" });
+    });
+    expect(screen.queryByText("Buy milk")).toBeNull();
+    expect((screen.getByLabelText("Search todos") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByText("All"));
+    expect(preferences.set).toHaveBeenLastCalledWith(expect.objectContaining({ profileId: replacement === "profile" ? "work" : "default", rootUri: "file:///replacement" }), expect.objectContaining({ status: "all" }));
+  });
+
+  it("restores per-vault preferences and groups sorted original rows with source navigation", async () => {
+    preferences.get.mockResolvedValue({ ...defaultTodoViewPreferences(), status: "all", sort: "oldest", groupBySource: true });
+    const { navigation } = renderScreen(carnetDark);
+    await screen.findByLabelText("Open source note Note A, 2 todos");
+    const headings = screen.getAllByLabelText(/Open source note/);
+    expect(headings[0].getAttribute("aria-label")).toContain("Note B");
+    resolveNoteEntry.mockResolvedValue({ id: "a", mode: "idea", title: "Note A", filepath: "file:///v/Ideas/a.md", createdAt: 200 });
+    fireEvent.click(screen.getByLabelText("Open source note Note A, 2 todos"));
+    await waitFor(() => expect(navigation.navigate).toHaveBeenCalledWith("RecentDetail", expect.objectContaining({ vaultContext: expect.objectContaining({ profileId: "default" }) })));
+    fireEvent.click(screen.getByLabelText("Mark as not done: Call mom"));
+    await waitFor(() => expect(updateChecklistItem).toHaveBeenCalledWith("file:///v/Ideas/a.md", "Call mom", true));
+  });
+
+  it("offers retries for failed loading and preference saves", async () => {
+    getNoteIndex.mockRejectedValueOnce(new Error("offline"));
+    renderScreen();
+    fireEvent.click(await screen.findByText("Retry loading todos"));
+    await screen.findByText("Buy milk");
+    preferences.set.mockRejectedValueOnce(new Error("storage full"));
+    fireEvent.click(screen.getByText("All"));
+    fireEvent.click(await screen.findByText("Retry view preferences"));
+    await waitFor(() => expect(preferences.set).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/Couldn't save view preferences/)).toBeNull();
+  });
+
+  it.each([carnetLight, carnetDark])("renders options and distinct search/filter/completed empties in both themes", async (theme) => {
+    preferences.get.mockResolvedValue({ ...defaultTodoViewPreferences(), tags: ["missing"] });
+    renderScreen(theme);
+    await screen.findByText("No todos match these filters.");
+    expect(screen.getByText("#missing")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("View options"));
+    expect(screen.getByText("Tags — any selected tag")).toBeTruthy();
+    fireEvent.click(screen.getAllByText("Reset view")[0]);
+    expect(screen.getByText("Buy milk")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Search todos"), { target: { value: "absent" } });
+    expect(screen.getByText("No todos match your search.")).toBeTruthy();
+  });
+
+  it("retries preference hydration without overwriting stored preferences", async () => {
+    preferences.get.mockRejectedValueOnce(new Error("storage unavailable"));
+    renderScreen();
+    await screen.findByText("Buy milk");
+    expect(await screen.findByText("Retry view preferences")).toBeTruthy();
+    expect(preferences.set).not.toHaveBeenCalled();
+    preferences.get.mockResolvedValue({ ...defaultTodoViewPreferences(), status: "completed" });
+    fireEvent.click(screen.getByText("Retry view preferences"));
+    expect(await screen.findByText("Call mom")).toBeTruthy();
+    expect(preferences.set).not.toHaveBeenCalled();
+  });
+
+  it("restores a new profile's view on refocus and rejects old background refresh completion", async () => {
+    const { refreshActiveVault } = await import("../lib/vaultRefreshService");
+    let release!: (value: NoteIndex) => void;
+    vi.mocked(refreshActiveVault).mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    renderScreen();
+    await screen.findByText("Buy milk");
+    setFocused(false);
+    vi.mocked(getSettings).mockResolvedValue({
+      captureFolderPath: "file:///work", vaultProfiles: [{ id: "work", name: "Work", rootUri: "file:///work", createdAt: 1 }], activeVaultProfileId: "work",
+    } as Awaited<ReturnType<typeof getSettings>>);
+    preferences.get.mockResolvedValue({ ...defaultTodoViewPreferences(), status: "completed" });
+    setFocused(true);
+    await screen.findByText("Call mom");
+    await act(async () => release({ builtAt: 9, notes: [] }));
+    expect(screen.getByText("Call mom")).toBeTruthy();
+    expect(preferences.get).toHaveBeenLastCalledWith({ profileId: "work", rootUri: "file:///work" });
+    expect(preferences.set).not.toHaveBeenCalled();
+  });
+
 });
 
 describe("flipInIndex", () => {

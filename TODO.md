@@ -2,11 +2,24 @@
 
 Tracking deferred v0.3 scope and known issues.
 
-**Last reconciled against git history: 2026-10-11 (baseline `271296b`).** This file had drifted before (see
+**Last reconciled against git history: 2026-10-11 (baseline `929de967`).** This file had drifted before (see
 prior reconciliation history in git blame) — items were listed as deferred after they had
 already shipped. When planning from it, re-verify anything you're about to act on (`git
 log --oneline --all | grep -i <topic>`, or look for the module it names); a stale
 "deferred" entry is worse than no entry.
+
+## Todos discovery — implemented, physical acceptance pending (2026-10-11)
+
+Text/title search, Open/Completed/All, capture-mode and source-tag filters,
+source-date or source-title sorting, optional source-file grouping, and view
+preferences isolated by profile plus vault root are implemented and independently
+reviewed. Local automated gates passed; physical acceptance remains pending.
+See [the session handoff](docs/session-handoffs/2026-10-11-todo-discovery.md)
+for exact verification evidence.
+Physical Android acceptance remains pending: no adb device is attached. Use the
+Todos checklist in [docs/smoke-test.md](docs/smoke-test.md), including completion,
+profile/root switching, and Syncthing refresh. #228 and #229 are merged; their
+remaining physical checks are still required.
 
 ## Resolved in v0.2
 
@@ -159,7 +172,7 @@ acceptance gates have evidence.
   other reader (index, cards, Search) still sees such a file as broken until it is
   enriched.
 
-## SAF rewrite truncation — fixed (`fix/saf-write-truncate`), follow-ups open
+## SAF rewrite truncation — merged (#229, `929de967`), physical follow-ups open
 
 SAF vault rewrites didn't truncate, so a shorter rewrite left the old file's tail as
 stray text. Found on-device 2026-10-03; fixed by `patches/expo-file-system+19.0.23.patch`
@@ -316,15 +329,13 @@ Review round (independent code + security review, 2026-09-30):
   the next Karakeep export updates its bookmark instead of duplicating it) and hand-added
   fields. The `fallback` provider marker and the `enhanced` stamp are deliberately NOT
   carried: they describe the reply being replaced.
-- [x] **Text re-enrich carries `fallback`/`enhanced` forward** — resolved locally
-  in this session branch (`9ed1c10`; not yet merged). Idea/Note and Person preservation
+- [x] **Text re-enrich carries `fallback`/`enhanced` forward** — merged in #228
+  (`28a8032`). Idea/Note and Person preservation
   exclude stale provider and enhancement markers; fresh reply metadata remains valid.
-- [x] **Re-enrich resets `created` to today** — resolved locally (`9ed1c10`,
-  `06f25d9`, `367237e`; not yet merged). A populated original `created` takes precedence
+- [x] **Re-enrich resets `created` to today** — merged in #228 (`28a8032`). A populated original `created` takes precedence
   over the model's date. Empty/comment-only values and empty YAML block scalars do not
   suppress a fresh date; populated block scalars retain their original representation.
-- [x] **Image re-enrich has no conflict guard** — resolved locally (`0b8ab97`;
-  not yet merged). The vision path compares against the on-disk body and modification
+- [x] **Image re-enrich has no conflict guard** — merged in #228 (`28a8032`). The vision path compares against the on-disk body and modification
   time captured before the model call, rejects stale screen snapshots, and skips writes
   after deletion/unreadability or content changes even when mtime is unchanged. It keeps
   concurrent Syncthing/editor changes. Residual limit: SAF offers no atomic compare-and-
