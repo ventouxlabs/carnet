@@ -1,12 +1,12 @@
 # Dependencies & integrations
-<!-- Generated: 2026-09-08 | Files scanned: 308 (171 src + 137 tests) | Token estimate: ~760 -->
+<!-- Verified: 2026-10-11 -->
 
 ## External services
 
 **The LLM backend is a user-chosen provider, not a fixed service.** `lib/dispatcher.ts`
 is the only seam app code calls; it resolves one of N configured entries and applies a
 fallback chain. **`lib/omniroute.ts` and `lib/localLlm.ts` no longer exist** — both were
-consolidated into the single `lib/llmClient.ts` (701 ln), which speaks OpenAI-compatible
+consolidated into the single `lib/llmClient.ts`, which speaks OpenAI-compatible
 HTTP to whichever provider the dispatcher resolved. Older docs and archived plans still
 name them; that is history, not drift.
 

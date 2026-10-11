@@ -1,5 +1,5 @@
 # Data Model — vault & local stores
-<!-- Generated: 2026-09-08 | Files scanned: 308 (171 src + 137 tests) | Token estimate: ~560 -->
+<!-- Verified: 2026-10-11 -->
 
 **No canonical SQL database.** Data = Markdown files + binaries in the Syncthing-synced
 vault, plus AsyncStorage/SecureStore keys on the device. (`expo-sqlite` is ABI-broken on
@@ -21,26 +21,29 @@ Attachments/…             paired files (embedded from notes via ../Subdir/file
 If `captureFolderPath` is blank (fresh install), writes land in app-private
 `files/carnet/` — configure the vault folder in Settings for Syncthing to see them.
 
-## Frontmatter — `lib/frontmatter.ts` (347 ln) — BYTE-COMPATIBILITY IS A HARD CONSTRAINT
+## Frontmatter — `lib/frontmatter.ts` — BYTE-COMPATIBILITY IS A HARD CONSTRAINT
 `parseFrontmatter` `upsertFrontmatterField`; tags `getFrontmatterTags`/`setFrontmatterTags`
 (+ `normalizeTag`); `location: "lat,lon"`; `karakeepId` stamped on export for idempotent
 re-export. Byte-exact `split`/`extract`/`strip`/`rewriteFrontmatterField` preserve header
 bytes (same-day journal append merges per-entry metadata into the day file).
 LLM output passes `lib/enrichSanitize.ts` (B3) before any write.
 
-## Shared types — `packages/shared/src` (index 14 · markdown 41 · types 47 ln)
+## Shared types — `packages/shared/src`
 `types.ts`: `IdeaNote` `IdeaStatus` `JournalEntry` `PersonNote` `CaptureResponse`
 `CaptureStatus`. `markdown.ts`: `parseStatusFromMarkdown` `deriveTitle`.
 
 ## Local stores
-- Settings blob — `lib/settings.ts` (`carnet:settings:v2`, AsyncStorage); API keys
+- Settings blob — `lib/settings.ts` (`carnet:settings:v4`, AsyncStorage); API keys
   (OmniRoute, Karakeep) in SecureStore, never in the blob
 - Offline queue rows — `lib/queue.ts` (`carnet:queue:v1`)
 - Pending Karakeep exports — `lib/pendingSync.ts` (`carnet:pendingsync:v1`; filepath
   pointers only, note body re-read at drain; deduped by filepath, 10-attempt cap)
-- Capture drafts — `carnet:capture_draft:v1:{mode}` (survives app restarts)
-- Note/tag index cache — `lib/vault.ts` (`carnet:noteindex:v1`; scans Ideas/Journal/
-  Notes/People with bounded concurrency; feeds Search + TagBrowser + `suggestTags`)
+- Capture drafts — `carnet:capture_draft:v2:<profile>:<mode>` (survives app restarts; profile scoped)
+- Note/tag/Todos index cache — `lib/vault.ts` + `lib/vaultStorageKeys.ts`
+  (`carnet:noteindex:v3:<profile>:<encoded-root>`; scans note sources with bounded
+  concurrency; feeds Search, TagBrowser, `suggestTags`, and Todos)
+- Todos view — `lib/todoViewPreferences.ts` (`carnet:todo-view:v1:<JSON profile/root tuple>`);
+  contains only view choices, with per-key serialized writes
 - Karakeep pushed-asset record — `lib/karakeepAssetSync.ts` (`carnet:karakeep-assets:v1:<id>`)
 - STT onboarding flag — `voice/sttOnboarding.ts`; recognizer pkg/label —
   `stt_recognizer_pkg/label` (AsyncStorage; session failover state is in-memory only)

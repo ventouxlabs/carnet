@@ -39,8 +39,9 @@ without Refresh → A’s 14 tasks and All/Source title/Group choices restored.
 Independent installed-APK and cleanup review approved this bounded case; see [the
 root-folder retest handoff](docs/session-handoffs/2026-10-11-root-folder-retest.md).
 The A-last-refresh → B-Save interval was not measured, so physical 30-second
-throttle acceptance is not claimed. Real Syncthing refresh and #228 LLM
-re-enrichment acceptance remain open.
+throttle acceptance is not claimed. Real Syncthing refresh and physical #228 LLM re-enrichment acceptance remain open;
+#228's text/image preservation and conflict-guard implementation is merged and covered
+by code-level checks, but device acceptance has not been performed.
 
 ## Resolved in v0.2
 
@@ -74,8 +75,8 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   action on the persistent capture notification; zero-app-open text capture, depends on
   B4's save-first path.
 - [x] **B6 — vault browse + search, Phase 1** (PR #67) — supersedes "Mobile browse +
-  search" below; note-metadata index (`carnet:noteindex:v1`, AsyncStorage) generalizing
-  the tag-index pattern, new Search screen. Phase 2 (on-demand full-text) and Phase 3
+  search" below; note-metadata index (now `carnet:noteindex:v3:<profile>:<encoded-root>`,
+  AsyncStorage) generalizing the tag-index pattern, new Search screen. Phase 2 (on-demand full-text) and Phase 3
   (retrospective query, below) remain separate later plans, now unblocked.
 - [x] **B7 — pluggable on-device backend, Phase 1** (PR #72) — interface-only dispatcher
   seam (`lib/dispatcher.ts`) re-exporting the six enrich functions from the selected
