@@ -27,16 +27,13 @@ import {
   stripFrontmatter,
 } from "./frontmatter";
 import { listNoteFiles, listNoteFilesInRoot, readNote, type NoteFileRef } from "./writer";
-import type { Root } from "./vaultRoot";
+import { resolveContextRoot, type Root } from "./vaultRoot";
 import { parentSegment, subdirForUri, type NoteSubdir } from "./noteSubdirs";
 import type { CaptureEntry, CaptureMode } from "./storage";
 import { getSettings } from "./settings";
 import { captureVaultContext } from "./vaultContext";
-import {
-  LEGACY_NOTE_INDEX_KEY,
-  noteIndexKey,
-} from "./vaultStorageKeys";
-import { DEFAULT_VAULT_PROFILE_ID } from "./vaultProfiles";
+import { noteIndexKey } from "./vaultStorageKeys";
+import { DEFAULT_VAULT_PROFILE_ID, normaliseVaultProfileState } from "./vaultProfiles";
 import { hasPossibleSafStaleTail } from "./safTailDetector";
 
 /** One AsyncStorage blob holding per-note metadata for browse + search; the tag
@@ -75,7 +72,7 @@ async function serializeCacheWrite<T>(operation: () => Promise<T>): Promise<T> {
 
 type PendingIndexUpsert = { revision: number; entry: NoteIndexEntry };
 
-/** Per-profile revisions let an in-flight full scan retain only writes that
+/** Per-profile/root revisions let an in-flight full scan retain only writes that
  * landed after it began. Without this journal, merging the whole cache would
  * incorrectly resurrect files an authoritative refresh has just removed. */
 type IndexMutationState = {
@@ -159,13 +156,43 @@ export interface NoteIndex {
   notes: NoteIndexEntry[];
 }
 
-/** Resolve once per cache operation. A settings failure falls back only to
- * default, which is where pre-profile cache data belongs. */
-async function activeIndexProfileId(): Promise<string> {
+/** Resolve the profile and root together before any cache/scan work yields. */
+async function indexScope(profileId?: string, rootOverride?: Root): Promise<{ key: string; root: Root; profileId: string }> {
+  if (profileId && rootOverride) return { key: noteIndexKey(profileId, rootOverride.uri), root: rootOverride, profileId };
+  const settings = await getSettings();
+  const context = captureVaultContext(settings);
+  const id = profileId ?? context.profileId;
+  const profiles = normaliseVaultProfileState({
+    profiles: settings.vaultProfiles,
+    activeProfileId: settings.activeVaultProfileId,
+    legacyCaptureFolderPath: settings.captureFolderPath,
+  }).profiles;
+  const profile = profiles.find((candidate) => candidate.id === id);
+  if (!rootOverride && !profile) throw new Error("Vault profile is no longer available");
+  const root = rootOverride ?? resolveContextRoot({ profileId: id, rootUri: profile!.rootUri });
+  return { key: noteIndexKey(id || DEFAULT_VAULT_PROFILE_ID, root.uri), root, profileId: id };
+}
+
+/** Compare actual SAF document identities, including selected child directories.
+ * A tree permission prefix alone does not prove membership in the selected root. */
+function noteBelongsToRoot(uri: string, rootUri: string): boolean {
+  const identity = (value: string): string => {
+    if (!value.startsWith("content://")) return value.replace(/\/+$/, "");
+    const marker = value.includes("/document/") ? "/document/" : "/tree/";
+    const position = value.indexOf(marker);
+    if (position < 0) return value;
+    const authority = value.slice(0, value.indexOf("/", "content://".length));
+    return `${authority}/${decodeURIComponent(value.slice(position + marker.length))}`.replace(/\/+$/, "");
+  };
   try {
-    return captureVaultContext(await getSettings()).profileId;
+    const rootId = identity(rootUri);
+    // Android volume document ids (e.g. primary:) use the colon itself as
+    // the boundary; their children are primary:Notes/file.md, without a slash.
+    const prefix = rootUri.startsWith("content://") && rootId.endsWith(":") ? rootId : `${rootId}/`;
+    const noteId = identity(uri);
+    return noteId.startsWith(prefix) && noteId.length > prefix.length;
   } catch {
-    return DEFAULT_VAULT_PROFILE_ID;
+    return false;
   }
 }
 
@@ -333,17 +360,15 @@ export function deriveTagIndex(index: NoteIndex): TagIndex {
 // ── Note index cache lifecycle ────────────────────────────────────────────────
 
 /** Read the cached note index, or null when absent / corrupt. */
-export async function loadCachedNoteIndex(profileId?: string): Promise<NoteIndex | null> {
-  const resolvedProfileId = profileId ?? await activeIndexProfileId();
-  const key = noteIndexKey(resolvedProfileId);
-  let raw = await AsyncStorage.getItem(key);
-  // v1 was a single-vault cache. Keep it visible only to default and copy it
-  // verbatim first, so interrupted migration is harmless and a new profile
-  // never briefly renders the prior vault's search results.
-  if (!raw && resolvedProfileId === DEFAULT_VAULT_PROFILE_ID) {
-    raw = await AsyncStorage.getItem(LEGACY_NOTE_INDEX_KEY);
-    if (raw) await AsyncStorage.setItem(key, raw);
-  }
+export async function loadCachedNoteIndex(profileId?: string, rootOverride?: Root): Promise<NoteIndex | null> {
+  const { key } = await indexScope(profileId, rootOverride);
+  return loadScopedNoteIndex(key);
+}
+
+async function loadScopedNoteIndex(key: string): Promise<NoteIndex | null> {
+  // Older blobs carry no root identity; they are disposable and cannot safely
+  // be attributed to the current folder after a same-profile replacement.
+  const raw = await AsyncStorage.getItem(key);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as NoteIndex;
@@ -358,15 +383,15 @@ export async function loadCachedNoteIndex(profileId?: string): Promise<NoteIndex
 
 /** Build the note index fresh and persist it to the cache. */
 export async function refreshNoteIndex(profileId?: string, rootOverride?: Root): Promise<NoteIndex> {
-  const resolvedProfileId = profileId ?? await activeIndexProfileId();
-  const state = indexMutationState(resolvedProfileId);
+  const { key, root } = await indexScope(profileId, rootOverride);
+  const state = indexMutationState(key);
   const refreshStart = state.revision;
   state.activeRefreshStarts.set(
     refreshStart,
     (state.activeRefreshStarts.get(refreshStart) ?? 0) + 1,
   );
   try {
-    const scanned = await buildNoteIndex(rootOverride);
+    const scanned = await buildNoteIndex(root);
     return await serializeCacheWrite(async () => {
       // An upsert that completed while the scan was running is newer than its
       // file enumeration. Preserve it, but do not retain unrelated stale
@@ -376,13 +401,13 @@ export async function refreshNoteIndex(profileId?: string, rootOverride?: Root):
         (mutation) => mutation.revision > refreshStart,
       );
       if (changes.length === 0) {
-        await AsyncStorage.setItem(noteIndexKey(resolvedProfileId), JSON.stringify(scanned));
+        await AsyncStorage.setItem(key, JSON.stringify(scanned));
         return scanned;
       }
       const notes = new Map(scanned.notes.map((note) => [note.uri, note]));
       for (const { entry } of changes) notes.set(entry.uri, entry);
       const index = { ...scanned, notes: [...notes.values()] };
-      await AsyncStorage.setItem(noteIndexKey(resolvedProfileId), JSON.stringify(index));
+      await AsyncStorage.setItem(key, JSON.stringify(index));
       return index;
     });
   } finally {
@@ -399,8 +424,9 @@ export async function refreshNoteIndex(profileId?: string, rootOverride?: Root):
  * incremental upsert isn't available (offline drain, in-place tag edit). The
  * common capture path should prefer upsertNoteInIndex to avoid a full rescan.
  */
-export async function invalidateNoteIndex(profileId?: string): Promise<void> {
-  await AsyncStorage.removeItem(noteIndexKey(profileId ?? await activeIndexProfileId()));
+export async function invalidateNoteIndex(profileId?: string, rootOverride?: Root): Promise<void> {
+  const { key } = await indexScope(profileId, rootOverride);
+  await AsyncStorage.removeItem(key);
 }
 
 /**
@@ -408,10 +434,10 @@ export async function invalidateNoteIndex(profileId?: string): Promise<void> {
  * one. Hold the result in memory for the session; refresh lazily via pull.
  */
 export async function getNoteIndex(profileId?: string, rootOverride?: Root): Promise<NoteIndex> {
-  const resolvedProfileId = profileId ?? await activeIndexProfileId();
-  const cached = await loadCachedNoteIndex(resolvedProfileId);
+  const scope = await indexScope(profileId, rootOverride);
+  const cached = await loadScopedNoteIndex(scope.key);
   if (cached) return cached;
-  return refreshNoteIndex(resolvedProfileId, rootOverride);
+  return refreshNoteIndex(scope.profileId, scope.root);
 }
 
 /**
@@ -424,8 +450,9 @@ export async function upsertNoteInIndex(
   uri: string,
   markdown: string,
   profileId?: string,
+  rootOverride?: Root,
 ): Promise<void> {
-  const resolvedProfileId = profileId ?? await activeIndexProfileId();
+  const { key, root } = await indexScope(profileId, rootOverride);
   // The uri is authoritative; the mode round-trip is only a fallback. Before
   // Notes/ had a mode of its own, subdirForMode alone recorded "Ideas" for a
   // Notes/ synthesis note while a full rebuild read "Notes" straight off the
@@ -435,18 +462,21 @@ export async function upsertNoteInIndex(
   const subdir = subdirForUri(uri) ?? subdirForMode(inferNoteMode(uri));
   const entry = buildNoteEntry(uri, subdir, markdown);
   await serializeCacheWrite(async () => {
-    const cached = await loadCachedNoteIndex(resolvedProfileId);
+    const cached = await loadScopedNoteIndex(key);
     if (!cached) return;
     const idx = cached.notes.findIndex((n) => n.uri === uri);
+    // A row from this root-pinned scan is positive ownership evidence even
+    // for SAF providers with opaque document ids. New rows need containment.
+    if (idx === -1 && !noteBelongsToRoot(uri, root.uri)) return;
     const notes =
       idx === -1
         ? [...cached.notes, entry]
         : cached.notes.map((n, i) => (i === idx ? entry : n));
-    const state = indexMutationState(resolvedProfileId);
+    const state = indexMutationState(key);
     state.revision += 1;
     state.pendingUpserts.push({ revision: state.revision, entry });
     await AsyncStorage.setItem(
-      noteIndexKey(resolvedProfileId),
+      key,
       JSON.stringify({ builtAt: cached.builtAt, notes }),
     );
   });

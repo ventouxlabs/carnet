@@ -8,7 +8,7 @@ already shipped. When planning from it, re-verify anything you're about to act o
 log --oneline --all | grep -i <topic>`, or look for the module it names); a stale
 "deferred" entry is worse than no entry.
 
-## Todos discovery — folded-device checks passed, follow-ups open (2026-10-11)
+## Todos discovery — folded/unfolded device checks passed, follow-ups open (2026-10-11)
 
 Text/title search, Open/Completed/All, capture-mode and source-tag filters,
 source-date or source-title sorting, optional source-file grouping, and view
@@ -23,8 +23,18 @@ for APK provenance, fixture-byte evidence and limits. Separate profiles using th
 same owned root retained independent view choices. The original profile/root and
 System theme were restored and owned profiles/fixtures removed. Independent review
 approved the exercised physical scope.
-Within-profile root changes, unfolded layout and real Syncthing refresh remain open
-in [docs/smoke-test.md](docs/smoke-test.md). #228 LLM re-enrichment acceptance remains open.
+The [extended device handoff](docs/session-handoffs/2026-10-11-extended-device-verification.md)
+records unfolded light/dark options, keyboard, grouping, combined mode/tag filtering
+and candidate-dialog checks, with owned fixture bytes unchanged and that profile/root
+and System appearance restored. Provider error/modern-method checks also passed in
+newly owned Android user 11, which was removed after return to user 0. Independent
+review confirms the bounded layout/provider/modern checks and cleanup.
+**Same-profile root replacement exposed a cache bug:**
+B initially showed A tasks until manual refresh. Completed/Group restored at A,
+but source-title sorting was not confirmed. The cache fix is implemented;
+independent review passed 90 focused tests. Shared build/typecheck/12 tests, mobile typecheck/lint/2,823 tests, capture-flow 763 tests, stale-plan and diff checks passed.
+Physical A → B → A acceptance of a new fixed build remains open. Real Syncthing refresh and #228 LLM
+re-enrichment acceptance remain open.
 
 ## Resolved in v0.2
 
@@ -203,8 +213,17 @@ stray text. Found on-device 2026-10-03; fixed by `patches/expo-file-system+19.0.
   and leaving no old task tail. The read-only scan showed 13 checked, 0 skipped and
   10 candidates; bounded scrolling, fixed Close and candidate Open passed, with all
   13 fixture files byte-identical after scanning. See [the device handoff](docs/session-handoffs/2026-10-11-pixel-10-fold-verification.md).
-- [ ] **Remaining physical SAF paths** — modern file-system API, providers rejecting
-  `"wt"`, unreadable/partial scans and unfolded layout still need device coverage.
+- [x] **Unfolded review-dialog checks (2026-10-11)** — 13 checked, 0 skipped and
+  10 candidates; final candidate reachable by bounded scrolling, Close accessible,
+  Open navigated to its source. All 13 disposable fixture hashes remained unchanged.
+  See [the extended handoff](docs/session-handoffs/2026-10-11-extended-device-verification.md).
+- [x] **Controlled physical SAF faults and modern compiled method (2026-10-11)** —
+  partial/all-read scans showed 2/1 and 0/3 checked/skipped, then recovered to 3/0;
+  scans left fixture hashes unchanged. Legacy `"wt"` rejection showed an error without
+  changing seed bytes. The exact CI modern class passed normal shorter `"wt"`,
+  `FileNotFoundException`/null retry to `"w"`, and security-error propagation without
+  retry. Fallback began from empty documents on a nontruncating `"w"` provider, so
+  shorter rewrites on nonempty `"w"`-only providers remain unverified.
 - [ ] **`"wt"` empties a file before a base64 decode fails** — harmless today (every
   `writeBinaryBytes` caller writes a fresh file); decode before opening the stream if that
   ever changes.

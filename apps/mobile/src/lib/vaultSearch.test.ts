@@ -27,7 +27,7 @@ vi.mock("./writer", () => ({
 }));
 
 vi.mock("./settings", () => ({
-  getSettings: vi.fn(async () => ({ captureFolderPath: "" })),
+  getSettings: vi.fn(async () => ({ captureFolderPath: "file:///v" })),
 }));
 
 const _store: Map<string, string> = new Map();
@@ -59,7 +59,7 @@ import {
   type NoteIndex,
   type NoteIndexEntry,
 } from "./vault";
-import { listNoteFiles, readNote } from "./writer";
+import { listNoteFilesInRoot, readNote } from "./writer";
 import { getSettings } from "./settings";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ function reset(): void {
   _unreadable.clear();
   _listRefs = [];
   vi.clearAllMocks();
-  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
+  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "file:///v" } as Awaited<ReturnType<typeof getSettings>>);
 }
 
 beforeEach(reset);
@@ -141,10 +141,10 @@ describe("note index cache", () => {
   it("getNoteIndex builds + caches on a cold miss, then serves the cache without rescanning", async () => {
     addNote("file:///v/Ideas/a.md", "Ideas", "---\ntags: [work]\n---\n# A\n");
     const first = await getNoteIndex();
-    expect(listNoteFiles).toHaveBeenCalledOnce();
+    expect(listNoteFilesInRoot).toHaveBeenCalledOnce();
 
     const second = await getNoteIndex();
-    expect(listNoteFiles).toHaveBeenCalledOnce(); // no second scan
+    expect(listNoteFilesInRoot).toHaveBeenCalledOnce(); // no second scan
     expect(second).toEqual(first);
   });
 
@@ -176,7 +176,7 @@ describe("upsertNoteInIndex", () => {
       "---\ncreated: 2026-06-01\ntags: [fresh]\n---\n# New\n\nBrand new note.\n",
     );
 
-    expect(listNoteFiles).not.toHaveBeenCalled(); // common path never rescans
+    expect(listNoteFilesInRoot).not.toHaveBeenCalled(); // common path never rescans
     const index = await loadCachedNoteIndex();
     const entry = entryByUri(index!, "file:///v/Ideas/new.md");
     expect(entry.title).toBe("New");
@@ -198,7 +198,7 @@ describe("upsertNoteInIndex", () => {
 
   it("is a no-op when no index is cached yet (avoids a rescan)", async () => {
     await upsertNoteInIndex("file:///v/Ideas/a.md", "---\ntags: [x]\n---\n# A\n");
-    expect(listNoteFiles).not.toHaveBeenCalled();
+    expect(listNoteFilesInRoot).not.toHaveBeenCalled();
     expect(await loadCachedNoteIndex()).toBeNull();
   });
 

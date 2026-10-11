@@ -17,6 +17,7 @@ const _unreadable: Set<string> = new Set();
 
 vi.mock("./writer", () => ({
   listNoteFiles: vi.fn(async () => _listRefs),
+  listNoteFilesInRoot: vi.fn(async () => _listRefs),
   readNote: vi.fn(async (uri: string) => {
     if (_unreadable.has(uri)) throw new Error(`unreadable: ${uri}`);
     const md = _notes.get(uri);
@@ -26,7 +27,7 @@ vi.mock("./writer", () => ({
 }));
 
 vi.mock("./settings", () => ({
-  getSettings: vi.fn(async () => ({ captureFolderPath: "" })),
+  getSettings: vi.fn(async () => ({ captureFolderPath: "file:///v" })),
 }));
 
 const _store: Map<string, string> = new Map();
@@ -44,6 +45,8 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
 
 import {
   buildNoteIndex,
+  getNoteIndex,
+  refreshNoteIndex,
   buildTagIndex,
   getAllTodos,
   getTagIndex,
@@ -62,8 +65,10 @@ import {
   type NoteIndex,
   type TagIndex,
 } from "./vault";
-import { listNoteFiles, readNote } from "./writer";
+import { listNoteFiles, listNoteFilesInRoot, readNote } from "./writer";
 import { getSettings } from "./settings";
+import { noteIndexKey } from "./vaultStorageKeys";
+import { resolveContextRoot } from "./vaultRoot";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -78,7 +83,7 @@ function reset(): void {
   _unreadable.clear();
   _listRefs = [];
   vi.clearAllMocks();
-  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "" } as Awaited<ReturnType<typeof getSettings>>);
+  vi.mocked(getSettings).mockResolvedValue({ captureFolderPath: "file:///v" } as Awaited<ReturnType<typeof getSettings>>);
 }
 
 beforeEach(reset);
@@ -275,11 +280,11 @@ describe("tag index cache", () => {
   it("getTagIndex builds + caches on a cold miss, then serves the cache", async () => {
     addNote("file:///v/Ideas/a.md", "Ideas", "---\ntags: [work]\n---\n");
     const first = await getTagIndex();
-    expect(listNoteFiles).toHaveBeenCalledOnce();
+    expect(listNoteFilesInRoot).toHaveBeenCalledOnce();
 
     // Second call should hit the cache — no further vault scan.
     const second = await getTagIndex();
-    expect(listNoteFiles).toHaveBeenCalledOnce();
+    expect(listNoteFilesInRoot).toHaveBeenCalledOnce();
     expect(second).toEqual(first);
   });
 
@@ -446,7 +451,7 @@ describe("upsertNoteInIndex picks up todos with no extra wiring", () => {
     await refreshTagIndex(); // builds + persists the note index cache
     const before = await loadCachedNoteIndex();
     expect(before!.notes[0].todos).toBeUndefined();
-    expect(listNoteFiles).toHaveBeenCalledOnce();
+    expect(listNoteFilesInRoot).toHaveBeenCalledOnce();
 
     await upsertNoteInIndex(
       "file:///v/Ideas/a.md",
@@ -456,7 +461,7 @@ describe("upsertNoteInIndex picks up todos with no extra wiring", () => {
     const after = await loadCachedNoteIndex();
     expect(after!.notes[0].todos).toEqual([{ text: "new task", checked: false }]);
     // Still just the one vault scan (from refreshTagIndex) — upsert never rescans.
-    expect(listNoteFiles).toHaveBeenCalledOnce();
+    expect(listNoteFilesInRoot).toHaveBeenCalledOnce();
   });
 
   it("records a Notes/ note under its real subdir, so it survives the next rebuild", async () => {
@@ -590,7 +595,7 @@ describe("getAllTodos", () => {
 
   it("doesn't throw on a cached index loaded from a pre-todos blob (no todos key on any entry)", async () => {
     _store.set(
-      "carnet:noteindex:v1",
+      noteIndexKey("default", "file:///v"),
       JSON.stringify({
         builtAt: 0,
         notes: [
@@ -675,7 +680,7 @@ describe("profile-scoped note-index cache", () => {
     const personal: NoteIndex = { builtAt: 1, notes: [] };
     const work: NoteIndex = { builtAt: 2, notes: [] };
     _store.set("carnet:noteindex:v2:default", JSON.stringify(personal));
-    _store.set("carnet:noteindex:v2:work", JSON.stringify(work));
+    _store.set(noteIndexKey("work", "file:///work"), JSON.stringify(work));
     _store.set("carnet:noteindex:v1", JSON.stringify({ builtAt: 0, notes: [{ uri: "legacy" }] }));
     vi.mocked(getSettings).mockResolvedValue({
       captureFolderPath: "file:///work",
@@ -687,7 +692,7 @@ describe("profile-scoped note-index cache", () => {
     } as Awaited<ReturnType<typeof getSettings>>);
 
     expect(await loadCachedNoteIndex()).toEqual(work);
-    expect(_store.get("carnet:noteindex:v2:work")).toBe(JSON.stringify(work));
+    expect(_store.get(noteIndexKey("work", "file:///work"))).toBe(JSON.stringify(work));
   });
 });
 
@@ -719,5 +724,90 @@ describe("inferNoteMode — Notes/", () => {
     expect(entry?.mode).toBe("note");
     expect(entry?.subdir).toBe("Notes");
     expect(entry?.todos).toEqual([{ text: "call the dentist", checked: false }]);
+  });
+});
+
+describe("same-profile root-scoped note index", () => {
+  const root = (uri: string) => resolveContextRoot({ profileId: "default", rootUri: uri });
+  const activate = (uri: string) => vi.mocked(getSettings).mockResolvedValue({
+    captureFolderPath: uri,
+  } as Awaited<ReturnType<typeof getSettings>>);
+
+  it("ignores old root-unknown caches rather than showing their tasks in the selected folder", async () => {
+    _store.set("carnet:noteindex:v1", JSON.stringify({ builtAt: 1, notes: [{ uri: "old" }] }));
+    _store.set("carnet:noteindex:v2:default", JSON.stringify({ builtAt: 1, notes: [{ uri: "old" }] }));
+    expect(await loadCachedNoteIndex()).toBeNull();
+  });
+
+  it("immediately replaces A tasks with empty B and preserves A's own cache on return", async () => {
+    addNote("file:///a/Notes/tasks.md", "Notes", "# A\n- [ ] A task\n");
+    activate("file:///a");
+    const a = await getNoteIndex();
+    _listRefs = [];
+    activate("file:///b");
+    expect(await loadCachedNoteIndex()).toBeNull();
+    expect(getAllTodos(await getNoteIndex())).toEqual([]);
+    expect(await getNoteIndex("default", root("file:///a"))).toEqual(a);
+    activate("file:///a");
+    expect(await getNoteIndex()).toEqual(a);
+  });
+
+  it("a delayed A scan and concurrent A upsert cannot merge into or overwrite B", async () => {
+    const aRoot = root("file:///a");
+    const bRoot = root("file:///b");
+    _store.set(noteIndexKey("default", aRoot.uri), JSON.stringify({ builtAt: 1, notes: [] }));
+    let release!: (refs: FakeNote[]) => void;
+    vi.mocked(listNoteFilesInRoot).mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const aScan = refreshNoteIndex("default", aRoot);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    await upsertNoteInIndex("file:///a/Notes/new.md", "# New\n- [ ] A only\n", "default", aRoot);
+    activate("file:///b");
+    const b = await refreshNoteIndex("default", bRoot);
+    expect(b.notes).toEqual([]);
+    release([]);
+    await aScan;
+    expect(await loadCachedNoteIndex()).toEqual(b);
+    expect(getAllTodos((await loadCachedNoteIndex("default", aRoot))!).map((todo) => todo.text)).toEqual(["A only"]);
+    // A delayed capture with only its profile id must not add its old URI to B.
+    await upsertNoteInIndex("file:///a/Notes/late.md", "- [ ] stale\n", "default");
+    expect(await loadCachedNoteIndex()).toEqual(b);
+  });
+
+  it("updates a root-scanned opaque SAF document while rejecting an unknown document", async () => {
+    const selected = root("content://provider/tree/opaque-root");
+    const member = "content://provider/document/opaque-member";
+    addNote(member, "Notes", "# Before\n- [ ] original\n");
+    await refreshNoteIndex("default", selected);
+    await upsertNoteInIndex(member, "# After\n- [x] original\n", "default", selected);
+    await upsertNoteInIndex("content://provider/document/opaque-foreign", "- [ ] foreign\n", "default", selected);
+    const cached = (await loadCachedNoteIndex("default", selected))!;
+    expect(cached.notes).toHaveLength(1);
+    expect(cached.notes[0].title).toBe("After");
+    expect(getAllTodos(cached)[0].checked).toBe(true);
+  });
+
+  it.each([
+    [
+      "content://provider/tree/primary%3A",
+      "content://provider/tree/primary%3A/document/primary%3ANotes%2Ftask.md",
+      "content://provider/tree/secondary%3A/document/secondary%3ANotes%2Ftask.md",
+    ],
+    ["file:///vault/B/", "file:///vault/B/Notes/task.md", "file:///vault/B2/Notes/task.md"],
+    [
+      "content://provider/tree/primary%3AVault/document/primary%3AVault%2FB",
+      "content://provider/tree/primary%3AVault/document/primary%3AVault%2FB%2FNotes%2Ftask.md",
+      "content://provider/tree/primary%3AVault/document/primary%3AVault%2FB2%2FNotes%2Ftask.md",
+    ],
+    [
+      "content://provider/tree/primary%3AVault%2FB",
+      "content://provider/tree/primary%3AVault%2FB/document/primary%3AVault%2FB%2FNotes%2Ftask.md",
+      "content://provider/tree/primary%3AVault%2FB/document/primary%3AVault%2FA%2FNotes%2Ftask.md",
+    ],
+  ])("accepts a real child and rejects shared-prefix or tree-only membership: %s", async (rootUri, child, foreign) => {
+    activate(rootUri);
+    await refreshNoteIndex();
+    await upsertNoteInIndex(child, "# Child\n- [ ] valid\n");
+    await upsertNoteInIndex(foreign, "# Foreign\n- [ ] invalid\n");
+    expect((await loadCachedNoteIndex())!.notes.map((note) => note.uri)).toEqual([child]);
   });
 });
