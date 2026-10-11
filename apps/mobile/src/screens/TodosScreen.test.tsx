@@ -127,6 +127,18 @@ function renderScreen(theme = carnetLight) {
   return { navigation, ...rendered };
 }
 
+async function waitForViewReady() {
+  const assertReady = () => {
+    expect(screen.getByLabelText("Search todos").getAttribute("readonly")).toBeNull();
+    expect(screen.getByRole("button", { name: "All" }).hasAttribute("disabled")).toBe(false);
+  };
+  await waitFor(assertReady);
+  // React Native Web updates its press handlers in a passive effect after
+  // hydration renders the enabled controls. Flush that effect before pressing.
+  await act(async () => {});
+  assertReady();
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   focus.focused = true;
@@ -303,6 +315,7 @@ describe("TodosScreen", () => {
   it("the open/all filter changes what's rendered", async () => {
     renderScreen();
     await screen.findByText("Buy milk");
+    await waitForViewReady();
     expect(screen.queryByText("Call mom")).toBeNull();
 
     fireEvent.click(screen.getByText("All"));
@@ -313,6 +326,7 @@ describe("TodosScreen", () => {
     getNoteIndex.mockResolvedValue({ ...SEEDED_INDEX, notes: SEEDED_INDEX.notes.map((note) => ({ ...note, tags: ["home"] })) });
     renderScreen();
     await screen.findByText("Buy milk");
+    await waitForViewReady();
     fireEvent.click(screen.getByText("Completed"));
     fireEvent.change(screen.getByLabelText("Search todos"), { target: { value: "Note A" } });
     fireEvent.click(screen.getByLabelText("View options"));
@@ -383,6 +397,7 @@ describe("TodosScreen", () => {
     renderScreen();
     fireEvent.click(await screen.findByText("Retry loading todos"));
     await screen.findByText("Buy milk");
+    await waitForViewReady();
     preferences.set.mockRejectedValueOnce(new Error("storage full"));
     fireEvent.click(screen.getByText("All"));
     fireEvent.click(await screen.findByText("Retry view preferences"));
