@@ -97,6 +97,14 @@ function clearFiles(): void {
 // ── listPairedBinaries ────────────────────────────────────────────────────────
 
 describe("listPairedBinaries", () => {
+  it("retains complete legacy and angle-wrapped names, deduplicating by storage path", () => {
+    const body = "![](<../Photos/a photo (1).jpg>)\n![](../Photos/a photo (1).jpg)\n[a spec.pdf](<../Files/a spec.pdf>)";
+    expect(listPairedBinaries(body)).toEqual([
+      { subdir: "Photos", filename: "a photo (1).jpg", rel: "../Photos/a photo (1).jpg" },
+      { subdir: "Files", filename: "a spec.pdf", rel: "../Files/a spec.pdf" },
+    ]);
+  });
+
   it("returns an empty array when there are no paired-binary links", () => {
     expect(listPairedBinaries("# T\n\nplain prose only\n")).toEqual([]);
   });
@@ -122,6 +130,18 @@ describe("listPairedBinaries", () => {
 // ── stripPairedBinaryLinks (RecentDetail display) ────────────────────────────
 
 describe("stripPairedBinaryLinks", () => {
+  it("leaves fenced link examples visible", () => {
+    const body = "# T\n\n```md\n![](../Photos/example.jpg)\n[example.pdf](../Files/example.pdf)\n```\n";
+    expect(stripPairedBinaryLinks(body)).toBe(body);
+    expect(listPairedBinaries(body)).toEqual([]);
+  });
+
+  it("strips complete spaced and parenthesized destinations from display", () => {
+    const body = "# T\n\n![](<../Photos/a photo (1).jpg>)\n\n## Files\n\n[a spec.pdf](<../Files/a spec.pdf>)\n";
+    expect(stripPairedBinaryLinks(body)).toBe("# T\n");
+    expect(stripPairedBinaryLinks(body, { keepImages: true })).toContain("![](<../Photos/a photo (1).jpg>)");
+  });
+
   it("removes a standalone image embed but keeps the prose", () => {
     const body = "# T\n\n![](../Photos/shot.jpg)\n\nWhat's in this.\n";
     expect(stripPairedBinaryLinks(body)).toBe("# T\n\nWhat's in this.\n");

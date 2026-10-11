@@ -85,6 +85,7 @@ import {
   writePerson,
   readNote,
   updateNote,
+  updateNoteIfUnchanged,
   updateChecklistItem,
   moveToArchive,
   rewriteFrontmatterField,
@@ -106,6 +107,38 @@ function clearFiles(): void {
 }
 
 // ── rewriteFrontmatterField ───────────────────────────────────────────────────
+
+describe("updateNoteIfUnchanged (file://)", () => {
+  beforeEach(() => {
+    clearFiles();
+    vi.clearAllMocks();
+  });
+
+  it("keeps content edits even when the file timestamp did not advance", async () => {
+    const filepath = "file:///vault/photo.md";
+    _files.set(filepath, { content: "# Edited\n" });
+    vi.mocked(FileSystem.getInfoAsync).mockResolvedValueOnce({ exists: true, modificationTime: 1000 } as never);
+    const result = await updateNoteIfUnchanged(filepath, "# Enriched\n", 1000, "# Original\n");
+    expect(result).toEqual({ ok: false, reason: "conflict" });
+    expect(_files.get(filepath)?.content).toBe("# Edited\n");
+    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+  });
+
+  it("does not recreate a missing file when a recorded timestamp disappears", async () => {
+    const filepath = "file:///vault/deleted.md";
+    const result = await updateNoteIfUnchanged(filepath, "# Enriched\n", 1000);
+    expect(result).toEqual({ ok: false, reason: "conflict" });
+    expect(_files.has(filepath)).toBe(false);
+    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+  });
+
+  it("retains the unguarded write when neither baseline was captured", async () => {
+    const filepath = "file:///vault/new.md";
+    const result = await updateNoteIfUnchanged(filepath, "# New\n", null, null);
+    expect(result).toEqual({ ok: true });
+    expect(_files.get(filepath)?.content).toBe("# New\n");
+  });
+});
 
 describe("rewriteFrontmatterField", () => {
   it("rewrites status field without touching body", () => {

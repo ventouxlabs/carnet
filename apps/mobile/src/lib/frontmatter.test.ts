@@ -432,3 +432,84 @@ describe("isSynthesisNote", () => {
     expect(isSynthesisNote(`${captured}\nquestion: what to buy\n`)).toBe(false);
   });
 });
+
+
+describe("preserveFrontmatterFields — original-owned fields", () => {
+  const fresh = '---\ncreated: 2026-10-11\nname: Updated\n---\n# Fresh\n';
+
+  it("keeps the original created line byte-for-byte and lets other fresh values win", () => {
+    const out = preserveFrontmatterFields(fresh,
+      '---\ncreated: "2026-07-04T12:00:00.000Z"\nname: Original\ncustom: "#1 fan"\n---\nOld\n',
+      [], ["created"]);
+    expect(out).toContain('created: "2026-07-04T12:00:00.000Z"');
+    expect(out).not.toContain("2026-10-11");
+    expect(out).toContain("name: Updated");
+    expect(out).toContain('custom: "#1 fan"');
+    expect(out.match(/^created:/gm)).toHaveLength(1);
+  });
+
+  it("removes duplicate selected keys after restoring the original", () => {
+    const out = preserveFrontmatterFields(
+      '---\ncreated: fresh\ncreated: duplicate\n---\nBody\n',
+      '---\ncreated: original\n---\nOld\n', [], ["created"]);
+    expect(out.match(/^created:/gm)).toHaveLength(1);
+    expect(out).toContain("created: original");
+  });
+
+  it.each(['', 'created: ""\n', 'created:\n',
+    'created: # date unknown\n', 'created:\n  # date unknown\n',
+    'created: "" # date unknown\n'])(
+    "keeps fresh created when the original has no populated value (%s)", (field) => {
+      expect(preserveFrontmatterFields(fresh, `---\n${field}---\nOld\n`, [], ["created"]))
+        .toBe(fresh);
+    });
+
+  it.each([
+    "created: 2026-07-04 # captured on holiday\n",
+    "created:\n  - 2026-07-04\n  # original representation\n",
+    "created: |\n  2026-07-04\n",
+    'created: "# date unknown"\n',
+  ])("retains populated preferred source lines verbatim (%s)", (field) => {
+    const out = preserveFrontmatterFields(fresh, `---\n${field}---\nOld\n`, [], ["created"]);
+    expect(out).toContain(field);
+    expect(out).not.toContain("2026-10-11");
+    expect(out.match(/^created:/gm)).toHaveLength(1);
+  });
+
+  it.each(["|", ">- # no date", "|+", ">2", "|2-", ">+2"])(
+    "keeps fresh created for an empty block scalar (%s)", (indicator) => {
+      for (const tail of ["", "  \n", "# date unknown\n"]) {
+        expect(preserveFrontmatterFields(fresh,
+          `---\ncreated: ${indicator}\n${tail}---\nOld\n`, [], ["created"]))
+          .toBe(fresh);
+      }
+    });
+
+  it.each(["|", ">- # date literal", "|+", ">2", "|2-", ">+2"])(
+    "retains real block content, including literal # text (%s)", (indicator) => {
+      const field = `created: ${indicator}\n  # literal scalar content\n`;
+      const out = preserveFrontmatterFields(fresh, `---\n${field}---\nOld\n`, [], ["created"]);
+      expect(out).toContain(field);
+      expect(out).not.toContain("2026-10-11");
+    });
+
+  it("leaves default empty-block carry semantics unchanged", () => {
+    expect(preserveFrontmatterFields('---\nname: Updated\n---\nFresh\n',
+      '---\ncreated: |\n---\nOld\n')).toContain("created: |");
+  });
+
+  it("leaves default comment-only carry semantics unchanged", () => {
+    expect(preserveFrontmatterFields('---\nname: Updated\n---\nFresh\n',
+      '---\ncreated: # date unknown\n---\nOld\n'))
+      .toContain("created: # date unknown");
+  });
+
+  it("gives exclusions precedence over selected original fields", () => {
+    expect(preserveFrontmatterFields(fresh, '---\ncreated: old\n---\nOld\n',
+      ["created"], ["created"])).toBe(fresh);
+  });
+
+  it("keeps default model-wins semantics when no selection is passed", () => {
+    expect(preserveFrontmatterFields(fresh, '---\ncreated: old\n---\nOld\n')).toBe(fresh);
+  });
+});

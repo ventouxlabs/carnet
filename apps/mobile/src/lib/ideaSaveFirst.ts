@@ -272,11 +272,15 @@ export interface ApplyEnrichedIdeaInput {
  * `rev` is the raw write's change detector and `status: pending-enrich` would
  * leave a just-enriched note showing a permanent pending chip — neither may
  * survive into an enriched note even when the model omits the field itself.
+ * `fallback` and `enhanced` describe the current provider reply, so only fresh
+ * dispatcher markers may survive; an old reply cannot supply them.
  *
  * `tags` belongs to mergeUserTags, which runs after this and merges the model's
  * tags with the user's. Preserving it first would overwrite the model's own
  * (block-form) tag list before that merge ever sees it. */
-const NEVER_PRESERVED_FIELDS = [RAW_REV_FIELD, DRIVE_INBOX_RECEIPT_FIELD, "status", "tags"] as const;
+const NEVER_PRESERVED_FIELDS = [
+  RAW_REV_FIELD, DRIVE_INBOX_RECEIPT_FIELD, "status", "tags", "fallback", "enhanced",
+] as const;
 
 /**
  * Overwrite the raw Idea note in place with the enriched result, preserving the
@@ -293,6 +297,7 @@ export async function applyEnrichedIdea(
         input.enrichedMarkdown,
         input.preserveFrontmatterFrom,
         NEVER_PRESERVED_FIELDS,
+        ["created"],
       )
     : input.enrichedMarkdown;
   md = injectAttachments(md, input.attachments ?? []);

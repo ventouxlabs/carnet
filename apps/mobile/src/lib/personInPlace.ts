@@ -104,7 +104,9 @@ export async function enrichPersonInPlace(
   // preservation anywhere near the field it does not own is how the model's own
   // fresh tags got overwritten with the note's older list.
   let md = input.preserveFrontmatterFrom
-    ? preserveFrontmatterFields(enriched, input.preserveFrontmatterFrom, ["tags"])
+    ? preserveFrontmatterFields(
+        enriched, input.preserveFrontmatterFrom, ["tags", "fallback", "enhanced"], ["created"],
+      )
     : enriched;
   md = injectAttachments(md, input.attachments ?? []);
   md = mergeUserTags(md, input.tags);

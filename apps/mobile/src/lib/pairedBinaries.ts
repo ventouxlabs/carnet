@@ -14,24 +14,12 @@
 import { fsForUri } from "./vaultFs";
 import { resolveRoot, type Root } from "./vaultRoot";
 import { mimeFromFilename } from "./mimeTypes";
+import { pairedMarkdownLinks } from "./pairedMarkdownLinks";
 
 // The MIME<->extension mapping lives in ./mimeTypes — pure, shared beyond the
 // paired-binary convention. Re-exported so importers of ./pairedBinaries (and
 // ./writer, which re-exports this module) keep their import path unchanged.
 export { extFromMime, mimeFromFilename } from "./mimeTypes";
-
-/** The relative-link convention every binary writer emits: `../{subdir}/{name}`.
- * The filename class `[^/\s)]+` rejects `/` so a crafted `[x](../Photos/../..)`
- * link can't traverse out of the recognized subdir.
- *
- * Kept as a source string so both flavors of the pattern can be derived from
- * one place: a `/g`-flagged RegExp for `matchAll` (enumeration), and a
- * non-global one for `.match()` (single-link lookups). A `/g` regex used with
- * `.match()` returns only whole matches, not capture groups — so the two
- * flavors can't share one RegExp instance. */
-const PAIRED_BINARY_LINK_SOURCE = "\\.\\./(Photos|Audio|Files)/([^/\\s)]+)";
-const PAIRED_BINARY_LINK = new RegExp(PAIRED_BINARY_LINK_SOURCE, "g");
-const PAIRED_BINARY_LINK_ONE = new RegExp(PAIRED_BINARY_LINK_SOURCE);
 
 type PairedSubdir = "Photos" | "Audio" | "Files";
 
@@ -50,11 +38,11 @@ export interface PairedBinary {
 export function listPairedBinaries(body: string): PairedBinary[] {
   const out: PairedBinary[] = [];
   const seen = new Set<string>();
-  for (const m of body.matchAll(PAIRED_BINARY_LINK)) {
-    const rel = `../${m[1]}/${m[2]}`;
+  for (const link of pairedMarkdownLinks(body)) {
+    const { rel, subdir, filename } = link;
     if (seen.has(rel)) continue;
     seen.add(rel);
-    out.push({ subdir: m[1] as PairedSubdir, filename: m[2], rel });
+    out.push({ subdir, filename, rel });
   }
   return out;
 }
@@ -99,15 +87,16 @@ export function stripPairedBinaryLinks(
   // detail view can render them INLINE (a custom markdown image rule resolves
   // each to a device URI); only Audio (dedicated player) and Files (tappable
   // rows) are pulled out. Default — no opts — strips all three, as before.
-  const subdirs = opts?.keepImages ? "Audio|Files" : "Photos|Audio|Files";
-  const pairedLinkLine = new RegExp(
-    `^!?\\[[^\\]]*\\]\\(\\.\\.\\/(?:${subdirs})\\/[^)]+\\)$`,
-  );
-  const lineIsPairedLink = (line: string): boolean =>
-    pairedLinkLine.test(line.trim());
-
-  // Pass 1: drop standalone embed/link lines.
-  const kept = body.split("\n").filter((l) => !lineIsPairedLink(l));
+  const linksByStart = new Map(pairedMarkdownLinks(body).map(link => [link.start, link]));
+  let offset = 0;
+  // Parse once with the complete body so fenced examples retain their context.
+  const kept = body.split("\n").filter(line => {
+    const start = offset + line.length - line.trimStart().length;
+    const end = offset + line.trimEnd().length;
+    offset += line.length + 1;
+    const link = linksByStart.get(start);
+    return !link || link.end !== end || (opts?.keepImages && link.subdir === "Photos");
+  });
 
   // Pass 2: drop a "## File"/"## Files" heading left with no body content.
   const out: string[] = [];
@@ -156,12 +145,11 @@ export async function readPairedBinaryUri(
   body: string,
   rootOverride?: Root,
 ): Promise<{ uri: string; mime: string; filename: string }> {
-  const linkMatch = body.match(PAIRED_BINARY_LINK_ONE);
+  const linkMatch = pairedMarkdownLinks(body)[0];
   if (!linkMatch) {
     throw new Error("No paired binary link found in note.");
   }
-  const subdir = linkMatch[1];
-  const filename = linkMatch[2];
+  const { subdir, filename } = linkMatch;
   const resolved = await resolvePairedUri(subdir, filename, rootOverride);
   if (!resolved) {
     throw new Error(`Paired binary not found: ${subdir}/${filename}`);
@@ -178,7 +166,7 @@ export async function readPairedBinaryUri(
  * Resolves the first `../{Photos|Audio|Files}/<name>` link in `body`,
  * looks the file up in that subdir of the active vault root, and reads it
  * as base64. Path-traversal characters in the captured filename are
- * rejected by the regex (matches `moveToArchive`).
+ * rejected by the shared Markdown destination parser.
  *
  * Throws with a friendly message when:
  *   - the body contains no recognized paired-binary link
@@ -192,12 +180,11 @@ export async function readPairedBinaryFromNote(
   body: string,
   rootOverride?: Root,
 ): Promise<{ base64: string; mime: string }> {
-  const linkMatch = body.match(PAIRED_BINARY_LINK_ONE);
+  const linkMatch = pairedMarkdownLinks(body)[0];
   if (!linkMatch) {
     throw new Error("No paired binary link found in note.");
   }
-  const subdir = linkMatch[1];
-  const filename = linkMatch[2];
+  const { subdir, filename } = linkMatch;
   const resolved = await resolvePairedUri(subdir, filename, rootOverride);
   if (!resolved) {
     throw new Error(`Paired binary not found: ${subdir}/${filename}`);

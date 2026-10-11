@@ -510,15 +510,15 @@ export interface GuardedUpdateResult {
  * reason: "conflict" }` is returned so the caller can keep the existing version
  * and surface a banner instead of clobbering it.
  *
- * Two baselines, in priority order:
- *   - `expectedMtime` — the fast path (one stat, no file read). Used whenever
- *     the backend reports an mtime at all.
- *   - `expectedContent` — the SAF fallback. `getModificationTime` returns null
+ * Both available baselines must match:
+ *   - `expectedMtime` detects a changed or unavailable file:// timestamp.
+ *   - `expectedContent` detects same-timestamp edits and is the SAF guard.
+ *     `getModificationTime` returns null
  *     for every `content://` URI, which is the NORMAL Android/Syncthing vault
  *     setup, so an mtime-only guard was dead code exactly where the vault is
  *     shared with a workstation. Comparing the file's current bytes against the
- *     snapshot taken alongside the (absent) mtime baseline restores the guard
- *     there: any intervening write changes the bytes.
+ *     snapshot taken alongside the mtime baseline restores the guard there.
+ *     A snapshot that cannot be read again is treated as a conflict.
  *
  * With neither baseline the guard cannot fire and the overwrite proceeds —
  * cross-device races then fall back to Syncthing conflict files, exactly as the
@@ -532,18 +532,22 @@ export async function updateNoteIfUnchanged(
 ): Promise<GuardedUpdateResult> {
   if (expectedMtime !== null) {
     const current = await getModificationTime(filepath);
-    if (current !== null && current !== expectedMtime) {
+    if (
+      (current === null && !filepath.startsWith("content://")) ||
+      (current !== null && current !== expectedMtime)
+    ) {
       return { ok: false, reason: "conflict" };
     }
-  } else if (expectedContent != null) {
+  }
+  // Content also catches edits that share the same coarse file:// timestamp.
+  // A captured snapshot must still be readable; recreating a deleted note or
+  // writing after a revoked SAF grant would discard the user's change.
+  if (expectedContent != null) {
     let current: string;
     try {
       current = await readByUri(filepath);
     } catch {
-      // Unreadable (permission revoked, file moved) — no baseline to compare, so
-      // fall through to the write rather than refusing it. Same "can't verify →
-      // proceed" stance the null-baseline case takes.
-      current = expectedContent;
+      return { ok: false, reason: "conflict" };
     }
     if (current !== expectedContent) {
       return { ok: false, reason: "conflict" };

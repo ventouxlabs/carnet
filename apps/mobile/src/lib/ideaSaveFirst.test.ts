@@ -698,8 +698,9 @@ describe("applyEnrichedIdea — frontmatter preservation", () => {
     const content = _files.get(filepath)!.content;
     expect(content).toContain("project: kites");
     expect(content).toContain("# Kite v2");
-    // The model's own values still win.
-    expect(content).toContain("created: 2026-07-05");
+    // Creation time belongs to the original capture, not this enrichment.
+    expect(content).toContain("created: 2026-07-04");
+    expect(content).not.toContain("created: 2026-07-05");
   });
 });
 
@@ -899,5 +900,36 @@ describe("a note's photo embed through Finish and Re-enrich", () => {
     expect(content.startsWith("---\n")).toBe(true);
     expect(extractFrontmatterField(content, "status")).toBeNull();
     expect(embedCount(content)).toBe(1);
+  });
+});
+
+
+describe("applyEnrichedIdea — capture metadata ownership", () => {
+  it.each(["idea", "note"] as const)("pins the raw %s timestamp after pending completion", async (mode) => {
+    const { filepath, markdown } = await writeRawIdea(
+      { text: "Capture", tags: [], mode }, new Date("2026-07-04T12:00:00.000Z"),
+    );
+    const provider = mode === "note" ? enrichNoteMock : enrichIdeaMock;
+    provider.mockResolvedValue({ markdown: "---\ncreated: 2026-10-11\n---\n# Enriched\n", model: "test" });
+    const outcome = await finishPendingEnrichment({ filepath, body: markdown, mode });
+    expect(outcome.kind).toBe("updated");
+    const content = _files.get(filepath)!.content;
+    expect(content).toContain("created: 2026-07-04T12:00:00.000Z");
+    expect(content.match(/^created:/gm)).toHaveLength(1);
+  });
+
+  it.each(["", "fallback: true\n", "enhanced: true\n"])("drops old dispatcher markers while retaining current fallback (%s)", async (freshMarker) => {
+    const { filepath, mtime } = await writeRawIdea({ text: "Capture", tags: [] });
+    await applyEnrichedIdea({ filepath, expectedMtime: mtime,
+      preserveFrontmatterFrom: '---\ncreated: "2026-07-04"\nfallback: true\nenhanced: true\nlocation: Paris\nkarakeep_id: saved-id\ncustom: "#1 fan"\n---\nOld\n',
+      enrichedMarkdown: `---\ncreated: 2026-10-11\n${freshMarker}tags: [fresh]\n---\nNew\n`, tags: ["user"] });
+    const content = _files.get(filepath)!.content;
+    expect(content).toContain('created: "2026-07-04"');
+    expect(content.includes("enhanced:")).toBe(freshMarker.includes("enhanced:"));
+    expect(content.includes("fallback:")).toBe(freshMarker.includes("fallback:"));
+    expect(content).toContain("location: Paris");
+    expect(content).toContain("karakeep_id: saved-id");
+    expect(content).toContain('custom: "#1 fan"');
+    expect(content).toContain("tags: [fresh, user]");
   });
 });

@@ -6,23 +6,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./writer", async () => {
   // The real pure splicer — it is what decides what the model is shown.
   const md = await vi.importActual<typeof import("./writerMarkdown")>("./writerMarkdown");
+  const paired = await vi.importActual<typeof import("./pairedMarkdownLinks")>("./pairedMarkdownLinks");
   return {
   stripInjectedAttachments: md.stripInjectedAttachments,
   getModificationTime: vi.fn(async () => 1000),
   readNote: vi.fn(async () => {
     throw new Error("not stubbed");
   }),
-  // Stand-in for the real listPairedBinaries (unit-tested in writer.test.ts),
-  // matching its `../{subdir}/{name}` convention and de-dup behaviour — the
-  // real module can't be imported here (see the importActual note below).
+  // Real pure parser; storage-facing listPairedBinaries has separate tests.
   listPairedBinaries: vi.fn((body: string) => {
     const out: { subdir: string; filename: string; rel: string }[] = [];
     const seen = new Set<string>();
-    for (const m of body.matchAll(/\.\.\/(Photos|Audio|Files)\/([^/\s)]+)/g)) {
-      const rel = `../${m[1]}/${m[2]}`;
+    for (const link of paired.pairedMarkdownLinks(body)) {
+      const { rel, subdir, filename } = link;
       if (seen.has(rel)) continue;
       seen.add(rel);
-      out.push({ subdir: m[1], filename: m[2], rel });
+      out.push({ subdir, filename, rel });
     }
     return out;
   }),
@@ -198,6 +197,30 @@ describe("finishPendingEnrichment", () => {
     const arg = mockEnrich.mock.calls[0][0];
     expect(arg.text).toBe("Stroudsburg Pennsylvania and the Pocono Mountains region.");
     expect(arg.attachments).toHaveLength(2);
+  });
+
+  it("extracts complete spaced and parenthesized attachment paths", async () => {
+    const pending = PENDING.replace("Stroudsburg", "![](<../Photos/a photo (1).jpg>)\n\nStroudsburg") +
+      "\n## Files\n\n[a spec (final).pdf](<../Files/a spec (final).pdf>)\n";
+    mockReadNote.mockResolvedValue(pending);
+    await finishPendingEnrichment({ body: pending, filepath: "f.md", mode: "note" });
+    const arg = mockEnrich.mock.calls[0][0];
+    expect(arg.text).toBe("Stroudsburg Pennsylvania and the Pocono Mountains region.");
+    expect(arg.attachments).toEqual([
+      { kind: "image", rel: "../Photos/a photo (1).jpg", filename: "a photo (1).jpg" },
+      { kind: "file", rel: "../Files/a spec (final).pdf", filename: "a spec (final).pdf" },
+    ]);
+  });
+
+  it("keeps authored Files prose in Note model input and line guard", async () => {
+    const pending = PENDING + "\n## Files\n\nKeep the paper originals.\n\n[spec.pdf](../Files/spec.pdf)\n";
+    mockReadNote.mockResolvedValue(pending);
+    await finishPendingEnrichment({ body: pending, filepath: "f.md", mode: "note" });
+    const arg = mockEnrich.mock.calls[0][0];
+    expect(arg.text).toContain("Keep the paper originals.");
+    expect(arg.attachments).toEqual([{ kind: "file", rel: "../Files/spec.pdf", filename: "spec.pdf" }]);
+    expect(keepsUserLines(arg.text, arg.text)).toBe(true);
+    expect(keepsUserLines(arg.text, "Stroudsburg Pennsylvania and the Pocono Mountains region.")).toBe(false);
   });
 
   it("refuses a pending note whose body is nothing but attachments", async () => {

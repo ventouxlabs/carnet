@@ -331,6 +331,25 @@ function groupHasValue(group: FieldGroup): boolean {
   return stripQuotes(head.slice(head.indexOf(":") + 1).trim()) !== "";
 }
 
+/** Preferred originals need a value, not just an explanatory YAML comment.
+ * Keep groupHasValue's existing behavior for the default preservation path. */
+function groupHasValueIgnoringComments(group: FieldGroup): boolean {
+  const head = group.lines[0];
+  const inline = head.slice(head.indexOf(":") + 1).trim();
+  // A literal/folded indicator declares a scalar; it is not its content.
+  // Both indentation/chomping orders are legal YAML. Inside the block an
+  // indented '#' is literal text, while an unindented comment is outside it.
+  if (/^[|>](?:[1-9][+-]?|[+-][1-9]?)?(?:\s+#.*)?$/.test(inline)) {
+    return group.lines.slice(1).some((line) => /^[ \t]+\S/.test(line));
+  }
+  const hasInlineValue = inline !== "" && !inline.startsWith("#") &&
+    !/^(['"])\1(?:\s+#.*)?$/.test(inline);
+  return hasInlineValue || group.lines.slice(1).some((line) => {
+    const trimmed = line.trim();
+    return trimmed !== "" && !trimmed.startsWith("#");
+  });
+}
+
 /**
  * Overlay `original`'s frontmatter fields onto `enriched` for every field the
  * enriched markdown does not itself provide — preserve-if-absent, model wins.
@@ -366,19 +385,29 @@ function groupHasValue(group: FieldGroup): boolean {
  * `exclude` is for fields another step owns outright — `tags` (mergeUserTags)
  * and the raw note's own bookkeeping. Callers must pass them: this function
  * cannot tell an owned field from a user's.
+ *
+ * `preferOriginal` pins selected populated original fields (such as capture
+ * creation time), retaining their source lines even when enrichment supplies
+ * a value. Exclusions still take precedence; missing/empty originals leave
+ * fresh values intact. Omit it to keep the default model-wins behavior.
  */
 export function preserveFrontmatterFields(
   enriched: string,
   original: string,
   exclude: readonly string[] = [],
+  preferOriginal: readonly string[] = [],
 ): string {
   const excluded = new Set(exclude);
+  const preferred = new Set(preferOriginal);
   const carried = new Map<string, string[]>();
   for (const group of groupFrontmatterLines(frontmatterInnerLines(splitFrontmatter(original).header))) {
     if (group.key === null || excluded.has(group.key) || carried.has(group.key)) continue;
     // A CRLF-sourced note would otherwise splice stray carriage returns into an
     // LF document; every other writer here emits LF.
-    if (groupHasValue(group)) carried.set(group.key, group.lines.map((l) => l.replace(/\r$/, "")));
+    const hasValue = preferred.has(group.key)
+      ? groupHasValueIgnoringComments(group)
+      : groupHasValue(group);
+    if (hasValue) carried.set(group.key, group.lines.map((l) => l.replace(/\r$/, "")));
   }
   if (carried.size === 0) return enriched;
 
@@ -396,7 +425,7 @@ export function preserveFrontmatterFields(
   const tail = headerLines.slice(closeIdx);
 
   const newInner: string[] = [];
-  /** Keys whose empty line in the model's output we filled from `original`. */
+  /** Keys replaced with source lines from `original`. */
   const filled = new Set<string>();
   for (const group of groupFrontmatterLines(inner)) {
     if (group.key === null) {
@@ -404,7 +433,13 @@ export function preserveFrontmatterFields(
       continue;
     }
     const replacement = carried.get(group.key);
-    if (groupHasValue(group)) {
+    if (preferred.has(group.key) && filled.has(group.key)) {
+      // Restoring an owned field must not leave a second model value behind.
+      continue;
+    } else if (preferred.has(group.key) && replacement) {
+      newInner.push(...replacement);
+      filled.add(group.key);
+    } else if (groupHasValue(group)) {
       newInner.push(...group.lines);
     } else if (filled.has(group.key)) {
       // The model emitted this key twice and the first copy already took the

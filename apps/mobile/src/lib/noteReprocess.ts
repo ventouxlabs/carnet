@@ -11,6 +11,9 @@
  */
 
 import {
+  getModificationTime,
+  readNote,
+  updateNoteIfUnchanged,
   injectImageEmbed,
   readPairedBinaryFromNote,
   updateNote,
@@ -21,17 +24,18 @@ import { transcribeAudio } from "./dispatcher";
 import { getFrontmatterTags, preserveFrontmatterFields } from "./frontmatter";
 import { mergeUserTags } from "./tags";
 import type { VaultContext } from "./vaultContext";
-import type { Root } from "./vaultRoot";
+import { resolveContextRoot, resolveRoot, type Root } from "./vaultRoot";
+import { repairEmbedsAboveFrontmatter } from "./legacyEmbedRepair";
+import { pairedMarkdownLinks } from "./pairedMarkdownLinks";
 
 /**
  * Locate the first paired-binary filename of a given subdir in a note body.
- * The link convention is `../{subdir}/{filename}`; the filename class rejects
- * `/` and whitespace so a crafted traversal link can't match out of the subdir.
+ * The link convention is `../{subdir}/{filename}`. The shared parser accepts
+ * spaced/parenthesized names and rejects traversal without returning partial paths.
  * Returns the filename (e.g. `photo.jpg`) or null when there is no such link.
  */
 export function findPairedLink(body: string, subdir: string): string | null {
-  const match = body.match(new RegExp(`\\.\\./${subdir}/([^/\\s)]+)`));
-  return match ? match[1] : null;
+  return pairedMarkdownLinks(body).find((link) => link.subdir === subdir)?.filename ?? null;
 }
 
 /** Fields the old note carries that must not outlive a fresh vision reply.
@@ -73,29 +77,43 @@ export async function reEnrichNote(input: {
   rootOverride?: Root;
 }): Promise<ReprocessOutcome> {
   try {
-    // The match also gives us the relative path to re-inject after the LLM
-    // rewrites the body.
-    const imageFilename = findPairedLink(input.body, "Photos");
+    // Capture the guard before the model call and use the current file, not
+    // the screen's possibly stale copy. The raw bytes remain the guard even
+    // when legacy embed repair normalizes the source used for enrichment.
+    const baseline = await getModificationTime(input.filepath);
+    const expectedContent = await readNote(input.filepath);
+    const source = repairEmbedsAboveFrontmatter(expectedContent);
+    const imageFilename = findPairedLink(source, "Photos");
     if (!imageFilename) {
       throw new Error(
         "No paired image found in this note — re-enrich needs the original image on disk.",
       );
     }
-    const { base64, mime } = input.rootOverride
-      ? await readPairedBinaryFromNote(input.body, input.rootOverride)
-      : await readPairedBinaryFromNote(input.body);
+    const root = input.rootOverride ?? (
+      input.vaultContext ? resolveContextRoot(input.vaultContext) : await resolveRoot()
+    );
+    const { base64, mime } = await readPairedBinaryFromNote(source, root);
     const result = await enrichSharedImage(
       { base64, mimeType: mime, context: "" },
       { vaultContext: input.vaultContext },
     );
     const preserved = preserveFrontmatterFields(
       result.markdown,
-      input.body,
+      source,
       REPROCESS_OWNED_FIELDS,
+      ["created"],
     );
     const withImage = injectImageEmbed(preserved, `../Photos/${imageFilename}`);
-    const next = mergeUserTags(withImage, getFrontmatterTags(input.body));
-    await updateNote(input.filepath, next);
+    const next = mergeUserTags(withImage, getFrontmatterTags(source));
+    const updated = await updateNoteIfUnchanged(
+      input.filepath, next, baseline, expectedContent,
+    );
+    if (!updated.ok) {
+      return {
+        kind: "failed",
+        reason: "This note changed while enrichment was running, so your version was kept. Try again.",
+      };
+    }
     return { kind: "updated", nextBody: next };
   } catch (e: unknown) {
     const reason = e instanceof Error ? e.message : String(e);
