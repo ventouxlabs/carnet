@@ -8,18 +8,23 @@ already shipped. When planning from it, re-verify anything you're about to act o
 log --oneline --all | grep -i <topic>`, or look for the module it names); a stale
 "deferred" entry is worse than no entry.
 
-## Todos discovery — implemented, physical acceptance pending (2026-10-11)
+## Todos discovery — folded-device checks passed, follow-ups open (2026-10-11)
 
 Text/title search, Open/Completed/All, capture-mode and source-tag filters,
 source-date or source-title sorting, optional source-file grouping, and view
 preferences isolated by profile plus vault root are implemented and independently
-reviewed. Local automated gates passed; physical acceptance remains pending.
-See [the session handoff](docs/session-handoffs/2026-10-11-todo-discovery.md)
-for exact verification evidence.
-Physical Android acceptance remains pending: no adb device is attached. Use the
-Todos checklist in [docs/smoke-test.md](docs/smoke-test.md), including completion,
-profile/root switching, and Syncthing refresh. #228 and #229 are merged; their
-remaining physical checks are still required.
+reviewed. Local automated gates passed; see [the implementation handoff](docs/session-handoffs/2026-10-11-todo-discovery.md).
+
+Physical checks on a folded Pixel 10 Pro Fold passed for light/dark layouts,
+keyboard input, all ten fixture tasks, combined OR filters, sorts, URI grouping,
+unique and cross-source checkbox writes, ambiguity rejection, and restart persistence.
+See [the device handoff](docs/session-handoffs/2026-10-11-pixel-10-fold-verification.md)
+for APK provenance, fixture-byte evidence and limits. Separate profiles using the
+same owned root retained independent view choices. The original profile/root and
+System theme were restored and owned profiles/fixtures removed. Independent review
+approved the exercised physical scope.
+Within-profile root changes, unfolded layout and real Syncthing refresh remain open
+in [docs/smoke-test.md](docs/smoke-test.md). #228 LLM re-enrichment acceptance remains open.
 
 ## Resolved in v0.2
 
@@ -193,6 +198,13 @@ stray text. Found on-device 2026-10-03; fixed by `patches/expo-file-system+19.0.
   raw Idea was replaced in rich text with `SAF-short-rewrite-ok`, then saved and
   reopened containing only `SAF-short-rewrite-ok`. The disposable verification note was
   archived.
+- [x] **Folded-device legacy rewrite and review dialog (2026-10-11)** — the exact
+  CI APK rewrote an owned SAF fixture from 143 to 69 bytes, preserving frontmatter
+  and leaving no old task tail. The read-only scan showed 13 checked, 0 skipped and
+  10 candidates; bounded scrolling, fixed Close and candidate Open passed, with all
+  13 fixture files byte-identical after scanning. See [the device handoff](docs/session-handoffs/2026-10-11-pixel-10-fold-verification.md).
+- [ ] **Remaining physical SAF paths** — modern file-system API, providers rejecting
+  `"wt"`, unreadable/partial scans and unfolded layout still need device coverage.
 - [ ] **`"wt"` empties a file before a base64 decode fails** — harmless today (every
   `writeBinaryBytes` caller writes a fresh file); decode before opening the stream if that
   ever changes.

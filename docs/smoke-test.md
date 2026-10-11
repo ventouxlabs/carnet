@@ -51,35 +51,61 @@ rest of the checklist — an attached device, a working adb, a synced vault.)_
 
 _(device-only: keyboard, scrolling, checkbox interaction, profile/root switching,
 and real Syncthing refresh. Automated filtering, preference isolation and screen
-wiring coverage passed locally: `npm -w @carnet/mobile test -- todoView todoViewPreferences TodosScreen` (41 focused tests). See the
-[session handoff](session-handoffs/2026-10-11-todo-discovery.md) for full gate evidence.
-No attached adb device was available on 2026-10-11, so these boxes remain open.)_
+wiring coverage passed locally: `npm -w @carnet/mobile test -- todoView todoViewPreferences TodosScreen` (41 focused tests).
+The [implementation handoff](session-handoffs/2026-10-11-todo-discovery.md) records the
+initial no-device session; the later [physical follow-up](session-handoffs/2026-10-11-pixel-10-fold-verification.md)
+records folded Pixel 10 Pro Fold checks in light and dark themes. Checked boxes below
+apply to that fixture run, not general acceptance across devices.)_
 
-- [ ] Prepare two notes with distinct dates, modes and tags; include open and
+- [x] Prepare notes with distinct dates, modes and tags; include open and
       completed tasks, duplicate task text, and two distinct files sharing a title.
       Open **Todos** and confirm default Open view, newest source note first.
-- [ ] Search for task text, then a source title. Clear the query; compare **Open**,
-      **Completed**, and **All** against the source Markdown checkboxes.
-- [ ] Select multiple modes and tags: any selected mode and any selected source
-      tag match; mode, tag, status and query requirements combine. Clear filters
+- [x] Search for task text, then a source title. Clear the query; compare **Open**,
+      **Completed**, and **All** against the source Markdown checkboxes (7/3/10).
+      Verify keyboard input and scroll to the final task. Light and dark layouts passed.
+- [x] Select multiple modes and tags: any selected mode and any selected source
+      tag match; mode, tag and status requirements combine. Clear filters
       and confirm hidden tasks return.
-- [ ] Compare **Newest**, **Oldest**, and **Source**. Date order follows source
+- [x] Compare **Newest**, **Oldest**, and **Source**. Date order follows source
       note dates, not a newly invented task timestamp. Enable source grouping;
       distinct files with identical titles must remain distinct groups.
-- [ ] Complete and reopen a task whose text is unique within its source note;
+- [x] Complete and reopen a task whose text is unique within its source note;
       confirm only that original checkbox changes on disk. Open the source note
       and check the result. Identical text in a different note must remain unchanged:
       completion targets the selected source URI.
-- [ ] Try completing a task whose matching text and checkbox state appear more
+- [x] Try completing a task whose matching text and checkbox state appear more
       than once in the same source note. Confirm the ambiguity notice appears,
-      the file remains unchanged, and
-      the optimistic checkbox change rolls back. Sorting and grouping must retain
-      row identity without allowing an ambiguous write.
-- [ ] Leave and reopen Todos, then restart Carnet; confirm view choices persist.
-      Switch profiles and vault roots; confirm choices and tasks belong to the
-      active profile/root and return when switching back.
+      the file remains unchanged, and the optimistic checkbox change rolls back.
+      Sorting and grouping must retain row identity without allowing an ambiguous write.
+- [x] Leave and reopen Todos, then restart Carnet; confirm view choices persist.
+- [x] Switch profiles using the same owned root; confirm each profile retains its
+      own view choices and returning restores them. A fresh profile showed default
+      Open/newest/ungrouped; the first restored Completed/Source/grouped.
+- [ ] Change the root within a profile; confirm choices and tasks belong to the
+      active root and return when switching back. Use a disposable setup: Settings
+      Save also migrates existing internal captures, so this run avoided it.
+- [ ] Exercise query/filter combinations beyond the separate text/title searches
+      and combined mode/tag/status checks above.
+- [ ] Repeat layout, keyboard and scrolling checks unfolded.
 - [ ] Edit task text/status on the workstation and allow Syncthing to finish.
       Refresh Todos; confirm the changed source appears without stale tasks.
+
+## SAF shorter rewrite and historical-tail review
+
+_(device-only: real provider truncation and review-dialog interaction. Automated
+coverage: `npm -w @carnet/mobile test -- writerSaf vault safTailDetector HomeScreen`.
+The [2026-10-11 physical follow-up](session-handoffs/2026-10-11-pixel-10-fold-verification.md)
+used only disposable fixtures through Android's external-storage SAF provider.)_
+
+- [x] Replace a longer fixture with shorter rich text through Carnet; pull the
+      file and verify frontmatter is retained and the old tail is absent (143 → 69 bytes).
+- [x] Scan a fixture vault with ten candidates; verify 13 checked, 0 skipped and
+      10 candidates. Scroll the bounded list and confirm Close stays accessible.
+- [x] Open a visible candidate; confirm navigation reaches its source note.
+      Compare all fixture file bytes before/after the scan to verify read-only behavior.
+- [ ] Exercise the modern file-system API and a provider rejecting `"wt"`.
+- [ ] Exercise partial and unreadable scans on a safe disposable provider.
+- [ ] Repeat candidate-dialog layout checks unfolded.
 
 ## First launch & configuration
 
