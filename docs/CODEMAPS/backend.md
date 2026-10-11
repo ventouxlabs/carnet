@@ -175,8 +175,8 @@ throttles successful refreshes for 30 seconds. Home's explicit scan also reports
 possible SAF stale tails through `lib/safTailDetector.ts`; candidates are metadata-only
 and require manual review.
 
-On SAF, writes request `"wt"` and fall back to `"w"` only when the provider rejects
-truncating mode or returns no stream. That fallback cannot guarantee truncation.
+On SAF, writes request `"wt"` and fall back to `"w"` only when `"wt"` throws
+`FileNotFoundException` or returns no stream. That fallback cannot guarantee truncation.
 Permission-denied/revoked refresh failures are surfaced as unavailable; there is no
 fallback to another root. Physical provider and Syncthing behavior remain device-level
 checks, not implied by automated tests.
