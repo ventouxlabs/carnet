@@ -476,6 +476,28 @@ describe("preserveFrontmatterFields — original-owned fields", () => {
     expect(out.match(/^created:/gm)).toHaveLength(1);
   });
 
+  it.each(["|", ">- # no date", "|+", ">2", "|2-", ">+2"])(
+    "keeps fresh created for an empty block scalar (%s)", (indicator) => {
+      for (const tail of ["", "  \n", "# date unknown\n"]) {
+        expect(preserveFrontmatterFields(fresh,
+          `---\ncreated: ${indicator}\n${tail}---\nOld\n`, [], ["created"]))
+          .toBe(fresh);
+      }
+    });
+
+  it.each(["|", ">- # date literal", "|+", ">2", "|2-", ">+2"])(
+    "retains real block content, including literal # text (%s)", (indicator) => {
+      const field = `created: ${indicator}\n  # literal scalar content\n`;
+      const out = preserveFrontmatterFields(fresh, `---\n${field}---\nOld\n`, [], ["created"]);
+      expect(out).toContain(field);
+      expect(out).not.toContain("2026-10-11");
+    });
+
+  it("leaves default empty-block carry semantics unchanged", () => {
+    expect(preserveFrontmatterFields('---\nname: Updated\n---\nFresh\n',
+      '---\ncreated: |\n---\nOld\n')).toContain("created: |");
+  });
+
   it("leaves default comment-only carry semantics unchanged", () => {
     expect(preserveFrontmatterFields('---\nname: Updated\n---\nFresh\n',
       '---\ncreated: # date unknown\n---\nOld\n'))

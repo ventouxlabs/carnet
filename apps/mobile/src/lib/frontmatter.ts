@@ -336,6 +336,12 @@ function groupHasValue(group: FieldGroup): boolean {
 function groupHasValueIgnoringComments(group: FieldGroup): boolean {
   const head = group.lines[0];
   const inline = head.slice(head.indexOf(":") + 1).trim();
+  // A literal/folded indicator declares a scalar; it is not its content.
+  // Both indentation/chomping orders are legal YAML. Inside the block an
+  // indented '#' is literal text, while an unindented comment is outside it.
+  if (/^[|>](?:[1-9][+-]?|[+-][1-9]?)?(?:\s+#.*)?$/.test(inline)) {
+    return group.lines.slice(1).some((line) => /^[ \t]+\S/.test(line));
+  }
   const hasInlineValue = inline !== "" && !inline.startsWith("#") &&
     !/^(['"])\1(?:\s+#.*)?$/.test(inline);
   return hasInlineValue || group.lines.slice(1).some((line) => {
