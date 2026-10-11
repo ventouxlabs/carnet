@@ -2,7 +2,7 @@
 
 Tracking deferred v0.3 scope and known issues.
 
-**Last reconciled against git history: 2026-09-08.** This file had drifted before (see
+**Last reconciled against git history: 2026-10-11 (baseline `271296b`).** This file had drifted before (see
 prior reconciliation history in git blame) — items were listed as deferred after they had
 already shipped. When planning from it, re-verify anything you're about to act on (`git
 log --oneline --all | grep -i <topic>`, or look for the module it names); a stale
@@ -83,6 +83,43 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
 
 ## Landed, pending on-device verification
 
+Implementation below is merged; unchecked entries track physical/platform acceptance,
+not missing implementation. The remaining-roadmap plan stays `in-progress` until those
+acceptance gates have evidence.
+
+- [ ] **Long retrospective citation labels** (PR #219) — `citationLabel` in
+  `lib/retrospective.ts` caps inline labels at 56 characters and removes terminal
+  punctuation while preserving the full title/URI and unabbreviated Sources list.
+  Automated coverage is present; long journal-title rendering and citation taps need
+  a fresh device check.
+- [ ] **Multi-vault support** (PR #219) — named profiles, non-destructive legacy
+  migration, Settings profile management, scoped drafts/history/indexes, and pinned
+  capture/queue routing are implemented (`vaultProfiles.ts`, `vaultContext.ts`,
+  `captureVaultSnapshot.ts`). Device acceptance remains: switch during slow capture,
+  attachment writes and queue drain, then restart and inspect each vault's files.
+- [ ] **Bidirectional sync awareness** (PR #219) — per-profile single-flight,
+  throttled foreground/focus refresh is implemented (`vaultRefreshCoordinator.ts`,
+  `vaultRefreshService.ts`, `App.tsx` and browse surfaces). SAF has no portable watcher.
+  Real Syncthing edits, deletes, permission revocation and profile switching still
+  need device acceptance.
+- [ ] **Card auto-detection** (PR #219) — explicit photo classification returns
+  `card`/`not-card`/`uncertain`; `cardScanWorkflow.ts` and `CardScannerModal` require
+  confirmation before OCR or durable writes and fail closed on classifier errors.
+  A physical business card, non-card image and unavailable-provider flow remain
+  unverified on device; the existing Person camera pipeline check still applies.
+- [ ] **Explicit Person ↔ journal linking** (PR #219) — bounded full-name matching
+  in the active vault (`personJournalLinks.ts`) and `PersonJournalLinksCard` are wired
+  into Person details with cancellable scans and guarded idempotent link writes.
+  Physical acceptance of matching, switching profiles and saving links remains.
+  Broader cross-capture discovery is already served by lexical `relatedNotes.ts`.
+- [ ] **Android Auto Drive Inbox pilot** (PRs #219/#220) — self-conversation reply
+  and mark-as-read actions, durable receipt/context handoff and restart/duplicate
+  guards are implemented in `withCaptureNotification.js` and
+  `notificationQuickIdea.ts`. Android instrumentation, Desktop Head Unit and
+  trusted-source real-vehicle checks remain pending; broad distribution requires
+  the eligibility/review gate in `docs/android-auto-eligibility.md`. It stays an
+  idea-only pilot and does not expose the vault browser on the car display.
+
 - [ ] **Note capture mode** (PR #222) — a sixth mode, Note, writes create-only into
   `Notes/` through a prompt that titles and tags a task list and NEVER expands it; action
   lines become `- [ ]` and reach TodosScreen with no todo code changed. Always save-first
@@ -102,11 +139,13 @@ branches shipped (B2 folded via `visionModel`, gate passed 2026-07-12).
   the exact places injection writes them (bare `../Photos/` embeds under the first H1 or
   at the top, a trailing `## Files` section of `[name](../Files/name)` links), so a line
   carrying the user's own words is never hidden from the model or the guard.
-  Pre-existing re-injection edge cases the review found, not fixed: `upsertSection`
-  replaces any prose the user wrote under `## Files` on every enrichment; a CRLF
-  `## Files\r` heading isn't found, so a second section is appended; a filename with a
-  space yields a broken link (`[^/\s)]+` stops at the space); `injectImageEmbed` takes a
-  `# comment` inside a code fence for the title.
+  The four review-discovered re-injection edge cases are resolved locally in this
+  session branch (`8ab464e`, `979e7f4`; not yet merged): authored `## Files` prose is
+  preserved, CRLF headings are recognized without duplication, spaced/parenthesized
+  filenames round-trip, and fenced H1/Files examples are not insertion anchors.
+  Shared paired-link parsing excludes code/escaped examples and malformed or unsafe
+  destinations; code examples do not suppress injection of the actual attachment.
+  This does not widen the legacy frontmatter repair coverage described below.
   Fixed follow-up: files v0.3.0–v0.11.0 wrote with an image embed above their
   frontmatter (and, when the capture had tags or a location, a second prepended block
   holding them) are repaired on read by `lib/legacyEmbedRepair.ts` — only when the block
@@ -252,31 +291,28 @@ Review round (independent code + security review, 2026-09-30):
   the next Karakeep export updates its bookmark instead of duplicating it) and hand-added
   fields. The `fallback` provider marker and the `enhanced` stamp are deliberately NOT
   carried: they describe the reply being replaced.
-- [ ] **Text re-enrich carries `fallback`/`enhanced` forward** (pre-existing, found by the
-  review of the item above) — `reEnrichNoteInPlace` hands the old note to
-  `preserveFrontmatterFields` for Idea/Note (`ideaSaveFirst.ts` `NEVER_PRESERVED_FIELDS`)
-  and Person (`personInPlace.ts`, excludes only `tags`), so re-enriching on the primary
-  provider leaves the "via relais" chip and a stale `enhanced` stamp behind. Add both
-  fields to those exclusion lists.
-- [ ] **Re-enrich resets `created` to today** (pre-existing, every re-enrich path) — the
-  prompts hardcode `created: ${today}` (`prompts.ts`), and the model's value beats the
-  carried one, so re-enriching an old note re-dates it. Keep the original `created`.
-- [ ] **Image re-enrich has no conflict guard** (pre-existing, found while fixing the item
-  above) — `reEnrichNote` overwrites with `updateNote`, built from the screen's snapshot
-  of the body, with no baseline-before-the-call mtime/content check. A Syncthing write or
-  WYSIWYG edit landing during the vision call is clobbered. The text paths
-  (`finishEnrichment.ts`) read from disk and use `updateNoteIfUnchanged`; mirror them.
+- [x] **Text re-enrich carries `fallback`/`enhanced` forward** — resolved locally
+  in this session branch (`9ed1c10`; not yet merged). Idea/Note and Person preservation
+  exclude stale provider and enhancement markers; fresh reply metadata remains valid.
+- [x] **Re-enrich resets `created` to today** — resolved locally (`9ed1c10`,
+  `06f25d9`, `367237e`; not yet merged). A populated original `created` takes precedence
+  over the model's date. Empty/comment-only values and empty YAML block scalars do not
+  suppress a fresh date; populated block scalars retain their original representation.
+- [x] **Image re-enrich has no conflict guard** — resolved locally (`0b8ab97`;
+  not yet merged). The vision path compares against the on-disk body and modification
+  time captured before the model call, rejects stale screen snapshots, and skips writes
+  after deletion/unreadability or content changes even when mtime is unchanged. It keeps
+  concurrent Syncthing/editor changes. Residual limit: SAF offers no atomic compare-and-
+  swap, so an external edit between the final comparison and write can still race.
 
 ## Deferred to v0.3
 
-- [ ] **Auto-capture surfaces** — Android Quick Settings tile dropped from the roadmap
-  (2026-07-04 decision): the persistent notification (shipped) + B5's inline-reply cover
-  the same latency profile. Android share sheet is shipped. iOS share extension is
-  preparation-only until a macOS/Xcode/signing environment is available. Android Auto
-  is an approved **Drive Inbox self-messaging pilot**, never a media claim or general
-  vault browser; implementation/distribution gate:
-  `docs/android-auto-eligibility.md`. Delivery plan:
-  `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
+- [ ] **Remaining platform capture gates** — Android Quick Settings tile remains
+  dropped: the persistent notification + inline reply cover that latency profile.
+  Android share sheet is shipped. iOS share extension is **preparation only** until
+  macOS/Xcode/signing and Apple-device checks can run. Android Auto Drive Inbox code
+  is merged (#219/#220); see the pending verification entry above and
+  `docs/android-auto-eligibility.md` for its distribution gate.
 - [x] **Browse/search Phase 3 — SHIPPED 2026-09-08** (PR #207) — the retrospective query
   ("What have I been thinking about regarding X?"). **This closes the browse/search axis:
   Phases 1, 2 and 3 are all done.** Ask from Search over the notes currently on screen;
@@ -295,35 +331,6 @@ Review round (independent code + security review, 2026-09-30):
   `<Text onPress>` citation taps that jsdom structurally cannot cover. Shipped in
   **v0.11.0**. Evidence and device-QA lessons:
   `docs/session-handoffs/2026-09-08-retrospective-query-shipped.md`.
-- [ ] **Truncate long citation labels in a retrospective answer** — found on-device
-  2026-09-08, after #207 shipped. `resolveCitations` renders a citation using the note's
-  full title, which is correct but unreadable when titles are whole sentences (journal
-  notes derive theirs from the first line). The prose becomes "…continuing to Colmar *My
-  family traveled to France via Strasbourg after arriving from the US, while I completed
-  another day of reserve duty.*." — plus a doubled period where the title's own full stop
-  meets the sentence's. Truncate the link label (keep the full title as the resolution
-  key, and keep `## Sources` unabbreviated). Small; touches `lib/retrospective.ts` +
-  `AskScreen`. Not a correctness bug — the links resolve and the guard holds.
-- [ ] **Bidirectional sync awareness** — Mostly works via Syncthing. Reconcile on app
-  foreground/focus and explicit refresh with a throttled, vault-safe scan; SAF has no
-  dependable portable filesystem watcher. Planned in
-  `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
-- [ ] **Card auto-detection** — Current button-press OCR flow works. After an explicitly
-  captured photo, classify `card`/`not-card`/`uncertain` and require confirmation before
-  OCR or durable writes; no continuous-camera surveillance. Planned in
-  `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
-- [ ] **Cross-capture linking — largely superseded, narrow remainder.** The "you've thought
-  about this before" intent is now served by `lib/relatedNotes.ts` (lexical scoring over the
-  cached note index — shared tags + term overlap, no embeddings, no network), surfaced in
-  `RecentDetailScreen` with wikilink insertion into a Related section. What remains of the
-  original framing is now **explicit Person ↔ journal linking**: a Person detail view
-  finds bounded active-vault journal matches and offers an idempotent wikilink action;
-  enrichment never silently rewrites notes. Planned in
-  `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
-- [ ] **Multi-vault support** — Approved for delivery: named profiles with one active
-  vault at a time, non-destructive legacy migration, and operation pinning so a slow
-  capture or queued job never crosses vaults after a switch. Planned in
-  `.claude/PRPs/plans/remaining-roadmap-delivery.plan.md`.
 - [x] **Desktop app fate** — Decided 2026-07-25: deprecate. `apps/desktop` (Tauri v2 stub,
   zero commits since 2026-06-04, zero tests, no usage signal) removed entirely, along with
   its CI job. See `.claude/PRPs/plans/completed/desktop-fate.plan.md` for the full
