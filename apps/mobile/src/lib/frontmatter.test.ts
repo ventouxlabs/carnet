@@ -456,11 +456,31 @@ describe("preserveFrontmatterFields — original-owned fields", () => {
     expect(out).toContain("created: original");
   });
 
-  it.each(['', 'created: ""\n', 'created:\n'])(
+  it.each(['', 'created: ""\n', 'created:\n',
+    'created: # date unknown\n', 'created:\n  # date unknown\n',
+    'created: "" # date unknown\n'])(
     "keeps fresh created when the original has no populated value (%s)", (field) => {
       expect(preserveFrontmatterFields(fresh, `---\n${field}---\nOld\n`, [], ["created"]))
         .toBe(fresh);
     });
+
+  it.each([
+    "created: 2026-07-04 # captured on holiday\n",
+    "created:\n  - 2026-07-04\n  # original representation\n",
+    "created: |\n  2026-07-04\n",
+    'created: "# date unknown"\n',
+  ])("retains populated preferred source lines verbatim (%s)", (field) => {
+    const out = preserveFrontmatterFields(fresh, `---\n${field}---\nOld\n`, [], ["created"]);
+    expect(out).toContain(field);
+    expect(out).not.toContain("2026-10-11");
+    expect(out.match(/^created:/gm)).toHaveLength(1);
+  });
+
+  it("leaves default comment-only carry semantics unchanged", () => {
+    expect(preserveFrontmatterFields('---\nname: Updated\n---\nFresh\n',
+      '---\ncreated: # date unknown\n---\nOld\n'))
+      .toContain("created: # date unknown");
+  });
 
   it("gives exclusions precedence over selected original fields", () => {
     expect(preserveFrontmatterFields(fresh, '---\ncreated: old\n---\nOld\n',

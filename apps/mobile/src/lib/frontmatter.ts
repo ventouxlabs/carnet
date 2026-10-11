@@ -331,6 +331,19 @@ function groupHasValue(group: FieldGroup): boolean {
   return stripQuotes(head.slice(head.indexOf(":") + 1).trim()) !== "";
 }
 
+/** Preferred originals need a value, not just an explanatory YAML comment.
+ * Keep groupHasValue's existing behavior for the default preservation path. */
+function groupHasValueIgnoringComments(group: FieldGroup): boolean {
+  const head = group.lines[0];
+  const inline = head.slice(head.indexOf(":") + 1).trim();
+  const hasInlineValue = inline !== "" && !inline.startsWith("#") &&
+    !/^(['"])\1(?:\s+#.*)?$/.test(inline);
+  return hasInlineValue || group.lines.slice(1).some((line) => {
+    const trimmed = line.trim();
+    return trimmed !== "" && !trimmed.startsWith("#");
+  });
+}
+
 /**
  * Overlay `original`'s frontmatter fields onto `enriched` for every field the
  * enriched markdown does not itself provide — preserve-if-absent, model wins.
@@ -385,7 +398,10 @@ export function preserveFrontmatterFields(
     if (group.key === null || excluded.has(group.key) || carried.has(group.key)) continue;
     // A CRLF-sourced note would otherwise splice stray carriage returns into an
     // LF document; every other writer here emits LF.
-    if (groupHasValue(group)) carried.set(group.key, group.lines.map((l) => l.replace(/\r$/, "")));
+    const hasValue = preferred.has(group.key)
+      ? groupHasValueIgnoringComments(group)
+      : groupHasValue(group);
+    if (hasValue) carried.set(group.key, group.lines.map((l) => l.replace(/\r$/, "")));
   }
   if (carried.size === 0) return enriched;
 
