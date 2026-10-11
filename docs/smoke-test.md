@@ -55,7 +55,11 @@ wiring coverage passed locally: `npm -w @carnet/mobile test -- todoView todoView
 The [implementation handoff](session-handoffs/2026-10-11-todo-discovery.md) records the
 initial no-device session; the later [physical follow-up](session-handoffs/2026-10-11-pixel-10-fold-verification.md)
 records folded Pixel 10 Pro Fold checks in light and dark themes. Checked boxes below
-apply to that fixture run, not general acceptance across devices.)_
+apply to those bounded fixture runs, not general acceptance across devices. The
+[extended handoff](session-handoffs/2026-10-11-extended-device-verification.md) records
+unfolded checks, isolated-user/provider execution and a reproduced root-cache
+isolation failure. The implemented cache fix passed the automated verification gates;
+a new fixed build still needs the root-change retest.)_
 
 - [x] Prepare notes with distinct dates, modes and tags; include open and
       completed tasks, duplicate task text, and two distinct files sharing a title.
@@ -82,11 +86,16 @@ apply to that fixture run, not general acceptance across devices.)_
       own view choices and returning restores them. A fresh profile showed default
       Open/newest/ungrouped; the first restored Completed/Source/grouped.
 - [ ] Change the root within a profile; confirm choices and tasks belong to the
-      active root and return when switching back. Use a disposable setup: Settings
-      Save also migrates existing internal captures, so this run avoided it.
+      active root and return when switching back, before manual refresh. The
+      2026-10-11 isolated Android-user run failed immediate task isolation: B showed
+      cached A tasks until pull-to-refresh. Completed/Group restored at A; source-title
+      sorting was not confirmed. Retest after the cache fix in a fresh owned Android
+      user: Settings Save can migrate global internal captures.
 - [ ] Exercise query/filter combinations beyond the separate text/title searches
       and combined mode/tag/status checks above.
-- [ ] Repeat layout, keyboard and scrolling checks unfolded.
+- [x] Repeat layout, keyboard and scrolling checks unfolded (2076 × 2152):
+      light/dark options reached Group/Reset; grouped task rows stayed visible above
+      the keyboard; All/grouped scrolling reached later source tasks.
 - [ ] Edit task text/status on the workstation and allow Syncthing to finish.
       Refresh Todos; confirm the changed source appears without stale tasks.
 
@@ -103,9 +112,19 @@ used only disposable fixtures through Android's external-storage SAF provider.)_
       10 candidates. Scroll the bounded list and confirm Close stays accessible.
 - [x] Open a visible candidate; confirm navigation reaches its source note.
       Compare all fixture file bytes before/after the scan to verify read-only behavior.
-- [ ] Exercise the modern file-system API and a provider rejecting `"wt"`.
-- [ ] Exercise partial and unreadable scans on a safe disposable provider.
-- [ ] Repeat candidate-dialog layout checks unfolded.
+- [x] Exercise the actual compiled modern `outputStream()` method from the
+      SHA-pinned CI APK: normal `"wt"` shorter rewrite, `FileNotFoundException`/null
+      fallback to `"w"`, and `SecurityException` without retry all passed. The
+      disposable provider's `"w"` does not truncate; empty-document fallback success
+      does not establish shorter rewrites on nonempty `"w"`-only providers. Carnet
+      legacy UI separately rejected `"wt"` with an error and unchanged seed bytes;
+      clearing the fault let only the intended checkbox change.
+- [x] Exercise partial/all-unreadable reads on a disposable provider: 2 checked /
+      1 skipped, then 0 checked / 3 skipped with Scan incomplete. Clear faults and
+      confirm 3 checked / 0 skipped. All read-fault scans preserved fixture hashes.
+- [x] Repeat candidate-dialog layout checks unfolded: 13 checked, 0 skipped,
+      10 candidates; bounded scrolling reached the final candidate, Close remained
+      accessible and Open navigated to its source. All 13 fixture hashes matched.
 
 ## First launch & configuration
 
