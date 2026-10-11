@@ -366,13 +366,20 @@ function groupHasValue(group: FieldGroup): boolean {
  * `exclude` is for fields another step owns outright — `tags` (mergeUserTags)
  * and the raw note's own bookkeeping. Callers must pass them: this function
  * cannot tell an owned field from a user's.
+ *
+ * `preferOriginal` pins selected populated original fields (such as capture
+ * creation time), retaining their source lines even when enrichment supplies
+ * a value. Exclusions still take precedence; missing/empty originals leave
+ * fresh values intact. Omit it to keep the default model-wins behavior.
  */
 export function preserveFrontmatterFields(
   enriched: string,
   original: string,
   exclude: readonly string[] = [],
+  preferOriginal: readonly string[] = [],
 ): string {
   const excluded = new Set(exclude);
+  const preferred = new Set(preferOriginal);
   const carried = new Map<string, string[]>();
   for (const group of groupFrontmatterLines(frontmatterInnerLines(splitFrontmatter(original).header))) {
     if (group.key === null || excluded.has(group.key) || carried.has(group.key)) continue;
@@ -396,7 +403,7 @@ export function preserveFrontmatterFields(
   const tail = headerLines.slice(closeIdx);
 
   const newInner: string[] = [];
-  /** Keys whose empty line in the model's output we filled from `original`. */
+  /** Keys replaced with source lines from `original`. */
   const filled = new Set<string>();
   for (const group of groupFrontmatterLines(inner)) {
     if (group.key === null) {
@@ -404,7 +411,13 @@ export function preserveFrontmatterFields(
       continue;
     }
     const replacement = carried.get(group.key);
-    if (groupHasValue(group)) {
+    if (preferred.has(group.key) && filled.has(group.key)) {
+      // Restoring an owned field must not leave a second model value behind.
+      continue;
+    } else if (preferred.has(group.key) && replacement) {
+      newInner.push(...replacement);
+      filled.add(group.key);
+    } else if (groupHasValue(group)) {
       newInner.push(...group.lines);
     } else if (filled.has(group.key)) {
       // The model emitted this key twice and the first copy already took the

@@ -369,3 +369,21 @@ describe("enrichPersonInPlace — tags are left to mergeUserTags", () => {
     expect(mockUpdate.mock.calls[0][1]).toContain("tags: [person, fintech, alice-corp]");
   });
 });
+
+
+describe("enrichPersonInPlace — capture metadata ownership", () => {
+  it.each(["", "fallback: true\n", "enhanced: true\n"])("pins creation and refreshes dispatcher markers (%s)", async (freshMarker) => {
+    mockPerson.mockResolvedValue({ markdown: `---\ncreated: 2026-10-11\n${freshMarker}tags: [person, fresh]\n---\n# Ada\n`, model: "test" });
+    await enrichPersonInPlace({ filepath: "p.md", expectedMtime: 2000, ocrResult: "Ada", context: "",
+      preserveFrontmatterFrom: '---\ncreated: "2026-07-04"\nfallback: true\nenhanced: true\nlocation: Paris\nkarakeep_id: saved-id\ncustom: "#1 fan"\n---\nOld\n', tags: ["user"] });
+    const content = mockUpdate.mock.calls[0][1];
+    expect(content).toContain('created: "2026-07-04"');
+    expect(content.match(/^created:/gm)).toHaveLength(1);
+    expect(content.includes("enhanced:")).toBe(freshMarker.includes("enhanced:"));
+    expect(content.includes("fallback:")).toBe(freshMarker.includes("fallback:"));
+    expect(content).toContain("location: Paris");
+    expect(content).toContain("karakeep_id: saved-id");
+    expect(content).toContain('custom: "#1 fan"');
+    expect(content).toContain("tags: [person, fresh, user]");
+  });
+});
