@@ -410,6 +410,7 @@ describe("TodosScreen", () => {
     renderScreen(theme);
     await screen.findByText("No todos match these filters.");
     expect(screen.getByText("#missing")).toBeTruthy();
+    await waitForViewReady();
     fireEvent.click(screen.getByLabelText("View options"));
     expect(screen.getByText("Tags — any selected tag")).toBeTruthy();
     fireEvent.click(screen.getAllByText("Reset view")[0]);
