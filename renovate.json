@@ -2,5 +2,14 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "packageRules": [
+    {
+      "description": "Keep the root metro-runtime pin aligned with Expo's Metro toolchain; update it manually in sync with Expo/Metro upgrades.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["package.json"],
+      "matchPackageNames": ["metro-runtime"],
+      "enabled": false
+    }
   ]
 }
