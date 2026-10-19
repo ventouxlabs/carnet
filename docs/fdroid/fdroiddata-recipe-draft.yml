@@ -1,13 +1,18 @@
 # fdroiddata metadata for main F-Droid inclusion (Phase 2 of #182).
 # Destination: fdroiddata repo as metadata/com.ventouxlabs.carnet.yml
-# Status: LOCALLY VALIDATED 2026-08-22 — `fdroid lint` clean and `fdroid build
+# Status: POLICY-BLOCKED, unsubmitted. Diagnostic :9 build verified locally
+# 2026-10-18 with fdroidserver 2.4.5; aapt2 confirmed 0.11.0/code 9 and
+# apksigner confirmed the APK is unsigned. This does not establish eligibility.
+# See docs/fdroid/validation-v0.11.0.md for evidence and local toolchain limits.
+# Historical validation: 2026-08-22 — `fdroid lint` clean and `fdroid build
 # com.ventouxlabs.carnet:7` produced an unsigned com.ventouxlabs.carnet_7.apk
 # (versionCode 7 / 0.9.0, apksigner confirms no signature) end-to-end on
 # fdroidserver 2.4.5. The :5 (0.7.0) block was validated the same way on
 # 2026-08-19 (12 iterations; see issue #182). Local shims that the real
 # buildserver provides natively: the gradlew-fdroid wrapper (missing from the
 # pip wheel) and the gradle 8.14.3 checksum (older bundled list). Key learnings
-# baked in below: prebuild lines are JOINED with ';' in ONE shell (cwd leaks —
+# baked into the historical blocks below: prebuild lines are JOINED with
+# ';' in ONE shell (cwd leaks —
 # hence the single chained line); the scanner DELETES gradle wrapper jar+script
 # (hence `gradle`, not `./gradlew`); scanignore is REQUIRED and must list
 # exactly the node_modules dirs that exist (~100 benign RN artifacts) — npm
@@ -17,6 +22,8 @@
 # FRESH workspace fdroidserver 2.4.5 crashes deriving SOURCE_DATE_EPOCH before
 # first clone (TypeError in set_FDroidPopen_env) — pre-clone the repo into
 # build/com.ventouxlabs.carnet once and it proceeds normally.
+
+Disabled: Proprietary ML Kit/GMS via expo-camera and expo-location; pending FLOSS variant
 
 Categories:
   - Writing
@@ -77,10 +84,36 @@ Builds:
       - cd android && gradle assembleRelease
     output: android/app/build/outputs/apk/release/app-release-unsigned.apk
 
-AutoUpdateMode: Version
-UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.9.0
-CurrentVersionCode: 7
+  - versionName: 0.11.0
+    versionCode: 9
+    commit: v0.11.0
+    subdir: apps/mobile
+    ndk: 27.1.12297006
+    scanignore:
+      # npm hoists React Native's build dependencies here. Review exceptions
+      # with F-Droid maintainers; scanner success is not a dependency audit.
+      - node_modules
+      - apps/mobile/node_modules
+    sudo:
+      - apt-get update
+      - apt-get install -y npm nodejs
+    init:
+      - cd ../.. && npm ci
+    prebuild:
+      # Drop the committed editor bundle so this version builds it from source.
+      - rm -f editor-web/generated/editorHtml.js editor-web/generated/editorHtml.d.ts
+      - npx expo prebuild --platform android --clean --no-install
+      - sed -i '/signingConfig signingConfigs.debug/d' android/app/build.gradle
+    build:
+      # Compile generated JS only after F-Droid's source scan.
+      - cd ../.. && npm run build:shared && npm -w @carnet/mobile run editor:build && cd apps/mobile/android && gradle assembleRelease
+    output: android/app/build/outputs/apk/release/app-release-unsigned.apk
+
+AutoUpdateMode: None
+UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
+UpdateCheckData: 'apps/mobile/app.json|"versionCode":\s*(\d+)|.|"version":\s*"([^"]+)"'
+CurrentVersion: 0.11.0
+CurrentVersionCode: 9
 
 # Open questions for the fdroiddata MR (tracked in issue #182):
 # 1. Signing: DECIDED (2026-08-22) — the prebuild sed strips the debug
@@ -88,6 +121,12 @@ CurrentVersionCode: 7
 #    UNSIGNED app-release-unsigned.apk (verified for both :5 and :7 via
 #    apksigner). F-Droid signs with their own key.
 # 2. Hermes/gradle determinism has not been verified on the buildserver.
-# 3. The committed editor-web/generated bundle passed the scanner unflagged
-#    (source + build script live in-repo: apps/mobile/editor-web, npm script
-#    `editor:build`) — no scanignore needed for it.
+# 3. Historical :5/:7 used the committed editor-web/generated bundle. The :9
+#    block removes it and rebuilds via editor:build from the in-repo sources.
+# 4. The :9 diagnostic build succeeded locally on 2026-10-18. Inclusion and
+#    buildserver reproducibility still require F-Droid maintainer review.
+# 5. Inclusion blocker: expo-camera unconditionally depends on proprietary
+#    com.google.mlkit:barcode-scanning:17.3.0. The broad node_modules exception
+#    masks this source-scanner finding; successful scanning is not compliance.
+#    expo-location also depends on play-services-location:21.0.1. A FLOSS
+#    camera/location dependency or build variant is needed before submission.

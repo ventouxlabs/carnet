@@ -1,13 +1,29 @@
-# IzzyOnDroid submission (Phase 1 of #182)
+# IzzyOnDroid request status (#182)
 
-Submit as a new issue at <https://gitlab.com/IzzyOnDroid/applists/-/issues>
-(requires a GitLab account), titled:
+Checked 2026-10-18. Carnet is not available through IzzyOnDroid. IzzySoft
+[closed request #37 on 2026-08-23](https://gitlab.com/IzzyOnDroid/applists/-/work_items/37#note_3722364952):
+the request used the wrong tracker (`applists` handles store links for
+android.izzysoft.de, where GitHub-only distribution does not qualify), and
+the APK exceeded the repository's usual 30 MB size limit.
 
-    Add: Carnet (com.ventouxlabs.carnet)
+Separately, the [current inclusion policy](https://izzyondroid.org/docs/general/AppInclusionPolicy/)
+rejects apps with AI-generated code and integrations with the LLM services
+covered by its AI policy. These are additional eligibility blockers for Carnet,
+not the reasons recorded in the closure above. Reducing APK size alone would
+not establish eligibility.
 
-The body below matches their issue template's fields (package name / other
-store link / category and group / additional links) with the full app details
-appended after the divider. Copy-paste it verbatim:
+The latest [GitHub release](https://github.com/ventouxlabs/carnet/releases/tag/v0.11.0)
+is v0.11.0 (versionCode 9), with a 109,942,442-byte APK (about 110 MB).
+GitHub Releases remains the available APK channel. Main F-Droid is a separate,
+unsubmitted route. The [v0.11.0 validation report](validation-v0.11.0.md)
+records camera/location dependency blockers; acceptance has not been established.
+
+## Historical submitted body
+
+The body below was already submitted as `Add: Carnet (com.ventouxlabs.carnet)`.
+It is preserved as a historical record, including v0.9.0/versionCode 7 and
+the size and endpoint descriptions at submission time. It is not a current
+submission template.
 
 ```
 ### Package name:
@@ -51,11 +67,3 @@ models. Happy to discuss per-ABI splits if size is a concern for the repo.
 device; API keys stored via Android Keystore (expo-secure-store). Network
 access only to user-entered endpoints plus optional self-hosted Karakeep.
 ```
-
-After acceptance, Izzy's updater pulls each new tagged GitHub Release
-automatically — no changes needed to the release workflow. The in-repo
-fastlane metadata feeds the store page (descriptions, changelogs,
-screenshots).
-
-Note: the "Latest release" line reflects submission time (v0.9.0); no need to
-keep this file updated afterward — Izzy tracks releases directly.

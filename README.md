@@ -24,11 +24,11 @@
 | Channel | Price | Notes |
 |---------|-------|-------|
 | [GitHub Releases](https://github.com/ventouxlabs/carnet/releases) | Free | APK attached to every `vX.Y.Z` tag |
-| [IzzyOnDroid](https://android.izzysoft.de/) | Free | F-Droid-compatible repo (listing pending review) |
+| IzzyOnDroid | — | Not available; [request closed](docs/fdroid/izzyondroid-submission.md) |
 | Google Play | Paid | Same app, convenience pricing — auto-updates and supports development (listing in preparation) |
 
-All channels ship the identical app; nothing is feature-gated. The Play build
-is signed by Play App Signing, so a Play install and a GitHub/Izzy install
+The GitHub APK is available now; the planned Play listing has the same features.
+The Play build is signed by Play App Signing, so a Play install and a GitHub install
 can't upgrade each other — pick one channel per device. Privacy policy:
 [PRIVACY.md](PRIVACY.md).
 
