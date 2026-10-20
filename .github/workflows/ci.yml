@@ -9,7 +9,7 @@ jobs:
   shared:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # PRP plan lifecycle (issue #92). Runs before install so it fails fast and
       # needs no toolchain. --self-test guards the checker itself: the real
@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [shared]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -82,7 +82,7 @@ jobs:
   mdcrm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -123,7 +123,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [shared]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/android-toolchain
 
       - name: Compile generated Kotlin
@@ -145,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [shared]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/android-toolchain
 
       - name: Restore release keystore
