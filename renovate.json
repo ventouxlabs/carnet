@@ -14,15 +14,20 @@
     {
       "description": "These native modules are pinned to the versions Expo SDK 54 bundles (expo/bundledNativeModules.json); update them manually, in sync with an Expo SDK upgrade.",
       "matchManagers": ["npm"],
-      "matchFileNames": ["apps/mobile/package.json"],
+      "matchFileNames": ["package.json", "apps/mobile/package.json"],
       "matchPackageNames": [
+        "react",
+        "react-dom",
         "react-native",
         "react-native-gesture-handler",
         "react-native-reanimated",
         "react-native-safe-area-context",
         "react-native-screens",
         "react-native-webview",
-        "react-native-worklets"
+        "react-native-worklets",
+        "react-refresh",
+        "@types/react",
+        "@types/react-dom"
       ],
       "enabled": false
     }
