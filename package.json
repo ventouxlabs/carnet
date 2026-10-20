@@ -22,6 +22,6 @@
     "patch-package": "^8.0.1"
   },
   "overrides": {
-    "react-native-worklets": "0.5.1"
+    "react-native-worklets": "0.13.0"
   }
 }
