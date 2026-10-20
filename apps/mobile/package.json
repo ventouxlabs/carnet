@@ -25,7 +25,7 @@
     "@react-navigation/native": "^6.1.17",
     "@react-navigation/native-stack": "^6.9.26",
     "@tiptap/extension-code-block": "^3.26.0",
-    "@tiptap/react": "3.26.0",
+    "@tiptap/react": "3.32.0",
     "crypto-js": "^4.2.0",
     "entities": "^2.2.0",
     "expo": "~54.0.35",
