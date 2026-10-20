@@ -10,6 +10,21 @@
       "matchFileNames": ["package.json"],
       "matchPackageNames": ["metro-runtime"],
       "enabled": false
+    },
+    {
+      "description": "These native modules are pinned to the versions Expo SDK 54 bundles (expo/bundledNativeModules.json); update them manually, in sync with an Expo SDK upgrade.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["apps/mobile/package.json"],
+      "matchPackageNames": [
+        "react-native",
+        "react-native-gesture-handler",
+        "react-native-reanimated",
+        "react-native-safe-area-context",
+        "react-native-screens",
+        "react-native-webview",
+        "react-native-worklets"
+      ],
+      "enabled": false
     }
   ]
 }
