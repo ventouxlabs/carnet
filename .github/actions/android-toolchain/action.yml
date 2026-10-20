@@ -28,7 +28,7 @@ runs:
     - name: Set up Android SDK
       # `tools` was removed from the Android SDK package index. Retain only
       # platform-tools here; install the project-specific SDK components below.
-      uses: android-actions/setup-android@v3
+      uses: android-actions/setup-android@v4
       with:
         packages: platform-tools
 
