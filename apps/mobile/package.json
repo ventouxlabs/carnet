@@ -66,6 +66,7 @@
     "@tiptap/extension-image": "^3.32.0",
     "@tiptap/extension-task-item": "^3.32.0",
     "@tiptap/extension-task-list": "^3.32.0",
+    "@tiptap/extension-text-style": "^3.32.0",
     "@tiptap/markdown": "^3.32.0",
     "@tiptap/starter-kit": "^3.32.0",
     "@types/crypto-js": "^4.2.2",
