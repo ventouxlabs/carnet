@@ -30,6 +30,31 @@
         "@types/react-dom"
       ],
       "enabled": false
+    },
+    {
+      "description": "Expo SDK 54 owns these versions (expo, expo-*, babel-preset-expo); update them manually in one deliberate Expo SDK upgrade.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": [
+        "expo",
+        "expo-*",
+        "babel-preset-expo"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Major bumps of tooling and Expo-coupled libraries (TypeScript, Vitest, Vite, jsdom, @babel/core 7, React Navigation 6, async-storage) are done in a deliberate upgrade pass, not one Renovate PR at a time; minor/patch updates still flow.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": [
+        "typescript",
+        "vitest",
+        "vite",
+        "jsdom",
+        "@babel/core",
+        "@react-navigation/*",
+        "@react-native-async-storage/async-storage"
+      ],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ]
 }
