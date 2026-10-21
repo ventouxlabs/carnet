@@ -55,6 +55,12 @@
       ],
       "matchUpdateTypes": ["major"],
       "enabled": false
+    },
+    {
+      "description": "Held back deliberately: Android build is on JDK 21 (25 breaks it); entities must stay v2 for markdown-it 10 in react-native-markdown-display; gradle/actions v6 requires accepting proprietary caching terms. Revisit manually.",
+      "matchPackageNames": ["java-jdk", "entities", "gradle/actions"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ]
 }
