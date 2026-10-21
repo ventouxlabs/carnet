@@ -27,7 +27,7 @@
     "@tiptap/extension-code-block": "^3.32.0",
     "@tiptap/react": "3.32.0",
     "crypto-js": "^4.2.0",
-    "entities": "^2.2.0",
+    "entities": "^8.0.0",
     "expo": "~54.0.35",
     "expo-asset": "~12.0.12",
     "expo-av": "~16.0.8",
