@@ -60,7 +60,7 @@
     "uuid": "^11.0.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.24.0",
+    "@babel/core": "^8.0.0",
     "@testing-library/react": "^16.3.2",
     "@tiptap/core": "^3.32.0",
     "@tiptap/extension-color": "^3.32.0",
