@@ -61,6 +61,12 @@
       "matchPackageNames": ["java-jdk", "entities", "gradle/actions"],
       "matchUpdateTypes": ["major"],
       "enabled": false
+    },
+    {
+      "description": "CI tests the README's Node minimum (20); raising it is a deliberate decision with a README update, not a Renovate bump.",
+      "matchPackageNames": ["node", "@types/node"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ]
 }
