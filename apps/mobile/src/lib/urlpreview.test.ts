@@ -588,6 +588,44 @@ describe("fetchUrlPreview body bound", () => {
       vi.useRealTimers();
     }
   });
+
+  it("clears the body timer when getReader throws", async () => {
+    vi.useFakeTimers();
+    try {
+      const response = {
+        ok: true,
+        headers: new Headers(headers),
+        body: {
+          getReader() {
+            throw new TypeError("locked");
+          },
+        },
+      };
+      fetchMock.mockResolvedValueOnce(response);
+
+      const result = await fetchUrlPreview("https://example.com/locked");
+
+      expect(result).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("caps the no-streaming-body fallback at the byte cap", async () => {
+    const response = {
+      ok: true,
+      headers: new Headers(headers),
+      body: null,
+      text: async () =>
+        `<html><head><title>Fallback</title></head><body>${"x".repeat(1024 * 1024)}`,
+    };
+    fetchMock.mockResolvedValueOnce(response);
+
+    const result = await fetchUrlPreview("https://example.com/nostream");
+
+    expect(result?.title).toBe("Fallback");
+  });
 });
 
 describe("isBlockedHost (direct — inputs Node's URL rejects)", () => {

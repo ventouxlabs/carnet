@@ -642,7 +642,8 @@ export async function fetchWithTimeout(url: string): Promise<RedirectResult> {
 /** Read the body under the SAME overall deadline as the headers and stop at
  * MAX_BODY_BYTES, cancelling the stream so an endless or stalled server cannot
  * hold the connection or memory. Rejects on timeout. Falls back to a raced
- * `text()` where the runtime exposes no streaming body. */
+ * `text()` (sliced to the cap, memory not bounded) where the runtime exposes
+ * no streaming body. */
 async function readBodyCapped(
   response: Response,
   timeoutMs: number,
@@ -654,10 +655,14 @@ async function readBodyCapped(
       Math.max(timeoutMs, 1),
     );
   });
-  const reader = response.body?.getReader();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
+    reader = response.body?.getReader();
     if (!reader) {
-      return await Promise.race([response.text(), timeout]);
+      // No streaming body (e.g. React Native fetch): the text is already
+      // buffered by the runtime, so we can only bound what we keep.
+      const text = await Promise.race([response.text(), timeout]);
+      return text.length > MAX_BODY_BYTES ? text.slice(0, MAX_BODY_BYTES) : text;
     }
     const chunks: Uint8Array[] = [];
     let total = 0;
