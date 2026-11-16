@@ -540,6 +540,56 @@ describe("fetchUrlPreview", () => {
  * Native's `URL` does no such validation and hands the raw authority to the
  * native fetch layer, so these are the cases where the guard is the ONLY
  * defense, and they have to be asserted against the guard itself. */
+describe("fetchUrlPreview body bound", () => {
+  const headers = { "Content-Type": "text/html; charset=utf-8" };
+
+  it("stops reading an endless body at the byte cap and still parses the head", async () => {
+    const enc = new TextEncoder();
+    const head = enc.encode(
+      "<html><head><title>Capped Title</title></head><body>",
+    );
+    const filler = enc.encode("x".repeat(64 * 1024));
+    let pulls = 0;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(pulls === 1 ? head : filler);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    fetchMock.mockResolvedValueOnce(new Response(stream, { status: 200, headers }));
+
+    const result = await fetchUrlPreview("https://example.com/endless");
+
+    expect(result?.title).toBe("Capped Title");
+    expect(cancelled).toBe(true);
+    // 256 KB cap / 64 KB chunks: a handful of pulls, never unbounded.
+    expect(pulls).toBeLessThan(20);
+  });
+
+  it("returns null when the body stalls past the overall timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const stream = new ReadableStream<Uint8Array>({
+        start() {
+          /* headers arrive, body never does */
+        },
+      });
+      fetchMock.mockResolvedValueOnce(new Response(stream, { status: 200, headers }));
+
+      const pending = fetchUrlPreview("https://example.com/stalled");
+      await vi.advanceTimersByTimeAsync(8_001);
+
+      await expect(pending).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("isBlockedHost (direct — inputs Node's URL rejects)", () => {
   it("blocks dot-variant loopback that new URL() will not parse", () => {
     // Sanity: these really are rejected upstream, so the black-box path

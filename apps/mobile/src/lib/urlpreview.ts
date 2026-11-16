@@ -34,6 +34,8 @@ const FETCH_TIMEOUT_MS = 8_000;
  * but the head we care about always sits in the first few thousand
  * chars regardless of encoding. */
 const MAX_BODY_CHARS = 256 * 1024;
+/** Streaming read cap in raw bytes (UTF-8 can use up to 4 bytes per char). */
+const MAX_BODY_BYTES = MAX_BODY_CHARS;
 const FIELD_CHAR_LIMIT = 500;
 const USER_AGENT =
   "Mozilla/5.0 (compatible; carnet/0.2; +https://github.com/ventouxlabs/carnet)";
@@ -637,6 +639,51 @@ export async function fetchWithTimeout(url: string): Promise<RedirectResult> {
   }
 }
 
+/** Read the body under the SAME overall deadline as the headers and stop at
+ * MAX_BODY_BYTES, cancelling the stream so an endless or stalled server cannot
+ * hold the connection or memory. Rejects on timeout. Falls back to a raced
+ * `text()` where the runtime exposes no streaming body. */
+async function readBodyCapped(
+  response: Response,
+  timeoutMs: number,
+): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`URL preview body timed out`)),
+      Math.max(timeoutMs, 1),
+    );
+  });
+  const reader = response.body?.getReader();
+  try {
+    if (!reader) {
+      return await Promise.race([response.text(), timeout]);
+    }
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (total < MAX_BODY_BYTES) {
+      const { done, value } = await Promise.race([reader.read(), timeout]);
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+    const bytes = new Uint8Array(Math.min(total, MAX_BODY_BYTES));
+    let offset = 0;
+    for (const chunk of chunks) {
+      const room = bytes.length - offset;
+      if (room <= 0) break;
+      bytes.set(chunk.subarray(0, room), offset);
+      offset += Math.min(chunk.byteLength, room);
+    }
+    return new TextDecoder().decode(bytes);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    reader?.cancel().catch(() => {
+      /* best-effort cancel */
+    });
+  }
+}
+
 /**
  * Fetch the URL and extract a structured preview. Returns null on any
  * failure — invalid URL, network error, timeout, non-200, non-HTML
@@ -662,6 +709,7 @@ export async function fetchUrlPreview(url: string): Promise<UrlPreview | null> {
     return null;
   }
 
+  const startedAt = Date.now();
   let response: Response;
   try {
     ({ response } = await fetchWithTimeout(url));
@@ -677,7 +725,10 @@ export async function fetchUrlPreview(url: string): Promise<UrlPreview | null> {
 
   let body: string;
   try {
-    body = await response.text();
+    body = await readBodyCapped(
+      response,
+      FETCH_TIMEOUT_MS - (Date.now() - startedAt),
+    );
   } catch {
     return null;
   }
