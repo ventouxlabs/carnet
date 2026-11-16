@@ -36,8 +36,11 @@ export function extFromMime(mime?: string): string {
   if (m === "text/csv") return "csv";
   if (m === "application/zip") return "zip";
   if (m === "application/json") return "json";
+  // The mime string can be attacker-controlled (share intent), and the result
+  // ends up in a filename — only accept a plain [a-z0-9] subtype.
   const slash = m.indexOf("/");
-  return slash >= 0 ? m.slice(slash + 1) : "bin";
+  const subtype = slash >= 0 ? m.slice(slash + 1) : "";
+  return /^[a-z0-9]+$/.test(subtype) ? subtype : "bin";
 }
 
 /** Best-effort inverse of `extFromMime` for the file extensions we actually
