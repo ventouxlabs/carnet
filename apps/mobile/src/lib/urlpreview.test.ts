@@ -613,3 +613,26 @@ describe("isBlockedHost (direct — inputs Node's URL rejects)", () => {
     expect(extractHost("not-a-url")).toBeNull();
   });
 });
+
+describe("fetchUrlPreview adversarial HTML (ReDoS)", () => {
+  const BUDGET_MS = 1000;
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ["unterminated <meta tags", "<meta ".repeat(40_000)],
+    ["unterminated <p tags", "<p ".repeat(80_000)],
+    ["nested <p> without close", "<p>".repeat(80_000)],
+    ["unterminated <title tags", "<title ".repeat(30_000)],
+    ["unclosed < inside <p> body", `<p>${"<a ".repeat(80_000)}`],
+  ];
+
+  for (const [label, junk] of cases) {
+    it(`parses ${label} in linear time`, async () => {
+      fetchMock.mockResolvedValueOnce(
+        htmlResponse(`<html><head><title>T</title></head>${junk}`),
+      );
+      const start = Date.now();
+      const result = await fetchUrlPreview("https://example.com/evil");
+      expect(Date.now() - start).toBeLessThan(BUDGET_MS);
+      expect(result?.title).toBe("T");
+    });
+  }
+});
