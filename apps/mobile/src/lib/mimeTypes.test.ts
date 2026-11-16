@@ -63,6 +63,15 @@ describe("extFromMime", () => {
     expect(extFromMime("x/")).toBe("bin");
   });
 
+  it("keeps hyphenated subtypes but rejects leading/trailing/double hyphens", () => {
+    expect(extFromMime("audio/x-m4a")).toBe("x-m4a");
+    expect(extFromMime("application/x-7z-compressed")).toBe("x-7z-compressed");
+    expect(extFromMime("image/x-icon")).toBe("x-icon");
+    expect(extFromMime("x/-a")).toBe("bin");
+    expect(extFromMime("x/a-")).toBe("bin");
+    expect(extFromMime("x/a--b")).toBe("bin");
+  });
+
   it("falls back to the type/subtype slash split for unknowns", () => {
     expect(extFromMime("video/mp4")).toBe("mp4");
     expect(extFromMime("application/zip")).toBe("zip");
