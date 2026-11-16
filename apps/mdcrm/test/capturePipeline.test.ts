@@ -58,6 +58,18 @@ describe("capture processing integration", () => {
     expect((await searchFullText(repository, "Jane partnerships")).map((result) => result.id)).toContain(contact?.frontmatter.id);
   });
 
+  it("indexes and searches prototype-key words like 'constructor' without crashing", async () => {
+    const { repository } = await harness();
+    const value = capture({ extracted: { name: "Constructor ToString", title: "__proto__ hasOwnProperty" } });
+    const source = await storeCapture(repository, value);
+    await rebuildFullTextIndex(repository);
+    for (const word of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+      const ids = (await searchFullText(repository, word)).map((result) => result.id);
+      if (word === "valueOf") expect(ids).toEqual([]);
+      else expect(ids).toContain(source.frontmatter.id);
+    }
+  });
+
   it("is idempotent when the same unchanged capture is processed twice", async () => {
     const { repository, config } = await harness();
     const source = await storeCapture(repository, capture());
