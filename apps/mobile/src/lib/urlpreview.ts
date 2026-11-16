@@ -28,6 +28,8 @@
  * existing INJECTION_GUARD covers it.
  */
 
+import { parseAttrs, scanTags, type HtmlTag } from "./htmlTags";
+
 const FETCH_TIMEOUT_MS = 8_000;
 /** Body cap measured in UTF-16 code units (JS `string.length`), NOT
  * bytes — a multibyte-heavy page can occupy ~2× this in actual bytes,
@@ -87,57 +89,58 @@ function clean(s: string): string {
     : collapsed;
 }
 
-/** Find the first match of a regex; return `clean()`-ed capture group 1
- * or empty string. Case-insensitive by convention at the call site. */
-function firstMatch(html: string, re: RegExp): string {
-  const m = html.match(re);
-  if (!m || typeof m[1] !== "string") return "";
-  return clean(m[1]);
+/** Everything the preview needs from the HTML, gathered in one linear
+ * scan (see `htmlTags.ts` — no backtracking regexes on fetched HTML). */
+interface ScannedHtml {
+  readonly metas: ReadonlyArray<ReadonlyMap<string, string>>;
+  readonly title: string;
+  readonly paragraph: string;
 }
 
-/** Extract a `<meta>` value where the attribute order may be
- * `property|name="X" content="Y"` OR `content="Y" property|name="X"`.
- * Both shapes are common in the wild. Quote characters are captured
- * and backreferenced so mismatched pairs (`content="foo'`) don't
- * match — protects against unbalanced markup. */
-function metaContent(html: string, key: string): string {
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // attr-first: <meta property="og:title" content="...">
-  // Capture group 1 = key quote, 2 = key, 3 = content quote, 4 = content value.
-  const a = new RegExp(
-    `<meta[^>]*(?:property|name)\\s*=\\s*(["'])${escaped}\\1[^>]*content\\s*=\\s*(["'])([^"']*)\\2`,
-    "i",
-  );
-  const matchA = html.match(a);
-  if (matchA && typeof matchA[3] === "string") {
-    const cleaned = clean(matchA[3]);
+/** Text of the first `open ... close` element, from the tag list. When
+ * `stripTags` is set, nested tags are dropped (replaced by a space). */
+function firstElementText(
+  html: string,
+  tags: ReadonlyArray<HtmlTag>,
+  name: string,
+  stripTags: boolean,
+): string {
+  const openIdx = tags.findIndex((t) => t.name === name);
+  if (openIdx === -1) return "";
+  const closeIdx = tags.findIndex((t, i) => i > openIdx && t.name === `/${name}`);
+  if (closeIdx === -1) return "";
+  if (!stripTags) return clean(html.slice(tags[openIdx].end, tags[closeIdx].start));
+  const parts: string[] = [];
+  let from = tags[openIdx].end;
+  for (let i = openIdx + 1; i < closeIdx; i += 1) {
+    parts.push(html.slice(from, tags[i].start));
+    from = tags[i].end;
+  }
+  parts.push(html.slice(from, tags[closeIdx].start));
+  return clean(parts.join(" "));
+}
+
+function scanHtml(html: string): ScannedHtml {
+  const tags = scanTags(html);
+  return {
+    metas: tags.filter((t) => t.name === "meta").map((t) => parseAttrs(t.attrs)),
+    title: firstElementText(html, tags, "title", false),
+    paragraph: firstElementText(html, tags, "p", true),
+  };
+}
+
+/** Extract a `<meta>` value keyed by `property` or `name`, regardless of
+ * attribute order. Metas with no usable `content` are skipped. */
+function metaContent(scanned: ScannedHtml, key: string): string {
+  for (const attrs of scanned.metas) {
+    const matches = [attrs.get("property"), attrs.get("name")].some(
+      (v) => v?.toLowerCase() === key,
+    );
+    if (!matches) continue;
+    const cleaned = clean(attrs.get("content") ?? "");
     if (cleaned) return cleaned;
   }
-  // content-first: <meta content="..." property="og:title">
-  const b = new RegExp(
-    `<meta[^>]*content\\s*=\\s*(["'])([^"']*)\\1[^>]*(?:property|name)\\s*=\\s*(["'])${escaped}\\3`,
-    "i",
-  );
-  const matchB = html.match(b);
-  if (matchB && typeof matchB[2] === "string") {
-    return clean(matchB[2]);
-  }
   return "";
-}
-
-/** Pull the textual content of the first `<p>` tag, stripping nested
- * tags. Used only as a last-resort description fallback.
- *
- * The opening-tag regex is `<p` then either nothing or a whitespace-
- * led attribute block — written as `(?:\s[^>]*)?` so we cleanly
- * consume the entire opening tag before starting to capture the body.
- * A loose `<p[^>]*>` would also work but `<p` followed by another
- * letter (e.g. `<pre>`) would match it. */
-function firstParagraph(html: string): string {
-  const m = html.match(/<p(?:\s[^>]*)?>([\s\S]*?)<\/p>/i);
-  if (!m || typeof m[1] !== "string") return "";
-  const stripped = m[1].replace(/<[^>]+>/g, " ");
-  return clean(stripped);
 }
 
 /** Extract the raw host (userinfo and port stripped) from a URL string
@@ -686,18 +689,18 @@ export async function fetchUrlPreview(url: string): Promise<UrlPreview | null> {
   const html = body.length > MAX_BODY_CHARS ? body.slice(0, MAX_BODY_CHARS) : body;
 
   try {
-    const ogTitle = metaContent(html, "og:title");
-    const twitterTitle = metaContent(html, "twitter:title");
-    const titleTag = firstMatch(html, /<title[^>]*>([^]*?)<\/title>/i);
-    const title = ogTitle || twitterTitle || titleTag;
+    const scanned = scanHtml(html);
+    const ogTitle = metaContent(scanned, "og:title");
+    const twitterTitle = metaContent(scanned, "twitter:title");
+    const title = ogTitle || twitterTitle || scanned.title;
 
-    const ogDesc = metaContent(html, "og:description");
-    const twitterDesc = metaContent(html, "twitter:description");
-    const metaDesc = metaContent(html, "description");
+    const ogDesc = metaContent(scanned, "og:description");
+    const twitterDesc = metaContent(scanned, "twitter:description");
+    const metaDesc = metaContent(scanned, "description");
     const description =
-      ogDesc || twitterDesc || metaDesc || firstParagraph(html);
+      ogDesc || twitterDesc || metaDesc || scanned.paragraph;
 
-    const ogSite = metaContent(html, "og:site_name");
+    const ogSite = metaContent(scanned, "og:site_name");
     const siteName = ogSite || parsed.hostname;
 
     // Sanity check: if we got nothing structural, treat the page as
