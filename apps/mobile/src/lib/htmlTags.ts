@@ -25,23 +25,54 @@ function isSpace(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f";
 }
 
+/** Index of the `>` closing the tag whose body starts at `from`, skipping
+ * any `>` inside a quoted attribute value (a quote only opens a value right
+ * after `=`). A quote with no closing partner is treated as plain text, and
+ * `unclosed` remembers such quote characters so later tags don't rescan to
+ * the end of the body. -1 when the tag never terminates. */
+function findTagEnd(
+  html: string,
+  from: number,
+  unclosed: Set<string>,
+): number {
+  const n = html.length;
+  let i = from;
+  while (i < n) {
+    const ch = html[i];
+    if (ch === ">") return i;
+    if (ch === "=") {
+      i += 1;
+      while (i < n && isSpace(html[i])) i += 1;
+      const q = html[i];
+      if ((q === '"' || q === "'") && !unclosed.has(q)) {
+        const close = html.indexOf(q, i + 1);
+        if (close === -1) unclosed.add(q);
+        else i = close;
+      }
+    }
+    i += 1;
+  }
+  return -1;
+}
+
 /** Scan every well-formed tag (`<name ...>` / `</name>`). A `<` that is
  * not followed by a letter or `/letter` is plain text; a tag with no
  * terminating `>` ends the scan. */
 export function scanTags(html: string): HtmlTag[] {
   const tags: HtmlTag[] = [];
+  const unclosed = new Set<string>();
   let pos = 0;
   for (;;) {
     const lt = html.indexOf("<", pos);
     if (lt === -1) break;
-    const gt = html.indexOf(">", lt + 1);
-    if (gt === -1) break;
     let i = lt + 1;
     if (html[i] === "/") i += 1;
     if (!/[a-zA-Z]/.test(html[i] ?? "")) {
       pos = lt + 1;
       continue;
     }
+    const gt = findTagEnd(html, i, unclosed);
+    if (gt === -1) break;
     let nameEnd = i;
     while (nameEnd < gt && !isSpace(html[nameEnd]) && html[nameEnd] !== "/") {
       nameEnd += 1;

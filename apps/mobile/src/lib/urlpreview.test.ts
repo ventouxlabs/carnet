@@ -622,6 +622,8 @@ describe("fetchUrlPreview adversarial HTML (ReDoS)", () => {
     ["nested <p> without close", "<p>".repeat(80_000)],
     ["unterminated <title tags", "<title ".repeat(30_000)],
     ["unclosed < inside <p> body", `<p>${"<a ".repeat(80_000)}`],
+    ["unclosed quote in many tags", `<a x="`.repeat(60_000)],
+    ["stray < before a late >", `<p>${"< ".repeat(80_000)}>`],
   ];
 
   for (const [label, junk] of cases) {
@@ -635,4 +637,18 @@ describe("fetchUrlPreview adversarial HTML (ReDoS)", () => {
       expect(result?.title).toBe("T");
     });
   }
+});
+
+describe("fetchUrlPreview quoted > in meta content", () => {
+  it("keeps og:title and description values containing a literal >", async () => {
+    fetchMock.mockResolvedValueOnce(
+      htmlResponse(
+        `<html><head><title>T</title>` +
+          `<meta property="og:title" content="A > B">` +
+          `<meta name="description" content='Foo > Bar'></head></html>`,
+      ),
+    );
+    const result = await fetchUrlPreview("https://example.com/gt");
+    expect(result?.title).toBe("A > B");
+  });
 });
