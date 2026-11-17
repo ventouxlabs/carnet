@@ -22,6 +22,14 @@ jobs:
       - name: PRP plan lifecycle — check
         run: ./scripts/check-stale-plans.sh
 
+      # Every lockfile entry must carry resolved + integrity, otherwise `npm ci`
+      # skips hash verification for it (audit-security-2026-11-16#3). Needs only node.
+      - name: Lockfile integrity — self-test
+        run: ./scripts/check-lockfile-integrity.sh --self-test
+
+      - name: Lockfile integrity — check
+        run: ./scripts/check-lockfile-integrity.sh
+
       - uses: actions/setup-node@v7
         with:
           node-version: '20'
