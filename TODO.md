@@ -190,9 +190,9 @@ acceptance gates have evidence.
   `isPendingEnrich`, Finish enrichment and Re-enrich read through it, so "Finish
   enrichment" is offered again and keeps the note's tags and location; the enriched write
   is what rewrites the file —
-  there is deliberately no vault sweep. Not covered: the Journal day-file leak, and every
-  other reader (index, cards, Search) still sees such a file as broken until it is
-  enriched.
+  there is deliberately no vault sweep. The read-only vault readers (note/tag index,
+  tag cards, Search, retrospective bodies) repair on read too. Not covered: the Journal
+  day-file leak.
 
 ## SAF rewrite truncation — merged (#229, `929de967`), physical follow-ups open
 

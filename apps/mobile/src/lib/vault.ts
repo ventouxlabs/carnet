@@ -26,6 +26,9 @@ import {
   normalizeTag,
   stripFrontmatter,
 } from "./frontmatter";
+// Read-only readers repair v0.3.0–v0.11.0 notes (embeds above frontmatter) so
+// tags/dates/bodies are not misread; write paths keep raw bytes as baseline.
+import { repairEmbedsAboveFrontmatter } from "./legacyEmbedRepair";
 import { listNoteFiles, listNoteFilesInRoot, readNote, type NoteFileRef } from "./writer";
 import { resolveContextRoot, type Root } from "./vaultRoot";
 import { parentSegment, subdirForUri, type NoteSubdir } from "./noteSubdirs";
@@ -241,7 +244,9 @@ function makeExcerpt(markdown: string): string {
 }
 
 /** Build a note index row from a note's ref + markdown. */
-function buildNoteEntry(uri: string, subdir: NoteSubdir, markdown: string): NoteIndexEntry {
+function buildNoteEntry(uri: string, subdir: NoteSubdir, raw: string): NoteIndexEntry {
+  // Repair here so every index path (full scan and incremental upsert) agrees.
+  const markdown = repairEmbedsAboveFrontmatter(raw);
   const status = extractFrontmatterField(markdown, "status");
   const todos = extractChecklistLines(markdown);
   return {
@@ -619,7 +624,7 @@ export async function notesForTag(index: TagIndex, tag: string): Promise<Capture
   await mapWithConcurrency(entry.files, SCAN_CONCURRENCY, async (uri) => {
     let markdown: string;
     try {
-      markdown = await readNote(uri);
+      markdown = repairEmbedsAboveFrontmatter(await readNote(uri));
     } catch {
       return;
     }
@@ -691,7 +696,7 @@ export function searchNotes(
 export async function resolveNoteEntry(uri: string): Promise<CaptureEntry | null> {
   let markdown: string;
   try {
-    markdown = await readNote(uri);
+    markdown = repairEmbedsAboveFrontmatter(await readNote(uri));
   } catch {
     return null;
   }
@@ -774,7 +779,7 @@ export async function readNoteBodies(
     SCAN_CONCURRENCY,
     async (uri) => {
       try {
-        bodies.set(uri, stripFrontmatter(await readNote(uri)));
+        bodies.set(uri, stripFrontmatter(repairEmbedsAboveFrontmatter(await readNote(uri))));
       } catch {
         // unreadable — skip it, exactly as buildNoteIndex does
       }
@@ -869,7 +874,7 @@ export async function searchNoteBodies(
     async (file) => {
       let markdown: string | null = null;
       try {
-        markdown = await readNote(file.uri);
+        markdown = repairEmbedsAboveFrontmatter(await readNote(file.uri));
       } catch {
         // unreadable — still counts as scanned, no match
       }

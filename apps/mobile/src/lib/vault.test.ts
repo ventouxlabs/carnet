@@ -811,3 +811,40 @@ describe("same-profile root-scoped note index", () => {
     expect((await loadCachedNoteIndex())!.notes.map((note) => note.uri)).toEqual([child]);
   });
 });
+
+// ── legacy embed-above-frontmatter notes (v0.3.0–v0.11.0) ─────────────────────
+
+describe("legacy embeds above frontmatter are repaired in every vault reader", () => {
+  const URI = "file:///v/Ideas/legacy.md";
+  const LEGACY =
+    "![](../Photos/a.jpg)\n\n---\ncreated: 2026-01-01\ntags: [garden]\n---\nthe ferns need water\n";
+
+  it("buildTagIndex sees the tags of a legacy note", async () => {
+    addNote(URI, "Ideas", LEGACY);
+    const index = await buildTagIndex();
+    expect(index.tags.map((t) => t.tag)).toEqual(["garden"]);
+  });
+
+  it("notesForTag resolves a legacy note's created date", async () => {
+    addNote(URI, "Ideas", LEGACY);
+    const index = await buildTagIndex();
+    const notes = await notesForTag(index, "garden");
+    expect(notes[0]?.createdAt).toBe(Date.parse("2026-01-01"));
+  });
+
+  it("upsertNoteInIndex keeps a legacy note's tags and created date (no flip after a todo toggle)", async () => {
+    addNote(URI, "Ideas", LEGACY);
+    await refreshTagIndex(); // full rebuild: repaired
+    await upsertNoteInIndex(URI, LEGACY); // incremental row rebuilt from the raw file
+    const after = await loadCachedNoteIndex();
+    expect(after!.notes[0].tags).toEqual(["garden"]);
+    expect(after!.notes[0].createdOrDate).toBe(Date.parse("2026-01-01"));
+  });
+
+  it("readNoteBodies strips the real frontmatter of a legacy note", async () => {
+    addNote(URI, "Ideas", LEGACY);
+    const bodies = await readNoteBodies([URI]);
+    expect(bodies.get(URI)).not.toContain("created:");
+    expect(bodies.get(URI)).toContain("the ferns need water");
+  });
+});
