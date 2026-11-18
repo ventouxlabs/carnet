@@ -244,7 +244,9 @@ function makeExcerpt(markdown: string): string {
 }
 
 /** Build a note index row from a note's ref + markdown. */
-function buildNoteEntry(uri: string, subdir: NoteSubdir, markdown: string): NoteIndexEntry {
+function buildNoteEntry(uri: string, subdir: NoteSubdir, raw: string): NoteIndexEntry {
+  // Repair here so every index path (full scan and incremental upsert) agrees.
+  const markdown = repairEmbedsAboveFrontmatter(raw);
   const status = extractFrontmatterField(markdown, "status");
   const todos = extractChecklistLines(markdown);
   return {
@@ -282,7 +284,7 @@ export async function buildNoteIndex(rootOverride?: Root): Promise<NoteIndex> {
     async ({ file, i }: { file: NoteFileRef; i: number }) => {
       let markdown: string;
       try {
-        markdown = repairEmbedsAboveFrontmatter(await readNote(file.uri));
+        markdown = await readNote(file.uri);
       } catch {
         skipped += 1; // unreadable (deleted mid-scan / perm revoked) — skip, don't fail
         return;
