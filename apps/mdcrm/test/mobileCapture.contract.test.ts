@@ -11,8 +11,12 @@
  * The mobile module is loaded by a runtime-computed path so mdcrm's `tsc`
  * (rootDir ".") never type-checks Expo sources; only the Expo-facing leaves
  * (`expo-crypto`, the vault `writer`/`vaultRoot`) are stubbed.
+ *
+ * Needs the full workspace install (`npm ci`): apps/mobile/tsconfig.json
+ * extends expo/tsconfig.base, so esbuild fails to parse it without expo.
+ * The `writer` stub mirrors the real writer's contract; keep them in sync.
  */
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -91,6 +95,12 @@ describe("mobile -> mdcrm capture package contract", () => {
     expect(original?.id).toBe(attachmentId);
     expect(repository.resolveRelativeToRecord(record, original!.path))
       .toBe(join(root, "attachments", "originals", `${attachmentId}.jpg`));
+
+    const ocr = (record.frontmatter as { ocr?: { raw_text_path?: string } }).ocr;
+    expect(ocr?.raw_text_path).toBeTruthy();
+    const sidecar = repository.resolveRelativeToRecord(record, ocr!.raw_text_path!);
+    expect(sidecar).toBe(join(root, "processing", "results", `${captureId}.ocr.txt`));
+    await expect(access(sidecar)).resolves.toBeUndefined();
   });
 
   it("does not discover a capture saved with a .md.txt name", async () => {
