@@ -649,6 +649,31 @@ describe("RecentDetailScreen — re-enrich family", () => {
     );
   });
 
+  it("Finish enrichment keeps entry.title when the result has frontmatter but no H1", async () => {
+    vi.mocked(readNote).mockResolvedValue(PENDING_NOTE_MD);
+    vi.mocked(finishPendingEnrichment).mockResolvedValueOnce({
+      kind: "updated",
+      markdown: "---\ntags: [a]\n---\n\n",
+    } as never);
+    const { navigation } = renderScreen();
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Finish enrichment"));
+
+    await waitFor(() =>
+      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        ENTRY.title,
+        "default",
+      ),
+    );
+    expect(updateCaptureTitleByFilepath).not.toHaveBeenCalledWith(
+      ENTRY.filepath,
+      "---",
+      "default",
+    );
+  });
+
   it("Finish enrichment leaves the index and recents title alone when it fails", async () => {
     vi.mocked(readNote).mockResolvedValue(PENDING_NOTE_MD);
     vi.mocked(finishPendingEnrichment).mockResolvedValueOnce({

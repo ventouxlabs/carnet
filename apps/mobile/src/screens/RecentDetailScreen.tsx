@@ -303,7 +303,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       void upsertNoteInIndex(entry.filepath, markdown, profileId).catch(warn("index refresh"));
       void updateCaptureTitleByFilepath(
         entry.filepath,
-        deriveTitle(markdown) || entry.title,
+        deriveTitle(stripFrontmatter(markdown)) || entry.title,
         profileId,
       ).catch(warn("recents title refresh"));
     },
