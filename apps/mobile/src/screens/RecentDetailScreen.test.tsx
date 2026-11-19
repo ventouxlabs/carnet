@@ -626,6 +626,88 @@ describe("RecentDetailScreen — re-enrich family", () => {
     expect(updateCaptureTitleByFilepath).not.toHaveBeenCalled();
   });
 
+  it("Finish enrichment refreshes the note index and recents title, but not on failure", async () => {
+    vi.mocked(readNote).mockResolvedValue(PENDING_NOTE_MD);
+    const { navigation } = renderScreen();
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Finish enrichment"));
+
+    await waitFor(() =>
+      expect(upsertNoteInIndex).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "---\n---\n# Finished\n\nFinished body.\n",
+        "default",
+      ),
+    );
+    await waitFor(() =>
+      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "Finished",
+        "default",
+      ),
+    );
+  });
+
+  it("Finish enrichment leaves the index and recents title alone when it fails", async () => {
+    vi.mocked(readNote).mockResolvedValue(PENDING_NOTE_MD);
+    vi.mocked(finishPendingEnrichment).mockResolvedValueOnce({
+      kind: "failed",
+      reason: "nope",
+    });
+    const { navigation } = renderScreen();
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Finish enrichment"));
+
+    await screen.findByText(/nope/);
+    expect(upsertNoteInIndex).not.toHaveBeenCalled();
+    expect(updateCaptureTitleByFilepath).not.toHaveBeenCalled();
+  });
+
+  it("image Re-enrich refreshes the note index and recents title, but not on failure", async () => {
+    vi.mocked(readNote).mockResolvedValue(
+      "---\ncreated: 2026-07-08T11:55:46.000Z\nkind: shared-image\ntags: [qa-test]\n---\n# Photo Note\n\n![](../Photos/photo.jpg)\n",
+    );
+    const { navigation } = renderScreen();
+    await screen.findByText(/Photo Note/);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Re-enrich"));
+
+    await waitFor(() =>
+      expect(upsertNoteInIndex).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "---\n---\n# Image Re-enriched\n\nImage re-enriched body.\n",
+        "default",
+      ),
+    );
+    await waitFor(() =>
+      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "Image Re-enriched",
+        "default",
+      ),
+    );
+  });
+
+  it("image Re-enrich leaves the index and recents title alone when it fails", async () => {
+    vi.mocked(readNote).mockResolvedValue(
+      "---\ncreated: 2026-07-08T11:55:46.000Z\nkind: shared-image\ntags: [qa-test]\n---\n# Photo Note\n\n![](../Photos/photo.jpg)\n",
+    );
+    vi.mocked(reEnrichNote).mockResolvedValueOnce({
+      kind: "failed",
+      reason: "nope",
+    });
+    const { navigation } = renderScreen();
+    await screen.findByText(/Photo Note/);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Re-enrich"));
+
+    await screen.findByText(/nope/);
+    expect(upsertNoteInIndex).not.toHaveBeenCalled();
+    expect(updateCaptureTitleByFilepath).not.toHaveBeenCalled();
+  });
+
   it("a pending note still shows Finish enrichment, and only that", async () => {
     const { navigation } = renderScreen();
     await screen.findByText(/Hello body text\./);

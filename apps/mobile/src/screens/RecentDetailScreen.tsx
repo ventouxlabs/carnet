@@ -291,6 +291,25 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
     navigation.goBack();
   }, [entry.id, navigation, profileId]);
 
+  // Enrichment rewrites the title and tags, and every OTHER surface (Home
+  // cards, tag browser, search) reads those from the cached note index and the
+  // recents history — not from this screen's state. Best-effort: a failure
+  // must not undo a write that already landed, but it is logged.
+  const refreshNoteSurfaces = useCallback(
+    (markdown: string) => {
+      const warn = (what: string) => (err: unknown) => {
+        console.warn(`[RecentDetail] ${what} failed:`, err instanceof Error ? err.message : String(err));
+      };
+      void upsertNoteInIndex(entry.filepath, markdown, profileId).catch(warn("index refresh"));
+      void updateCaptureTitleByFilepath(
+        entry.filepath,
+        deriveTitle(markdown) || entry.title,
+        profileId,
+      ).catch(warn("recents title refresh"));
+    },
+    [entry.filepath, entry.title, profileId],
+  );
+
   const handleReEnrich = useCallback(async () => {
     if (reEnrichingRef.current) return;
     reEnrichingRef.current = true;
@@ -303,8 +322,10 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
         vaultContext,
         rootOverride: noteRoot,
       });
-      if (outcome.kind === "updated") setBody(outcome.nextBody);
-      else setReEnrichError(outcome.reason);
+      if (outcome.kind === "updated") {
+        setBody(outcome.nextBody);
+        refreshNoteSurfaces(outcome.nextBody);
+      } else setReEnrichError(outcome.reason);
     } finally {
       // Explicit release (#114 pattern, see handleDelete): reEnrichNote catches
       // internally today, so this can't currently latch — but a future uncaught
@@ -312,7 +333,7 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       reEnrichingRef.current = false;
       setReEnriching(false);
     }
-  }, [body, entry.filepath, noteRoot, vaultContext]);
+  }, [body, entry.filepath, noteRoot, refreshNoteSurfaces, vaultContext]);
 
   // Reuses the re-enrich in-flight ref and error slot: both are "re-run the
   // enrichment call on this note", they are mutually exclusive (a note is
@@ -330,14 +351,16 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
         mode: entry.mode,
         vaultContext,
       });
-      if (outcome.kind === "updated") setBody(outcome.markdown);
-      else setReEnrichError(outcome.reason);
+      if (outcome.kind === "updated") {
+        setBody(outcome.markdown);
+        refreshNoteSurfaces(outcome.markdown);
+      } else setReEnrichError(outcome.reason);
     } finally {
       // Explicit release (#114 pattern, see handleDelete) — see handleReEnrich.
       reEnrichingRef.current = false;
       setReEnriching(false);
     }
-  }, [body, entry.filepath, entry.mode, vaultContext]);
+  }, [body, entry.filepath, entry.mode, refreshNoteSurfaces, vaultContext]);
 
   // The third member of the re-enrich family, and the only one not gated on the
   // note being stuck: "I edited this note, run enrichment on my edit". Shares
@@ -357,24 +380,14 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       });
       if (outcome.kind === "updated") {
         setBody(outcome.markdown);
-        // Enrichment rewrites the title and tags, and every OTHER surface (Home
-        // cards, tag browser, search) reads those from the cached note index and
-        // the recents history — not from this screen's state. Without these two
-        // the note stays stale everywhere but here until the next full vault scan.
-        // Best-effort: a failure must not undo a write that already landed.
-        void upsertNoteInIndex(entry.filepath, outcome.markdown, profileId).catch(() => undefined);
-        void updateCaptureTitleByFilepath(
-          entry.filepath,
-          deriveTitle(outcome.markdown) || entry.title,
-          profileId,
-        ).catch(() => undefined);
+        refreshNoteSurfaces(outcome.markdown);
       } else setReEnrichError(outcome.reason);
     } finally {
       // Explicit release (#114 pattern, see handleDelete) — see handleReEnrich.
       reEnrichingRef.current = false;
       setReEnriching(false);
     }
-  }, [body, entry.filepath, entry.mode, entry.title, profileId, vaultContext]);
+  }, [body, entry.filepath, entry.mode, refreshNoteSurfaces, vaultContext]);
 
   const handleTranscribe = useCallback(async () => {
     if (transcribingRef.current) return;
