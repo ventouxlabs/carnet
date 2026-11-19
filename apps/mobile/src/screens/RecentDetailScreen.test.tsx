@@ -17,6 +17,7 @@ const NOTE_MD =
 
 vi.mock("../lib/writer", async () => {
   const fm = await import("../lib/frontmatter");
+  const pb = await import("../lib/pairedBinaries");
   return {
     // Real pure helpers (writer re-exports these from ./frontmatter).
     extractFrontmatterField: fm.extractFrontmatterField,
@@ -25,7 +26,7 @@ vi.mock("../lib/writer", async () => {
     // Writer-defined pure helpers, faked minimally: no paired binaries in
     // the fixture note.
     listPairedBinaries: vi.fn(() => []),
-    stripPairedBinaryLinks: vi.fn((md: string) => md),
+    stripPairedBinaryLinks: vi.fn(pb.stripPairedBinaryLinks),
     resolvePairedUri: vi.fn(async () => null),
     readPairedBinaryFromNote: vi.fn(async () => {
       throw new Error("no binary");
@@ -607,6 +608,33 @@ describe("RecentDetailScreen — re-enrich family", () => {
         "Re-enriched",
         "default",
       ),
+    );
+  });
+
+  it("keeps entry.title when a no-H1 image re-enrich result starts with an embed", async () => {
+    // injectImageEmbed puts `![](../Photos/x.jpg)` on the first body line when
+    // the vision reply has no H1; that raw link must never become the title.
+    vi.mocked(readNote).mockResolvedValue(ENRICHED_MD);
+    vi.mocked(reEnrichNoteInPlace).mockResolvedValueOnce({
+      kind: "updated",
+      markdown: "---\ntags: [a]\n---\n![](../Photos/x.jpg)\n\nA receipt from the shop.\n",
+    } as never);
+    const { navigation } = renderScreen();
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Re-enrich"));
+
+    await waitFor(() =>
+      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "A receipt from the shop.",
+        "default",
+      ),
+    );
+    expect(updateCaptureTitleByFilepath).not.toHaveBeenCalledWith(
+      ENTRY.filepath,
+      expect.stringContaining("../Photos/"),
+      "default",
     );
   });
 

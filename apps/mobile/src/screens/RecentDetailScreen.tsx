@@ -303,7 +303,10 @@ export default function RecentDetailScreen({ route, navigation }: Props) {
       void upsertNoteInIndex(entry.filepath, markdown, profileId).catch(warn("index refresh"));
       void updateCaptureTitleByFilepath(
         entry.filepath,
-        deriveTitle(stripFrontmatter(markdown)) || entry.title,
+        // Drop paired-attachment/image-embed lines first: a no-H1 image
+        // re-enrich leaves `![](../Photos/x.jpg)` as the first body line, and
+        // deriveTitle would otherwise adopt that raw link as the title.
+        deriveTitle(stripPairedBinaryLinks(stripFrontmatter(markdown)).trimStart()) || entry.title,
         profileId,
       ).catch(warn("recents title refresh"));
     },
