@@ -17,6 +17,7 @@ const NOTE_MD =
 
 vi.mock("../lib/writer", async () => {
   const fm = await import("../lib/frontmatter");
+  const pb = await import("../lib/pairedBinaries");
   return {
     // Real pure helpers (writer re-exports these from ./frontmatter).
     extractFrontmatterField: fm.extractFrontmatterField,
@@ -25,7 +26,7 @@ vi.mock("../lib/writer", async () => {
     // Writer-defined pure helpers, faked minimally: no paired binaries in
     // the fixture note.
     listPairedBinaries: vi.fn(() => []),
-    stripPairedBinaryLinks: vi.fn((md: string) => md),
+    stripPairedBinaryLinks: vi.fn(pb.stripPairedBinaryLinks),
     resolvePairedUri: vi.fn(async () => null),
     readPairedBinaryFromNote: vi.fn(async () => {
       throw new Error("no binary");
@@ -610,6 +611,33 @@ describe("RecentDetailScreen — re-enrich family", () => {
     );
   });
 
+  it("keeps entry.title when a no-H1 image re-enrich result starts with an embed", async () => {
+    // injectImageEmbed puts `![](../Photos/x.jpg)` on the first body line when
+    // the vision reply has no H1; that raw link must never become the title.
+    vi.mocked(readNote).mockResolvedValue(ENRICHED_MD);
+    vi.mocked(reEnrichNoteInPlace).mockResolvedValueOnce({
+      kind: "updated",
+      markdown: "---\ntags: [a]\n---\n![](../Photos/x.jpg)\n\nA receipt from the shop.\n",
+    } as never);
+    const { navigation } = renderScreen();
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Re-enrich"));
+
+    await waitFor(() =>
+      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "A receipt from the shop.",
+        "default",
+      ),
+    );
+    expect(updateCaptureTitleByFilepath).not.toHaveBeenCalledWith(
+      ENTRY.filepath,
+      expect.stringContaining("../Photos/"),
+      "default",
+    );
+  });
+
   it("leaves the index and recents title alone when re-enrichment fails", async () => {
     vi.mocked(readNote).mockResolvedValue(ENRICHED_MD);
     vi.mocked(reEnrichNoteInPlace).mockResolvedValueOnce({
@@ -618,6 +646,113 @@ describe("RecentDetailScreen — re-enrich family", () => {
     });
     const { navigation } = renderScreen();
     await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Re-enrich"));
+
+    await screen.findByText(/nope/);
+    expect(upsertNoteInIndex).not.toHaveBeenCalled();
+    expect(updateCaptureTitleByFilepath).not.toHaveBeenCalled();
+  });
+
+  it("Finish enrichment refreshes the note index and recents title, but not on failure", async () => {
+    vi.mocked(readNote).mockResolvedValue(PENDING_NOTE_MD);
+    const { navigation } = renderScreen();
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Finish enrichment"));
+
+    await waitFor(() =>
+      expect(upsertNoteInIndex).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "---\n---\n# Finished\n\nFinished body.\n",
+        "default",
+      ),
+    );
+    await waitFor(() =>
+      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "Finished",
+        "default",
+      ),
+    );
+  });
+
+  it("Finish enrichment keeps entry.title when the result has frontmatter but no H1", async () => {
+    vi.mocked(readNote).mockResolvedValue(PENDING_NOTE_MD);
+    vi.mocked(finishPendingEnrichment).mockResolvedValueOnce({
+      kind: "updated",
+      markdown: "---\ntags: [a]\n---\n\n",
+    } as never);
+    const { navigation } = renderScreen();
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Finish enrichment"));
+
+    await waitFor(() =>
+      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        ENTRY.title,
+        "default",
+      ),
+    );
+    expect(updateCaptureTitleByFilepath).not.toHaveBeenCalledWith(
+      ENTRY.filepath,
+      "---",
+      "default",
+    );
+  });
+
+  it("Finish enrichment leaves the index and recents title alone when it fails", async () => {
+    vi.mocked(readNote).mockResolvedValue(PENDING_NOTE_MD);
+    vi.mocked(finishPendingEnrichment).mockResolvedValueOnce({
+      kind: "failed",
+      reason: "nope",
+    });
+    const { navigation } = renderScreen();
+    await screen.findByText(/Hello body text\./);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Finish enrichment"));
+
+    await screen.findByText(/nope/);
+    expect(upsertNoteInIndex).not.toHaveBeenCalled();
+    expect(updateCaptureTitleByFilepath).not.toHaveBeenCalled();
+  });
+
+  it("image Re-enrich refreshes the note index and recents title, but not on failure", async () => {
+    vi.mocked(readNote).mockResolvedValue(
+      "---\ncreated: 2026-07-08T11:55:46.000Z\nkind: shared-image\ntags: [qa-test]\n---\n# Photo Note\n\n![](../Photos/photo.jpg)\n",
+    );
+    const { navigation } = renderScreen();
+    await screen.findByText(/Photo Note/);
+    openActionsSheet(navigation);
+    fireEvent.click(await screen.findByText("Re-enrich"));
+
+    await waitFor(() =>
+      expect(upsertNoteInIndex).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "---\n---\n# Image Re-enriched\n\nImage re-enriched body.\n",
+        "default",
+      ),
+    );
+    await waitFor(() =>
+      expect(updateCaptureTitleByFilepath).toHaveBeenCalledWith(
+        ENTRY.filepath,
+        "Image Re-enriched",
+        "default",
+      ),
+    );
+  });
+
+  it("image Re-enrich leaves the index and recents title alone when it fails", async () => {
+    vi.mocked(readNote).mockResolvedValue(
+      "---\ncreated: 2026-07-08T11:55:46.000Z\nkind: shared-image\ntags: [qa-test]\n---\n# Photo Note\n\n![](../Photos/photo.jpg)\n",
+    );
+    vi.mocked(reEnrichNote).mockResolvedValueOnce({
+      kind: "failed",
+      reason: "nope",
+    });
+    const { navigation } = renderScreen();
+    await screen.findByText(/Photo Note/);
     openActionsSheet(navigation);
     fireEvent.click(await screen.findByText("Re-enrich"));
 
