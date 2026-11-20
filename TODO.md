@@ -191,8 +191,9 @@ acceptance gates have evidence.
   enrichment" is offered again and keeps the note's tags and location; the enriched write
   is what rewrites the file —
   there is deliberately no vault sweep. The read-only vault readers (note/tag index,
-  tag cards, Search, retrospective bodies) repair on read too. Not covered: the Journal
-  day-file leak.
+  tag cards, Search, retrospective bodies) repair on read too, as does the Karakeep export
+  (`deriveKarakeepExportFields`, so queued pending-sync retries are covered). Not covered:
+  the Journal day-file leak.
 
 ## SAF rewrite truncation — merged (#229, `929de967`), physical follow-ups open
 

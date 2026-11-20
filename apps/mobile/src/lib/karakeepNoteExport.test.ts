@@ -77,6 +77,15 @@ describe("deriveKarakeepExportFields", () => {
     expect(f.noteBody).toBe("# Real Title\n\nBody here.\n");
   });
 
+  it("reads a legacy note whose embeds sit above the frontmatter", () => {
+    const body =
+      "![](../Photos/a.jpg)\n\n---\ncreated: 2026-01-01T00:00:00.000Z\nstatus: pending-enrich\ntags: [garden]\n---\n# Ferns\n\nneed water\n";
+    const f = deriveKarakeepExportFields(body, FILEPATH, "Entry Title");
+    expect(f.title).toBe("Ferns");
+    expect(f.tags).toEqual(["garden"]);
+    expect(f.createdAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+
   it("falls back to the filename stem when the note has no usable H1", () => {
     const body = "---\nkind: photo\n---\n\n\n";
     const f = deriveKarakeepExportFields(body, FILEPATH, "Entry Title");

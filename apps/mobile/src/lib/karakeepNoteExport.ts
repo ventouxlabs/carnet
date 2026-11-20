@@ -22,6 +22,7 @@ import {
   splitFrontmatter,
   upsertFrontmatterField,
 } from "./frontmatter";
+import { repairEmbedsAboveFrontmatter } from "./legacyEmbedRepair";
 import { updateNote } from "./writer";
 import {
   attachTags,
@@ -63,6 +64,9 @@ export function deriveKarakeepExportFields(
   filepath: string,
   entryTitle: string,
 ): KarakeepExportFields {
+  // Every caller (screen, pending-sync retry) may hand over a legacy note with
+  // its embeds above the frontmatter; repair so title/tags/created are readable.
+  body = repairEmbedsAboveFrontmatter(body);
   const { header, body: noteBody } = splitFrontmatter(body);
   const stem =
     filepath
