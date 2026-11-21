@@ -46,6 +46,32 @@ afterEach(() => {
 });
 
 describe("useKarakeepExport — confirm gate", () => {
+  it("asks first for a legacy embed-first note that carries a karakeepId", async () => {
+    const legacyExported =
+      "![](../Photos/a.jpg)\n\n---\ncreated: 2026-07-08T11:55:46.000Z\nkarakeepId: bm_abc\n---\n# T\n\nBody.\n";
+    const { result } = setup(legacyExported);
+    await send(result);
+
+    expect(exportNoteToKarakeep).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+  });
+
+  it("exports directly for a legacy embed-first note with no karakeepId", async () => {
+    vi.mocked(exportNoteToKarakeep).mockResolvedValue({
+      kind: "exported",
+      nextBody: "STAMPED",
+      didUpdate: false,
+      skippedUnsupported: [],
+    });
+    const legacyFresh =
+      "![](../Photos/a.jpg)\n\n---\ncreated: 2026-07-08T11:55:46.000Z\n---\n# T\n\nBody.\n";
+    const { result } = setup(legacyFresh);
+    await send(result);
+
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(exportNoteToKarakeep).toHaveBeenCalledTimes(1);
+  });
+
   it("exports directly when the note has never been exported", async () => {
     vi.mocked(exportNoteToKarakeep).mockResolvedValue({
       kind: "exported",

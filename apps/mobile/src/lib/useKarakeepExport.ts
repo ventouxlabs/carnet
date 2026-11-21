@@ -16,6 +16,7 @@ import { Alert } from "react-native";
 
 import { exportNoteToKarakeep } from "./karakeepNoteExport";
 import { needsReexportConfirm, planKarakeepUiUpdate } from "./karakeepExportUi";
+import { repairEmbedsAboveFrontmatter } from "./legacyEmbedRepair";
 import { enqueuePendingExport } from "./pendingSync";
 import type { VaultContext } from "./vaultContext";
 import type { Root } from "./vaultRoot";
@@ -128,10 +129,12 @@ export function useKarakeepExport({
   }, [filepath, entryTitle, onBodyChange, rootOverride, vaultContext]);
 
   // If the note was already exported (frontmatter carries a karakeepId),
-  // confirm before re-sending; otherwise export directly.
+  // confirm before re-sending; otherwise export directly. Read the repaired
+  // body, as the export does: a legacy note with its embeds above the
+  // frontmatter hides its karakeepId from an unrepaired read.
   const handleSendToKarakeep = useCallback(() => {
     if (exportingKarakeepRef.current) return;
-    if (needsReexportConfirm(body)) {
+    if (needsReexportConfirm(repairEmbedsAboveFrontmatter(body))) {
       Alert.alert(
         "Already exported",
         "This note is already in Karakeep. Update the existing bookmark with the current text and tags?",
