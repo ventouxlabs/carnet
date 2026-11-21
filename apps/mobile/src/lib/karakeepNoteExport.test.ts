@@ -294,3 +294,91 @@ describe("exportNoteToKarakeep", () => {
     });
   });
 });
+
+describe("exportNoteToKarakeep — legacy embed-first notes", () => {
+  const LEGACY =
+    "![](../Photos/a.jpg)\n\n---\ncreated: 2026-01-01T00:00:00.000Z\nstatus: pending-enrich\ntags: [garden]\n---\n# Ferns\n\nneed water\n";
+
+  it("exports repaired tags/title/created and stamps one valid frontmatter block", async () => {
+    mockCreate.mockResolvedValue({ id: "bm_legacy" });
+    const out = await exportNoteToKarakeep({
+      body: LEGACY,
+      filepath: FILEPATH,
+      entryTitle: "Ferns",
+    });
+    if (out.kind !== "exported") throw new Error(`unexpected ${out.kind}`);
+    expect(mockCreate).toHaveBeenCalledWith({
+      text: "# Ferns\n\n![](../Photos/a.jpg)\n\nneed water\n",
+      title: "Ferns",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(mockAttachTags).toHaveBeenCalledWith("bm_legacy", ["garden"]);
+
+    // One frontmatter block, at the very top, holding the real fields + the id.
+    expect(out.nextBody.startsWith("---\ncreated: 2026-01-01T00:00:00.000Z\n")).toBe(true);
+    expect(out.nextBody.match(/^---$/gm)).toHaveLength(2);
+    expect(out.nextBody.match(/karakeepId:/g)).toHaveLength(1);
+    expect(out.nextBody).toContain("karakeepId: bm_legacy");
+    expect(out.nextBody).toContain("status: pending-enrich");
+    expect(mockUpdateNote).toHaveBeenCalledTimes(1);
+    expect(mockUpdateNote).toHaveBeenCalledWith(FILEPATH, out.nextBody);
+  });
+
+  it("re-export of the stamped note updates the same bookmark (no duplicate)", async () => {
+    mockCreate.mockResolvedValue({ id: "bm_legacy" });
+    const first = await exportNoteToKarakeep({
+      body: LEGACY,
+      filepath: FILEPATH,
+      entryTitle: "Ferns",
+    });
+    if (first.kind !== "exported") throw new Error("unreachable");
+
+    mockCreate.mockClear();
+    mockUpdate.mockResolvedValue({ id: "bm_legacy" });
+    const second = await exportNoteToKarakeep({
+      body: first.nextBody,
+      filepath: FILEPATH,
+      entryTitle: "Ferns",
+    });
+    if (second.kind !== "exported") throw new Error("unreachable");
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith("bm_legacy", expect.any(Object));
+    expect(second.didUpdate).toBe(true);
+    // Idempotent: the second stamp is a byte-identical no-op.
+    expect(second.nextBody).toBe(first.nextBody);
+  });
+
+  it("re-export of a legacy note that already carries a karakeepId finds it", async () => {
+    mockUpdate.mockResolvedValue({ id: "bm_old" });
+    const body = LEGACY.replace("status:", "karakeepId: bm_old\nstatus:");
+    const out = await exportNoteToKarakeep({ body, filepath: FILEPATH, entryTitle: "Ferns" });
+    if (out.kind !== "exported") throw new Error("unreachable");
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith("bm_old", expect.any(Object));
+    expect(out.nextBody.match(/karakeepId:/g)).toHaveLength(1);
+    expect(out.nextBody.match(/^---$/gm)).toHaveLength(2);
+  });
+
+  it("heals a note the pre-#289 export stamped above the embed, no duplicate", async () => {
+    mockUpdate.mockResolvedValue({ id: "bm_old" });
+    const damaged =
+      "---\nkarakeepId: bm_old\n---\n![](../Photos/a.jpg)\n\n---\ncreated: 2026-01-01T00:00:00.000Z\ntags: [garden]\n---\n# Ferns\n\nneed water\n";
+    const out = await exportNoteToKarakeep({ body: damaged, filepath: FILEPATH, entryTitle: "Ferns" });
+    if (out.kind !== "exported") throw new Error("unreachable");
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith("bm_old", expect.objectContaining({ title: "Ferns", createdAt: "2026-01-01T00:00:00.000Z" }));
+    expect(out.nextBody.startsWith("---\ncreated:")).toBe(true);
+    expect(out.nextBody.match(/^---$/gm)).toHaveLength(2);
+    expect(out.nextBody.match(/karakeepId:/g)).toHaveLength(1);
+  });
+
+  it("leaves a non-legacy note's stamp byte-for-byte as before", async () => {
+    mockCreate.mockResolvedValue({ id: "bm_n" });
+    const body = "---\ncreated: 2026-01-01T00:00:00.000Z\n---\n# Hi\n\n![](../Photos/a.jpg)\n\nText.\n";
+    const out = await exportNoteToKarakeep({ body, filepath: FILEPATH, entryTitle: "Hi" });
+    if (out.kind !== "exported") throw new Error("unreachable");
+    expect(out.nextBody).toBe(
+      "---\ncreated: 2026-01-01T00:00:00.000Z\nkarakeepId: bm_n\n---\n# Hi\n\n![](../Photos/a.jpg)\n\nText.\n",
+    );
+  });
+});
