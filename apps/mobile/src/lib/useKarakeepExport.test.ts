@@ -56,6 +56,23 @@ describe("useKarakeepExport — confirm gate", () => {
     expect(Alert.alert).toHaveBeenCalledTimes(1);
   });
 
+  it("asks first for a legacy note stamped by the old export (id in the top block)", async () => {
+    const damaged =
+      "---\nkarakeepId: bm_abc\n---\n![](../Photos/a.jpg)\n\n---\ncreated: 2026-07-08T11:55:46.000Z\n---\n# T\n\nBody.\n";
+    const { result } = setup(damaged);
+    await send(result);
+    expect(exportNoteToKarakeep).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks first for a legacy note whose tags block precedes the embed", async () => {
+    const second =
+      "---\ntags: [a]\n---\n![](../Photos/a.jpg)\n\n---\ncreated: 2026-07-08T11:55:46.000Z\nkarakeepId: bm_abc\n---\n# T\n\nBody.\n";
+    const { result } = setup(second);
+    await send(result);
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+  });
+
   it("exports directly for a legacy embed-first note with no karakeepId", async () => {
     vi.mocked(exportNoteToKarakeep).mockResolvedValue({
       kind: "exported",

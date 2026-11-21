@@ -42,10 +42,10 @@ import { mergeUserTags } from "./tags";
 import { injectImageEmbed } from "./writerMarkdown";
 
 /** Exactly what those releases wrote: an optional prepended block holding only the
- * `tags`/`location` lines its merges add, then one `![](../Photos/{name})`
+ * `tags`/`location` lines its merges add (or the `karakeepId` a pre-#289 Karakeep export stamped), then one `![](../Photos/{name})`
  * line and a blank line per image, then the real frontmatter's `---`. */
 const LEGACY_EMBEDS_ABOVE_FRONTMATTER =
-  /^(---\n(?:(?:tags|location): [^\n]*\n)+---\n)?((?:!\[\]\(\.\.\/Photos\/[^/\s)]+\)\n\n)+)(?=---)/;
+  /^(---\n(?:(?:tags|location|karakeepId): [^\n]*\n)+---\n)?((?:!\[\]\(\.\.\/Photos\/[^/\s)]+\)\n\n)+)(?=---)/;
 
 /** The real frontmatter carnet wrote under the embeds: closed by an exact
  * `---` line, and carrying `created:` at column 0 — every raw stub and every
@@ -90,5 +90,13 @@ export function repairEmbedsAboveFrontmatter(markdown: string): string {
   if (!prepended) return md;
   const withTags = mergeUserTags(md, getFrontmatterTags(prepended));
   const location = extractFrontmatterField(prepended, "location");
-  return location ? upsertFrontmatterField(withTags, "location", location) : withTags;
+  const withLocation = location
+    ? upsertFrontmatterField(withTags, "location", location)
+    : withTags;
+  // A pre-#289 Karakeep export stamped its id into the prepended block; carry
+  // it into the real frontmatter so a re-export updates that bookmark.
+  const karakeepId = extractFrontmatterField(prepended, "karakeepId");
+  return karakeepId
+    ? upsertFrontmatterField(withLocation, "karakeepId", karakeepId)
+    : withLocation;
 }
