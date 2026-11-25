@@ -23,6 +23,6 @@
   },
   "overrides": {
     "react-native-worklets": "0.5.1",
-    "markdown-it": "12.3.2"
+    "markdown-it": "15.0.3"
   }
 }
